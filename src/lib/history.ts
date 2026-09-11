@@ -621,3 +621,29 @@ export function chargeRanks(period: Period, today = laDayString()): ChargeRank[]
   return chargeRanksFrom(CHARGES, period, today);
 }
 
+
+/** Fraction of consumed trip kWh assumed recovered via regenerative braking (~18% typical Model Y). */
+export const REGEN_OF_TRIP_KWH = 0.18;
+
+/** Estimate lifetime regen kWh from consumed trip energy (regen is not modeled in trip rows). */
+export function estimateRegenKwh(consumedTripKwh: number) {
+  return Math.max(0, consumedTripKwh) * REGEN_OF_TRIP_KWH;
+}
+
+/** ICE baseline for petrol savings: 30 mpg at $3.50/gal (US retail). */
+export const ICE_MPG = 30;
+export const PETROL_USD_PER_GAL = 3.5;
+
+/** Petrol cost for the same miles as an ICE car at ICE_MPG / PETROL_USD_PER_GAL. */
+export function petrolCostForMiles(miles: number) {
+  if (miles <= 0) return 0;
+  return (miles / ICE_MPG) * PETROL_USD_PER_GAL;
+}
+
+/**
+ * Savings vs petrol/benzin for a period: petrolCost(miles) − electricity chargeUsd.
+ * Assumptions: ICE 30 mpg, petrol $3.50/gal (US); miles and chargeUsd should match the same period.
+ */
+export function petrolSavings(miles: number, chargeUsd: number) {
+  return petrolCostForMiles(miles) - Math.max(0, chargeUsd);
+}
