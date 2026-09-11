@@ -44,7 +44,7 @@ import { HOME_USD_PER_KWH } from "@/lib/history";
 import { useChargeStore } from "@/store/charge-store";
 import { useElprisStore } from "@/store/elpris-store";
 import { useLiveElpris } from "./use-live-elpris";
-import { EU_NETWORKS, roamExtra, roamRate } from "./networks";
+import { EU_NETWORKS, EU_REGIONS, type EuRegion, regionalExtra, regionalOwn, regionalRoam, roamExtra, roamRate } from "./networks";
 import { useVehicleProfile } from "@/hooks/use-vehicle-profile";
 import { useVehicleStore } from "@/store/vehicle-store";
 
@@ -1181,14 +1181,27 @@ function NetworksPanel({
   abo: Record<string, boolean>;
   onToggle: (id: string, on: boolean) => void;
 }) {
-  const rows = [...EU_NETWORKS].sort((a, b) => {
-    const ae = roamExtra(a, Boolean(abo[a.id]));
-    const be = roamExtra(b, Boolean(abo[b.id]));
-    if (ae == null && be == null) return a.name.localeCompare(b.name);
-    if (ae == null) return 1;
-    if (be == null) return -1;
-    return be - ae;
-  });
+  const [region, setRegion] = useState<EuRegion>("DK");
+  const rows = [...EU_NETWORKS]
+    .map((n) => {
+      const on = Boolean(abo[n.id]);
+      return {
+        n,
+        on,
+        own: regionalOwn(n, region, on),
+        roam: regionalRoam(n, region, on),
+        extra: regionalExtra(n, region, on),
+      };
+    })
+    .filter((r) => r.own != null || r.roam != null)
+    .sort((a, b) => {
+      const ae = a.extra;
+      const be = b.extra;
+      if (ae == null && be == null) return a.n.name.localeCompare(b.n.name);
+      if (ae == null) return 1;
+      if (be == null) return -1;
+      return be - ae;
+    });
   return (
     <section className="space-y-3">
       <p className="text-sm text-muted">
@@ -1198,8 +1211,23 @@ function NetworksPanel({
       </p>
       <div className="overflow-hidden rounded-xl bg-surface shadow-[var(--shadow-border)]">
         <p className="px-4 pt-4 text-[11px] font-medium uppercase tracking-wide text-muted">
-          Roaming vs own
+          Roaming vs own · {region}
         </p>
+        <div className="mt-2 flex flex-wrap gap-1 px-4">
+          {EU_REGIONS.map((r) => (
+            <button
+              key={r.id}
+              type="button"
+              onClick={() => setRegion(r.id)}
+              className={cn(
+                "h-8 rounded-full px-3 text-[11px] font-medium",
+                region === r.id ? "bg-foreground text-background" : "bg-surface-2 text-muted",
+              )}
+            >
+              {r.label}
+            </button>
+          ))}
+        </div>
         <table className="mt-2 w-full text-left text-xs">
           <thead className="text-[11px] uppercase tracking-wide text-subtle">
             <tr>
@@ -1210,19 +1238,14 @@ function NetworksPanel({
             </tr>
           </thead>
           <tbody>
-            {rows.map((n) => {
-              const on = Boolean(abo[n.id]);
-              const own = on ? n.aboKr : n.spotKr;
-              const roam = roamRate(n, on);
-              const extra = roamExtra(n, on);
-              return (
+            {rows.map(({ n, on, own, roam, extra }) => (
                 <tr key={n.id} className="border-t border-border">
                   <td className="px-4 py-2">{n.name}</td>
                   <td className="px-2 py-2 tabular-nums text-muted">
-                    {n.unlimited && on ? "0" : formatKrPerKwh(own, 2)}
+                    {own == null ? "—" : formatKrPerKwh(own, 2)}
                   </td>
                   <td className="px-2 py-2 tabular-nums text-muted">
-                    {roam == null ? "own only" : formatKrPerKwh(roam, 2)}
+                    {roam == null ? (own != null ? "own only" : "—") : formatKrPerKwh(roam, 2)}
                   </td>
                   <td
                     className={cn(
@@ -1239,8 +1262,7 @@ function NetworksPanel({
                     {extra == null ? "—" : `${extra > 0 ? "+" : ""}${formatKrPerKwh(extra, 2)}`}
                   </td>
                 </tr>
-              );
-            })}
+            ))}
           </tbody>
         </table>
       </div>

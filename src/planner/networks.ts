@@ -213,3 +213,182 @@ export function networkLabel(id: string, hasAbo: boolean) {
   if (!n) return "Network";
   return hasAbo ? n.aboName : `${n.name} ad-hoc`;
 }
+
+export const EU_REGIONS = [
+  { id: "DK", label: "DK" },
+  { id: "DE", label: "DE" },
+  { id: "NL", label: "NL" },
+  { id: "BE", label: "BE" },
+  { id: "FR", label: "FR" },
+  { id: "AT", label: "AT" },
+  { id: "SE", label: "SE" },
+  { id: "UK", label: "UK" },
+] as const;
+
+export type EuRegion = (typeof EU_REGIONS)[number]["id"];
+
+type MarketCell = { own: number | null; roam: number | null };
+
+function cell(own: number | null, roam: number | null): MarketCell {
+  return { own, roam };
+}
+
+/** Typical DC kr/kWh by country. own = CPO stalls, roam = this contract at other CPOs. */
+export const REGION_MARKETS: Record<string, Partial<Record<EuRegion, MarketCell>>> = {
+  tesla: {
+    DK: cell(dkkFromEur(0.48), null),
+    DE: cell(dkkFromEur(0.52), null),
+    NL: cell(dkkFromEur(0.5), null),
+    BE: cell(dkkFromEur(0.5), null),
+    FR: cell(dkkFromEur(0.45), null),
+    AT: cell(dkkFromEur(0.5), null),
+    SE: cell(dkkFromEur(0.4), null),
+    UK: cell(dkkFromEur(0.62), null),
+  },
+  ionity: {
+    DK: cell(dkkFromEur(0.79), null),
+    DE: cell(dkkFromEur(0.79), null),
+    NL: cell(dkkFromEur(0.76), null),
+    BE: cell(dkkFromEur(0.76), null),
+    FR: cell(dkkFromEur(0.59), null),
+    AT: cell(dkkFromEur(0.78), null),
+    SE: cell(dkkFromEur(0.5), null),
+    UK: cell(dkkFromEur(0.93), null),
+  },
+  fastned: {
+    DE: cell(dkkFromEur(0.69), null),
+    NL: cell(dkkFromEur(0.69), null),
+    BE: cell(dkkFromEur(0.69), null),
+    FR: cell(dkkFromEur(0.69), null),
+    UK: cell(dkkFromEur(0.69), null),
+    DK: cell(null, null),
+    AT: cell(null, null),
+    SE: cell(null, null),
+  },
+  allego: {
+    NL: cell(dkkFromEur(0.793), dkkFromEur(0.79)),
+    DE: cell(dkkFromEur(0.762), dkkFromEur(0.79)),
+    BE: cell(dkkFromEur(0.75), dkkFromEur(0.79)),
+    FR: cell(dkkFromEur(0.59), dkkFromEur(0.69)),
+    AT: cell(null, dkkFromEur(0.79)),
+    DK: cell(null, dkkFromEur(0.79)),
+    SE: cell(null, dkkFromEur(0.79)),
+    UK: cell(null, dkkFromEur(0.85)),
+  },
+  electra: {
+    FR: cell(dkkFromEur(0.54), dkkFromEur(0.69)),
+    BE: cell(dkkFromEur(0.54), dkkFromEur(0.75)),
+    DE: cell(dkkFromEur(0.54), dkkFromEur(0.79)),
+    AT: cell(null, dkkFromEur(0.79)),
+    NL: cell(null, dkkFromEur(0.79)),
+    DK: cell(null, dkkFromEur(0.79)),
+    SE: cell(null, dkkFromEur(0.79)),
+    UK: cell(null, null),
+  },
+  enbw: {
+    DE: cell(dkkFromEur(0.59), dkkFromEur(0.73)),
+    AT: cell(dkkFromEur(0.59), dkkFromEur(0.85)),
+    DK: cell(null, dkkFromEur(0.73)),
+    NL: cell(null, dkkFromEur(0.73)),
+    BE: cell(null, dkkFromEur(0.73)),
+    FR: cell(null, dkkFromEur(0.73)),
+    SE: cell(null, dkkFromEur(0.73)),
+    UK: cell(null, null),
+  },
+  clever: {
+    DK: cell(4.99, 0),
+    SE: cell(4.99, 0),
+    DE: cell(null, 5.49),
+    NL: cell(null, 5.49),
+    BE: cell(null, 5.49),
+    FR: cell(null, 5.49),
+    AT: cell(null, 5.49),
+    UK: cell(null, null),
+  },
+  eon: {
+    DK: cell(3.95, 5.2),
+    DE: cell(dkkFromEur(0.61), dkkFromEur(0.79)),
+    SE: cell(3.95, 5.2),
+    NL: cell(null, dkkFromEur(0.79)),
+    BE: cell(null, dkkFromEur(0.79)),
+    FR: cell(null, dkkFromEur(0.79)),
+    AT: cell(null, dkkFromEur(0.79)),
+    UK: cell(null, null),
+  },
+  spirii: {
+    DK: cell(null, 3.7),
+    SE: cell(null, 3.9),
+    DE: cell(null, dkkFromEur(0.79)),
+    NL: cell(null, dkkFromEur(0.79)),
+    BE: cell(null, dkkFromEur(0.79)),
+    FR: cell(null, dkkFromEur(0.75)),
+    AT: cell(null, dkkFromEur(0.79)),
+    UK: cell(null, dkkFromEur(0.85)),
+  },
+  shell: {
+    DK: cell(dkkFromEur(0.65), dkkFromEur(0.79)),
+    DE: cell(dkkFromEur(0.69), dkkFromEur(0.79)),
+    NL: cell(dkkFromEur(0.69), dkkFromEur(0.79)),
+    BE: cell(dkkFromEur(0.69), dkkFromEur(0.79)),
+    FR: cell(dkkFromEur(0.65), dkkFromEur(0.75)),
+    AT: cell(dkkFromEur(0.69), dkkFromEur(0.79)),
+    SE: cell(dkkFromEur(0.6), dkkFromEur(0.75)),
+    UK: cell(dkkFromEur(0.72), dkkFromEur(0.85)),
+  },
+  aral: {
+    DE: cell(dkkFromEur(0.79), dkkFromEur(0.79)),
+    AT: cell(null, dkkFromEur(0.79)),
+    DK: cell(null, dkkFromEur(0.79)),
+    NL: cell(null, dkkFromEur(0.79)),
+    BE: cell(null, dkkFromEur(0.79)),
+    FR: cell(null, dkkFromEur(0.79)),
+    SE: cell(null, null),
+    UK: cell(null, null),
+  },
+  total: {
+    FR: cell(dkkFromEur(0.59), dkkFromEur(0.69)),
+    BE: cell(dkkFromEur(0.59), dkkFromEur(0.69)),
+    NL: cell(dkkFromEur(0.59), dkkFromEur(0.69)),
+    DE: cell(dkkFromEur(0.59), dkkFromEur(0.69)),
+    DK: cell(null, dkkFromEur(0.69)),
+    AT: cell(null, dkkFromEur(0.69)),
+    SE: cell(null, dkkFromEur(0.69)),
+    UK: cell(null, null),
+  },
+};
+
+export function regionalCell(n: ChargeNetwork, region: EuRegion): MarketCell | null {
+  return REGION_MARKETS[n.id]?.[region] ?? null;
+}
+
+export function regionalOwn(n: ChargeNetwork, region: EuRegion, hasAbo: boolean) {
+  const c = regionalCell(n, region);
+  if (!c || c.own == null) return null;
+  if (hasAbo && n.unlimited) return 0;
+  if (hasAbo) {
+    if (n.spotKr <= 0) return n.aboKr;
+    return Math.round(c.own * (n.aboKr / n.spotKr) * 1000) / 1000;
+  }
+  return c.own;
+}
+
+export function regionalRoam(n: ChargeNetwork, region: EuRegion, hasAbo: boolean) {
+  const c = regionalCell(n, region);
+  if (!c || c.roam == null) return null;
+  if (hasAbo && n.unlimited && region === "DK") return 0;
+  if (hasAbo && n.unlimited && region === "SE") return 0;
+  if (hasAbo && n.id === "clever") return 3.75;
+  if (hasAbo && n.roamAboKr != null && c.roam === n.roamKr) return n.roamAboKr;
+  if (hasAbo && n.roamAboKr != null && n.roamKr && n.roamKr > 0) {
+    return Math.round(c.roam * (n.roamAboKr / n.roamKr) * 1000) / 1000;
+  }
+  return c.roam;
+}
+
+export function regionalExtra(n: ChargeNetwork, region: EuRegion, hasAbo: boolean) {
+  const roam = regionalRoam(n, region, hasAbo);
+  if (roam == null) return null;
+  const own = regionalOwn(n, region, hasAbo);
+  if (own == null) return roam;
+  return roam - own;
+}
