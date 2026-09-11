@@ -527,26 +527,65 @@ export function PlanScreen() {
   }
 
   async function exportToTesla(planStops: { name: string; lat: number; lng: number }[], title: string) {
-    const pts = planStops.filter((s) => Number.isFinite(s.lat) && Number.isFinite(s.lng));
-    if (pts.length < 1) {
-      toast("Nothing to send");
+    const pts = planStops.filter(
+      (s) =>
+        Number.isFinite(s.lat) &&
+        Number.isFinite(s.lng) &&
+        Math.abs(s.lat) <= 90 &&
+        Math.abs(s.lng) <= 180,
+    );
+    if (!pts.length) {
+      toast.error("No valid coordinates to send");
       return;
     }
-    const url =
-      pts.length === 1
-        ? teslaDestUrl(pts[0])
-        : mapsDirUrl(pts);
+    let url = "";
     try {
-      if (navigator.share) {
-        await navigator.share({ title: title || "Tesla trip", text: title, url });
+      url = pts.length === 1 ? teslaDestUrl(pts[0]) : mapsDirUrl(pts);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not build a Tesla nav link");
+      return;
+    }
+    if (!url) {
+      toast.error("Could not build a Tesla nav link");
+      return;
+    }
+
+    const fallback = async (reason?: string) => {
+      let opened = false;
+      try {
+        const win = window.open(url, "_blank", "noopener,noreferrer");
+        opened = Boolean(win);
+      } catch {
+        opened = false;
+      }
+      if (opened) {
+        toast("Open in Tesla app, or share the map to the car");
         return;
       }
-    } catch {
-      /* user cancelled */
-      return;
+      try {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(url);
+          toast.error(reason ? `${reason}. Link copied.` : "Popup blocked. Tesla link copied.");
+          return;
+        }
+      } catch {
+        /* clipboard blocked too */
+      }
+      toast.error(reason ? `${reason}. Copy this link: ${url}` : `Could not open Tesla nav. ${url}`);
+    };
+
+    if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
+      try {
+        await navigator.share({ title: title || "Tesla trip", text: title, url });
+        return;
+      } catch (err) {
+        if (isShareCancel(err)) return;
+        await fallback(shareErrorMessage(err));
+        return;
+      }
     }
-    window.open(url, "_blank", "noopener,noreferrer");
-    toast("Open in Tesla app, or share the map to the car");
+
+    await fallback();
   }
 
   const mapRoutes: MapRoute[] = useMemo(() => {
@@ -1785,10 +1824,31 @@ function ChargeChoice({
 }
 
 function mapsDirUrl(stops: { lat: number; lng: number }[]) {
+  if (!stops.length) throw new Error("No stops to export");
   if (stops.length === 1) return teslaDestUrl(stops[0]);
-  return `https://www.google.com/maps/dir/${stops.map((s) => `${s.lat},${s.lng}`).join("/")}`;
+  const path = stops
+    .map((s) => {
+      if (!Number.isFinite(s.lat) || !Number.isFinite(s.lng)) throw new Error("A stop is missing coordinates");
+      return `${s.lat},${s.lng}`;
+    })
+    .join("/");
+  return `https://www.google.com/maps/dir/${path}`;
 }
 
 function teslaDestUrl(stop: { lat: number; lng: number }) {
+  if (!Number.isFinite(stop.lat) || !Number.isFinite(stop.lng)) {
+    throw new Error("Destination is missing coordinates");
+  }
   return `https://www.tesla.com/navigation?lat=${stop.lat}&lng=${stop.lng}`;
+}
+
+function isShareCancel(err: unknown) {
+  if (!(err instanceof Error)) return false;
+  const name = "name" in err ? String((err as { name?: string }).name) : "";
+  return name === "AbortError" || /cancel/i.test(err.message);
+}
+
+function shareErrorMessage(err: unknown) {
+  if (err instanceof Error && err.message) return err.message;
+  return "Could not share to Tesla nav";
 }
