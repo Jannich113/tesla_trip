@@ -21,6 +21,7 @@ import {
   detourPays,
   detourSavings,
   pathMode,
+  routeAb,
   stallKw,
 } from "./modes.ts";
 import { rateForNetwork, networkIdFor, roamExtra, EU_NETWORKS, EU_REGIONS, regionalOwn, regionalRoam } from "./networks.ts";
@@ -80,6 +81,15 @@ describe("leg modes", () => {
     assert.equal(save.net, 160);
     assert.equal(save.extraMin, 80);
     assert.equal(save.significant, false);
+  });
+
+  it("A/B picks significant savings, else the faster road", () => {
+    const fast = { kr: 800, tollKr: 200, driveMin: 900, mi: 900 };
+    const cheapWin = { kr: 500, tollKr: 200, driveMin: 910, mi: 905 };
+    const cheapLose = { kr: 780, tollKr: 200, driveMin: 980, mi: 920 };
+    assert.equal(routeAb(fast, cheapWin).overall, "b");
+    assert.equal(routeAb(fast, cheapLose).overall, "a");
+    assert.equal(routeAb(fast, cheapWin).cost, "b");
   });
 
   it("only detours when savings are significant", () => {

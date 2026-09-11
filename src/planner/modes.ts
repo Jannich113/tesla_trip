@@ -108,6 +108,21 @@ export function detourSavings(base: { kr: number; tollKr: number; driveMin: numb
   return { extraMin, extraMi, chargeSaved, tollSaved, net, significant };
 }
 
+export type AbSide = "a" | "b" | "tie";
+
+export function routeAb(
+  a: { kr: number; tollKr: number; driveMin: number; mi: number },
+  b: { kr: number; tollKr: number; driveMin: number; mi: number },
+) {
+  const save = detourSavings(a, b);
+  const time: AbSide =
+    Math.abs(a.driveMin - b.driveMin) < 5 ? "tie" : a.driveMin < b.driveMin ? "a" : "b";
+  const cost: AbSide = Math.abs(a.kr - b.kr) < MIN_SAVE_KR ? "tie" : a.kr < b.kr ? "a" : "b";
+  const overall: AbSide =
+    save.significant && b.kr < a.kr ? "b" : save.significant && a.kr < b.kr ? "a" : time === "tie" ? cost : cost === "tie" ? time : time;
+  return { save, time, cost, overall };
+}
+
 /** Eco is off the motorway — look farther toward services. Cheapest hunts a wider band. */
 export function chargeSearchKm(mode: LegMode, detourKm: number, focus?: ModeFocus, routeSeconds?: number) {
   const km = Math.max(8, detourKm);

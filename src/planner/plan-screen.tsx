@@ -37,6 +37,7 @@ import {
   planTotals,
   pricePlan,
   remainingHours,
+  routeAb,
   SPEED_KMH,
   splitDateTime,
 } from "./engine";
@@ -152,6 +153,8 @@ export function PlanScreen() {
   const [backupLoc, setBackupLoc] = useState<Record<number, string>>({});
   const [openStops, setOpenStops] = useState<Record<string, boolean>>({});
   const [showAllRoutes, setShowAllRoutes] = useState(false);
+  const [abA, setAbA] = useState<LegMode>("fastest");
+  const [abB, setAbB] = useState<LegMode>("cheapest");
   const [naming, setNaming] = useState(false);
   const [saveLabel, setSaveLabel] = useState("");
   const [pane, setPane] = useState<"plan" | "advanced">("plan");
@@ -871,6 +874,96 @@ export function PlanScreen() {
             );
           })}
         </ul>
+
+        {(() => {
+          const rowA = optionRows.find((r) => r.mode === abA);
+          const rowB = optionRows.find((r) => r.mode === abB);
+          const ta = rowA?.totals;
+          const tb = rowB?.totals;
+          const ab = ta && tb && abA !== abB ? routeAb(ta, tb) : null;
+          const cell = (side: "a" | "b", win: "a" | "b" | "tie", text: string) => (
+            <span className={cn("tabular-nums", win === side && "font-medium text-foreground")}>{text}</span>
+          );
+          return (
+            <div className="mt-3 rounded-xl bg-surface-2 px-3 py-3">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted">A/B</p>
+              <div className="mt-2 flex items-center gap-2">
+                <select
+                  value={abA}
+                  onChange={(e) => setAbA(e.target.value as LegMode)}
+                  className="h-9 flex-1 rounded-xl bg-background px-2 text-sm text-foreground outline-none"
+                >
+                  {LEG_MODES.map((m) => (
+                    <option key={`a-${m}`} value={m}>
+                      A · {modeLabel(m)}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={abB}
+                  onChange={(e) => setAbB(e.target.value as LegMode)}
+                  className="h-9 flex-1 rounded-xl bg-background px-2 text-sm text-foreground outline-none"
+                >
+                  {LEG_MODES.map((m) => (
+                    <option key={`b-${m}`} value={m}>
+                      B · {modeLabel(m)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {ab && ta && tb ? (
+                <>
+                  <div className="mt-3 grid grid-cols-[4.5rem_1fr_1fr] gap-y-1 text-xs text-muted">
+                    <span />
+                    <span className="text-foreground">{modeLabel(abA)}</span>
+                    <span className="text-foreground">{modeLabel(abB)}</span>
+                    <span>Drive</span>
+                    {cell("a", ab.time, minutesToHm(ta.driveMin))}
+                    {cell("b", ab.time, minutesToHm(tb.driveMin))}
+                    <span>Charge</span>
+                    {cell("a", ab.cost, `${formatKrValue(Math.max(0, ta.kr - ta.tollKr), 0)} kr`)}
+                    {cell("b", ab.cost, `${formatKrValue(Math.max(0, tb.kr - tb.tollKr), 0)} kr`)}
+                    <span>Toll</span>
+                    <span className="tabular-nums">{formatKrValue(ta.tollKr, 0)} kr</span>
+                    <span className="tabular-nums">{formatKrValue(tb.tollKr, 0)} kr</span>
+                    <span>Total</span>
+                    {cell("a", ab.cost, `${formatKrValue(ta.kr, 0)} kr`)}
+                    {cell("b", ab.cost, `${formatKrValue(tb.kr, 0)} kr`)}
+                  </div>
+                  <p className="mt-2 text-xs text-muted">
+                    {ab.overall === "tie"
+                      ? "Tie — pick either."
+                      : `${ab.overall === "a" ? modeLabel(abA) : modeLabel(abB)} wins${
+                          ab.save.significant && ab.overall === "b"
+                            ? ` · saves ${formatKrValue(ab.save.net, 0)} kr`
+                            : ab.overall === "a"
+                              ? " · faster"
+                              : ""
+                        }.`}
+                  </p>
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setAllModes(abA)}
+                      className="h-9 flex-1 rounded-xl bg-background text-xs font-medium text-foreground"
+                    >
+                      Use A
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAllModes(abB)}
+                      className="h-9 flex-1 rounded-xl bg-background text-xs font-medium text-foreground"
+                    >
+                      Use B
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <p className="mt-2 text-xs text-subtle">Pick two different modes after routing.</p>
+              )}
+            </div>
+          );
+        })()}
 
         <p className="mt-4 text-xs font-medium text-muted">
           {stops.length < 2

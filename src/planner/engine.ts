@@ -70,6 +70,7 @@ export {
   MODE_FOCUSES,
   DEFAULT_MODE_FOCUS,
   pathMode,
+  routeAb,
   stallKw,
   cheapDetourKm,
   detourPays,
