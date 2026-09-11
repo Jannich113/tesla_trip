@@ -29,7 +29,7 @@ export function modeHint(mode: LegMode) {
 export function modeColor(mode: LegMode) {
   if (mode === "eco") return "#1ecf8a";
   if (mode === "fastest") return "#6ea8ff";
-  if (mode === "cheapest") return "#a8b4c0";
+  if (mode === "cheapest") return "#e6b84d";
   return "#c8cdd4";
 }
 

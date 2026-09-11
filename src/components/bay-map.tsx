@@ -137,16 +137,16 @@ export function BayMap({
         [selectedId, ...(selectedIds ?? [])].filter((id): id is string => !!id),
       );
       const selectedRoutes = routes.filter((r) => selectedSet.has(r.id));
-      const maxW = Math.max(1, ...routes.map((r) => r.weight));
       for (const route of routes) {
         const selected = selectedSet.has(route.id);
         const pts = route.path && route.path.length >= 2 ? route.path : arc(route.from, route.to);
         pts.forEach((p) => bounds.push(p));
         L.polyline(pts, {
           color: route.color || "#1ecf8a",
-          opacity: selected ? 0.95 : selectedSet.size ? 0.22 : route.weight >= 3 ? 0.7 : 0.45,
-          weight: selected ? 4.5 : 1.6 + (route.weight / maxW) * 2.4,
+          opacity: selected ? 1 : selectedSet.size ? 0.55 : 0.9,
+          weight: selected ? 5 : 3.2,
           lineCap: "round",
+          lineJoin: "round",
           interactive: true,
         })
           .on("click", (e) => {
@@ -201,14 +201,14 @@ export function BayMap({
         selectedRoutes.length > 0
           ? selectedRoutes.flatMap((r) => (r.path && r.path.length >= 2 ? r.path : arc(r.from, r.to)))
           : bounds;
-      if (!dropping && focus.length >= 2) {
+      if (focus.length >= 2) {
         map.fitBounds(L.latLngBounds(focus), {
-          padding: [48, 48],
-          maxZoom: selectedRoutes.length === 1 ? 13 : 9,
+          padding: [36, 36],
+          maxZoom: selectedRoutes.length === 1 ? 12 : 8,
           animate: false,
         });
-      } else if (!dropping && focus.length === 1) {
-        map.setView(focus[0], 15, { animate: false });
+      } else if (focus.length === 1) {
+        map.setView(focus[0], 12, { animate: false });
       }
       map.invalidateSize();
     });

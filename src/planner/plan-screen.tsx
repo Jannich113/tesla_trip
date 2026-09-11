@@ -45,6 +45,26 @@ import { useLiveElpris } from "./use-live-elpris";
 import { useVehicleProfile } from "@/hooks/use-vehicle-profile";
 import { useVehicleStore } from "@/store/vehicle-store";
 
+function offsetPath(path: [number, number][], meters: number): [number, number][] {
+  if (path.length < 2 || meters === 0) return path;
+  const deg = meters / 111_320;
+  return path.map((p, i) => {
+    const a = path[Math.max(0, i - 1)];
+    const b = path[Math.min(path.length - 1, i + 1)];
+    const dLat = b[0] - a[0];
+    const dLng = b[1] - a[1];
+    const len = Math.hypot(dLat, dLng) || 1;
+    return [p[0] + (-dLng / len) * deg, p[1] + (dLat / len) * deg];
+  });
+}
+
+const ROUTE_OFFSET_M: Record<LegMode, number> = {
+  eco: -480,
+  standard: -160,
+  fastest: 160,
+  cheapest: 480,
+};
+
 function routeKey(
   from: { lat: number; lng: number },
   to: { lat: number; lng: number },
@@ -103,7 +123,7 @@ export function PlanScreen() {
     eco: true,
     standard: true,
     fastest: true,
-    cheapest: false,
+    cheapest: true,
   });
   const { data: elpris, error: elprisError, loading: elprisLoading } = useLiveElpris(area);
 
@@ -320,6 +340,7 @@ export function PlanScreen() {
     if (legHit) {
       const i = Number(legHit[1]);
       ids.add(`leg-${i}`);
+      for (const mode of LEG_MODES) ids.add(`opt-${mode}-${i}`);
       const leg = viewLegs[i];
       if (leg?.charge) ids.add(`chg-${i}-${leg.charge.locationId}`);
       if (leg?.backup) ids.add(`chg-${i}-${leg.backup.locationId}`);
@@ -346,29 +367,27 @@ export function PlanScreen() {
   }
 
   const mapRoutes: MapRoute[] = [];
-  const seenPath = new Set<string>();
-  function addRoute(id: string, from: PlanStop, to: PlanStop, route: RoutedLeg, color: string, weight: number) {
-    const key = route.path.map((p) => p.join(",")).join("|") || `${from.id}-${to.id}`;
-    if (weight < 3 && seenPath.has(key)) return;
-    if (weight >= 3) seenPath.add(key);
-    mapRoutes.push({
-      id,
-      from: [from.lat, from.lng],
-      to: [to.lat, to.lng],
-      weight,
-      path: route.path,
-      color,
-    });
-  }
-  for (const [i, leg] of viewLegs.entries()) {
-    addRoute(`leg-${i}`, leg.from, leg.to, leg.route, modeColor(leg.mode), 3);
-  }
-  for (const mode of LEG_MODES) {
-    if (!showRoutes[mode]) continue;
-    const option = routesFor(mode);
-    if (option.length !== stops.length - 1) continue;
-    for (let i = 0; i < option.length; i++) {
-      addRoute(`opt-${mode}-${i}`, stops[i], stops[i + 1], option[i], modeColor(mode), 1);
+  if (stops.length >= 2) {
+    for (const mode of LEG_MODES) {
+      if (!showRoutes[mode]) continue;
+      for (let i = 0; i < stops.length - 1; i++) {
+        const hit =
+          routeMap[routeKey(stops[i], stops[i + 1], mode)] ??
+          (mode === "cheapest" ? routeMap[routeKey(stops[i], stops[i + 1], "standard")] : undefined);
+        if (!hit) continue;
+        const raw =
+          hit.path.length >= 2
+            ? hit.path
+            : ([[stops[i].lat, stops[i].lng], [stops[i + 1].lat, stops[i + 1].lng]] as [number, number][]);
+        mapRoutes.push({
+          id: `opt-${mode}-${i}`,
+          from: [stops[i].lat, stops[i].lng],
+          to: [stops[i + 1].lat, stops[i + 1].lng],
+          weight: 3,
+          path: offsetPath(raw, ROUTE_OFFSET_M[mode]),
+          color: modeColor(mode),
+        });
+      }
     }
   }
 
