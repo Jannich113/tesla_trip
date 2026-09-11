@@ -33,6 +33,7 @@ import {
   splitRoutedLeg,
 } from "./insert";
 import { estimateTolls } from "./tolls";
+import { withRetry } from "./retry";
 
 export { alongFraction, haversineM, minDistToPathM, pathMeters, pickViaOnPath, splitRoutedLeg } from "./insert";
 
@@ -177,18 +178,21 @@ export async function fetchRoute(from: PlanStop, to: PlanStop, mode: LegMode): P
   const hit = routeCache.get(key);
   if (hit) return hit;
   try {
-    const res = await fetch("/api/drive", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({
-        from: { lat: from.lat, lng: from.lng },
-        to: { lat: to.lat, lng: to.lng },
-        mode,
-      }),
+    const body = await withRetry(async () => {
+      const res = await fetch("/api/drive", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          from: { lat: from.lat, lng: from.lng },
+          to: { lat: to.lat, lng: to.lng },
+          mode,
+        }),
+      });
+      if (!res.ok) throw new Error(`Route ${res.status}`);
+      const json = (await res.json()) as RoutedLeg;
+      if (!json.path?.length || !Number.isFinite(json.miles)) throw new Error("Empty route");
+      return json;
     });
-    if (!res.ok) return airRoute(from, to);
-    const body = (await res.json()) as RoutedLeg;
-    if (!body.path?.length || !Number.isFinite(body.miles)) return airRoute(from, to);
     routeCache.set(key, body);
     return body;
   } catch {

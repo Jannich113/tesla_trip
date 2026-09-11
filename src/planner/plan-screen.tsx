@@ -39,6 +39,7 @@ import {
   SPEED_KMH,
 } from "./engine";
 import { usePlanStore } from "./store";
+import { withRetry } from "./retry";
 import { formatKrPerKwh, formatKrValue, type HourPrice } from "@/lib/elpris";
 import { applyTillægToHours, providerById } from "@/lib/el-providers";
 import { PLACES } from "@/lib/places";
@@ -534,19 +535,30 @@ export function PlanScreen() {
         Math.abs(s.lat) <= 90 &&
         Math.abs(s.lng) <= 180,
     );
+    const fail = (message: string) => {
+      toast.error(message, {
+        action: {
+          label: "Retry",
+          onClick: () => {
+            void exportToTesla(planStops, title);
+          },
+        },
+      });
+    };
+
     if (!pts.length) {
-      toast.error("No valid coordinates to send");
+      fail("No valid coordinates to send");
       return;
     }
     let url = "";
     try {
       url = pts.length === 1 ? teslaDestUrl(pts[0]) : mapsDirUrl(pts);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not build a Tesla nav link");
+      fail(err instanceof Error ? err.message : "Could not build a Tesla nav link");
       return;
     }
     if (!url) {
-      toast.error("Could not build a Tesla nav link");
+      fail("Could not build a Tesla nav link");
       return;
     }
 
@@ -564,14 +576,14 @@ export function PlanScreen() {
       }
       try {
         if (navigator.clipboard?.writeText) {
-          await navigator.clipboard.writeText(url);
-          toast.error(reason ? `${reason}. Link copied.` : "Popup blocked. Tesla link copied.");
+          await withRetry(() => navigator.clipboard.writeText(url), { delaysMs: [0, 120] });
+          fail(reason ? `${reason}. Link copied.` : "Popup blocked. Tesla link copied.");
           return;
         }
       } catch {
         /* clipboard blocked too */
       }
-      toast.error(reason ? `${reason}. Copy this link: ${url}` : `Could not open Tesla nav. ${url}`);
+      fail(reason ? `${reason}. Copy this link: ${url}` : `Could not open Tesla nav. ${url}`);
     };
 
     if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
