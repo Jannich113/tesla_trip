@@ -104,7 +104,7 @@ export const useVehicleStore = create<VehicleStore>()(
         const s = get();
         const dtHr = 1 / 3600;
         const day = todayKey();
-        let milesToday = s.todayDate === day ? s.milesToday : 0;
+        const milesToday = s.todayDate === day ? s.milesToday : 0;
 
         if (s.mode === "driving") {
           const t = Date.now();
