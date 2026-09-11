@@ -21,6 +21,7 @@ import {
   DKK_PER_USD,
   dkNowDateTime,
   defaultSpeedEff,
+  detourSavings,
   epaWhPerMi,
   fetchRoute,
   formatDateTime,
@@ -802,6 +803,7 @@ export function PlanScreen() {
             const on = !mixed && activeModes[0] === row.mode;
             const t = row.totals;
             const fastest = optionRows.find((r) => r.mode === "fastest")?.totals;
+            const save = t && fastest && row.mode !== "fastest" ? detourSavings(fastest, t) : null;
             return (
               <li key={row.mode}>
                 <div className={cn("px-3 py-3", on && "bg-background/40")}>
@@ -838,9 +840,11 @@ export function PlanScreen() {
                             ? `${t.charges} ${t.charges === 1 ? "charge" : "charges"} · ${formatKrValue(Math.max(0, t.kr - t.tollKr), 0)} kr`
                             : "no charge"}
                           {t.tollKr >= 1 ? ` · toll ${formatKrValue(t.tollKr, 0)} kr` : " · no toll"}
-                          {row.mode !== "fastest" && fastest && fastest.tollKr - t.tollKr >= 5
-                            ? ` · saves ${formatKrValue(fastest.tollKr - t.tollKr, 0)} kr tolls`
-                            : ""}
+                          {save && save.net >= 1
+                            ? ` · saves ${formatKrValue(save.net, 0)} kr${save.extraMin >= 1 ? ` for +${minutesToHm(save.extraMin)}` : ""}`
+                            : save && save.net <= -1
+                              ? ` · ${formatKrValue(-save.net, 0)} kr more`
+                              : ""}
                           {row.mode === "cheapest" || t.waitMin > 0
                             ? ` · ${t.waitMin > 0 ? minutesToHm(t.waitMin) : "no"} wait`
                             : ""}

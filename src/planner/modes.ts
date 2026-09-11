@@ -87,6 +87,15 @@ export function cheapDetourKm(routeSeconds: number) {
   return Math.min(80, Math.max(12, Math.round(km)));
 }
 
+export function detourSavings(base: { kr: number; tollKr: number; driveMin: number; mi: number }, alt: { kr: number; tollKr: number; driveMin: number; mi: number }) {
+  const extraMin = Math.max(0, alt.driveMin - base.driveMin);
+  const extraMi = Math.max(0, alt.mi - base.mi);
+  const chargeSaved = Math.max(0, base.kr - base.tollKr) - Math.max(0, alt.kr - alt.tollKr);
+  const tollSaved = base.tollKr - alt.tollKr;
+  const net = base.kr - alt.kr;
+  return { extraMin, extraMi, chargeSaved, tollSaved, net };
+}
+
 /** Eco is off the motorway — look farther toward services. Cheapest hunts a wider band. */
 export function chargeSearchKm(mode: LegMode, detourKm: number, focus?: ModeFocus, routeSeconds?: number) {
   const km = Math.max(8, detourKm);

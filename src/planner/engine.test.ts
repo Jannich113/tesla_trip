@@ -18,6 +18,7 @@ import {
   asDateTime,
   waitDelayMin,
   cheapDetourKm,
+  detourSavings,
   pathMode,
   stallKw,
 } from "./modes.ts";
@@ -66,6 +67,17 @@ describe("leg modes", () => {
     assert.equal(cheapDetourKm(15 * 3600), 80);
     assert.ok(chargeSearchKm("cheapest", 12, "pris", 2 * 3600) >= 24);
     assert.ok(chargeSearchKm("cheapest", 12, "pris", 15 * 3600) >= 80);
+  });
+
+  it("detour savings is net kr vs extra drive time", () => {
+    const save = detourSavings(
+      { kr: 700, tollKr: 200, driveMin: 900, mi: 900 },
+      { kr: 540, tollKr: 200, driveMin: 980, mi: 915 },
+    );
+    assert.equal(save.chargeSaved, 160);
+    assert.equal(save.tollSaved, 0);
+    assert.equal(save.net, 160);
+    assert.equal(save.extraMin, 80);
   });
 
   it("eco and cheapest search farther for chargers than fastest", () => {

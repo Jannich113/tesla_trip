@@ -71,6 +71,7 @@ export {
   pathMode,
   stallKw,
   cheapDetourKm,
+  detourSavings,
   type DetourKm,
   type LegMode,
   type ModeFocus,
