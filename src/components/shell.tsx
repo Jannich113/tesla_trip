@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { toast, Toaster } from "sonner";
-import { Car, CircleDollarSign, House, RotateCw, Route } from "lucide-react";
+import { Car, CircleDollarSign, House, RotateCw, Route, Zap } from "lucide-react";
 import { HomeScreen } from "@/components/home-screen";
 import { TripsScreen } from "@/components/trips-screen";
 import { ChargeScreen } from "@/components/charge-screen";
 import { VehicleScreen } from "@/components/vehicle-screen";
+import { ElprisScreen } from "@/components/elpris-screen";
 import { type Tab, VEHICLE } from "@/lib/vehicle";
 import { cn } from "@/lib/utils";
 import { useChargeStore } from "@/store/charge-store";
@@ -15,6 +16,7 @@ const TABS: { id: Tab; label: string; icon: typeof House }[] = [
   { id: "home", label: "Home", icon: House },
   { id: "trips", label: "Trips", icon: Route },
   { id: "costs", label: "Costs", icon: CircleDollarSign },
+  { id: "elpris", label: "Elpris", icon: Zap },
   { id: "vehicle", label: "Juniper", icon: Car },
 ];
 
@@ -85,6 +87,7 @@ export function Dashboard() {
           {tab === "home" && <HomeScreen />}
           {tab === "trips" && <TripsScreen />}
           {tab === "costs" && <ChargeScreen />}
+          {tab === "elpris" && <ElprisScreen />}
           {tab === "vehicle" && <VehicleScreen />}
         </main>
 
@@ -92,7 +95,7 @@ export function Dashboard() {
           className="fixed inset-x-0 bottom-0 z-20 mx-auto max-w-lg border-t border-border bg-background/95 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-1 backdrop-blur-sm"
           aria-label="Primary"
         >
-          <ul className="grid grid-cols-4">
+          <ul className="grid grid-cols-5">
             {TABS.map((item) => {
               const Icon = item.icon;
               const active = tab === item.id;
