@@ -17,6 +17,8 @@ import {
   waitDelayMin,
 } from "./modes.ts";
 import { rateForNetwork, networkIdFor, roamExtra, EU_NETWORKS, EU_REGIONS, regionalOwn, regionalRoam } from "./networks.ts";
+import { toDkk, CATALOG_FX, NETWORK_NATIVE } from "./charge-fx.ts";
+import { countryProfile } from "./country-profiles.ts";
 
 describe("leg modes", () => {
   it("eco is shortest + avoids highways and tolls", () => {
@@ -167,5 +169,18 @@ describe("leg modes", () => {
     assert.ok(regionalRoam(clever, "DE", true)! > 3);
     assert.ok(regionalOwn(ionity, "UK", false)! > regionalOwn(ionity, "FR", false)!);
     assert.equal(regionalRoam(EU_NETWORKS.find((n) => n.id === "tesla")!, "DE", true), null);
+  });
+
+  it("native tariffs convert through FX", () => {
+    assert.equal(toDkk(1, "EUR", CATALOG_FX), 7.46);
+    assert.equal(toDkk(1, "NOK", CATALOG_FX), 0.64);
+    assert.equal(NETWORK_NATIVE.ionity.ccy, "EUR");
+    assert.equal(NETWORK_NATIVE.recharge.ccy, "NOK");
+  });
+
+  it("every country has a charging profile", () => {
+    for (const r of EU_REGIONS) {
+      assert.ok(countryProfile(r.id), r.id);
+    }
   });
 });

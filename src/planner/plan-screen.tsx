@@ -43,6 +43,9 @@ import { formatDistance, formatEfficiency, formatNumber } from "@/lib/vehicle";
 import { HOME_USD_PER_KWH } from "@/lib/history";
 import { useChargeStore } from "@/store/charge-store";
 import { useElprisStore } from "@/store/elpris-store";
+import { NETWORK_NATIVE, scaleCatalogKr, type FxTable } from "./charge-fx";
+import { countryProfile } from "./country-profiles";
+import { useChargePrices } from "./use-charge-prices";
 import { useLiveElpris } from "./use-live-elpris";
 import { EU_BLOCS, EU_NETWORKS, EU_REGIONS, type EuRegion, regionalExtra, regionalOwn, regionalRoam, roamExtra, roamRate } from "./networks";
 import { useVehicleProfile } from "@/hooks/use-vehicle-profile";
@@ -1174,6 +1177,13 @@ export function PlanScreen() {
   );
 }
 
+function scaleKr(networkId: string, kr: number | null, fx: FxTable | null) {
+  if (kr == null || !fx) return kr;
+  const native = NETWORK_NATIVE[networkId];
+  if (!native) return kr;
+  return scaleCatalogKr(kr, native.ccy, fx);
+}
+
 function NetworksPanel({
   abo,
   onToggle,
@@ -1182,17 +1192,21 @@ function NetworksPanel({
   onToggle: (id: string, on: boolean) => void;
 }) {
   const [region, setRegion] = useState<EuRegion>("DK");
+  const prices = useChargePrices();
+  const networks = prices.data?.networks ?? EU_NETWORKS;
+  const fx = prices.data?.fx ?? null;
+  const profile = countryProfile(region);
   const blocId = EU_REGIONS.find((r) => r.id === region)?.bloc ?? "nordic";
   const bloc = EU_BLOCS.find((b) => b.id === blocId) ?? EU_BLOCS[0];
-  const rows = [...EU_NETWORKS]
+  const rows = [...networks]
     .map((n) => {
       const on = Boolean(abo[n.id]);
       return {
         n,
         on,
-        own: regionalOwn(n, region, on),
-        roam: regionalRoam(n, region, on),
-        extra: regionalExtra(n, region, on),
+        own: scaleKr(n.id, regionalOwn(n, region, on), fx),
+        roam: scaleKr(n.id, regionalRoam(n, region, on), fx),
+        extra: scaleKr(n.id, regionalExtra(n, region, on), fx),
       };
     })
     .filter((r) => r.own != null || r.roam != null)
@@ -1211,6 +1225,33 @@ function NetworksPanel({
         you have that membership — trip cost uses the cheaper kWh. Monthly fees stay out of the
         route total.
       </p>
+      <p className="text-[11px] tabular-nums text-subtle">
+        {prices.loading
+          ? "Fetching FX…"
+          : prices.error
+            ? prices.error
+            : prices.data
+              ? `EUR ${prices.data.fx.EUR.toFixed(3)} · NOK ${prices.data.fx.NOK.toFixed(3)} DKK · ${prices.data.fxSource} · ${prices.data.updatedAt.slice(11, 16)} UTC`
+              : "Catalog rates"}
+        <button
+          type="button"
+          onClick={() => prices.refresh()}
+          className="ml-2 text-muted underline"
+        >
+          {prices.refreshing ? "Refreshing…" : "Refresh"}
+        </button>
+      </p>
+      {profile ? (
+        <div className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-muted">
+            {profile.name} · {profile.ccy}
+          </p>
+          <p className="mt-1 text-sm">{profile.note}</p>
+          <p className="mt-2 text-[11px] text-subtle">
+            CPOs · {profile.cpos.map((id) => networks.find((n) => n.id === id)?.name ?? id).join(" · ")}
+          </p>
+        </div>
+      ) : null}
       <div className="overflow-hidden rounded-xl bg-surface shadow-[var(--shadow-border)]">
         <p className="px-4 pt-4 text-[11px] font-medium uppercase tracking-wide text-muted">
           Roaming vs own · {region}
@@ -1286,7 +1327,7 @@ function NetworksPanel({
         </table>
       </div>
       <ul className="space-y-2">
-        {EU_NETWORKS.map((n) => {
+        {networks.map((n) => {
           const on = Boolean(abo[n.id]);
           const rate = on ? n.aboKr : n.spotKr;
           const roam = roamRate(n, on);
