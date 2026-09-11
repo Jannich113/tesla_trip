@@ -133,12 +133,14 @@ export const usePlanStore = create<PlanStore>()(
 
       removeStop: (id) => {
         const idx = get().stops.findIndex((s) => s.id === id);
-        if (idx <= 0) return;
+        if (idx < 0) return;
+        const stops = get().stops.filter((s) => s.id !== id);
+        const dropLeg = idx === 0 ? 0 : idx - 1;
         set({
-          stops: get().stops.filter((s) => s.id !== id),
-          modes: get().modes.filter((_, i) => i !== idx - 1),
-          detours: get().detours.filter((_, i) => i !== idx - 1),
-          legWhen: get().legWhen.filter((_, i) => i !== idx - 1),
+          stops,
+          modes: get().modes.filter((_, i) => i !== dropLeg),
+          detours: get().detours.filter((_, i) => i !== dropLeg),
+          legWhen: get().legWhen.filter((_, i) => i !== dropLeg),
         });
       },
 

@@ -451,7 +451,7 @@ export function PlanScreen() {
       lat: s.lat,
       lng: s.lng,
       label: s.name,
-      kind: (i === 0 ? "home" : "place") as MapMarker["kind"],
+      kind: (s.id === "home" || s.name === "Home" ? "home" : "place") as MapMarker["kind"],
       badge: String(i + 1),
     })),
     ...chargerMarkers,
@@ -882,16 +882,14 @@ export function PlanScreen() {
                       {chargeLeg?.accepted ? "Accepted" : "Accept"}
                     </button>
                   ) : null}
-                  {i > 0 ? (
-                    <button
-                      type="button"
-                      onClick={() => removeStop(stop.id)}
-                      className="flex size-9 shrink-0 items-center justify-center rounded-full text-muted"
-                      aria-label={`Remove ${stop.name}`}
-                    >
-                      <Trash2 className="size-4" />
-                    </button>
-                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => removeStop(stop.id)}
+                    className="flex size-9 shrink-0 items-center justify-center rounded-full text-muted"
+                    aria-label={`Remove ${stop.name}`}
+                  >
+                    <Trash2 className="size-4" />
+                  </button>
                 </div>
                 {i > 0 ? (
                   <div className="mt-2 pl-10">
@@ -1154,13 +1152,23 @@ export function PlanScreen() {
           ) : (
             <ul className="mt-2 flex flex-wrap gap-2">
               {Object.entries(PLACES)
-                .filter(([name]) => name !== "Home" && !name.includes("Supercharger") && !name.includes("Wall"))
+                .filter(([name]) => {
+                  if (name.includes("Supercharger") || name.includes("Wall")) return false;
+                  if (name === "Home" && stops.some((s) => s.id === "home" || s.name === "Home")) return false;
+                  return true;
+                })
                 .slice(0, 8)
                 .map(([name, g]) => (
                   <li key={name}>
                     <button
                       type="button"
-                      onClick={() => addStop({ label: name, lat: g.lat, lng: g.lng })}
+                      onClick={() => {
+                        if (name === "Home") {
+                          addStopToStore({ id: "home", name: "Home", lat: g.lat, lng: g.lng });
+                          return;
+                        }
+                        addStop({ label: name, lat: g.lat, lng: g.lng });
+                      }}
                       className="h-9 rounded-full bg-surface-2 px-3 text-xs font-medium text-muted"
                     >
                       {g.short}
