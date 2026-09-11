@@ -898,9 +898,30 @@ export function PlanScreen() {
       </div>
 
       <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
-        <p className="text-sm font-medium">Stops</p>
+        <div className="flex items-center gap-2">
+          <p className="text-sm font-medium">Stops</p>
+          <div className="ml-auto flex gap-1">
+            {LEG_MODES.map((mode) => {
+              const on = !mixed && activeModes[0] === mode;
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setAllModes(mode)}
+                  className={cn(
+                    "h-7 rounded-full px-2.5 text-[11px] font-medium",
+                    on ? "text-background" : "bg-surface-2 text-muted",
+                  )}
+                  style={on ? { background: modeColor(mode) } : undefined}
+                >
+                  {modeLabel(mode)}
+                </button>
+              );
+            })}
+          </div>
+        </div>
         <ol className="mt-2">
-          {timeline.filter((row) => !row.via).map(({ stop, inbound, outbound, via, index: i }) => {
+          {timeline.map(({ stop, inbound, outbound, via, index: i }) => {
             const userI = outbound?.userIndex ?? inbound?.userIndex ?? Math.max(0, i - 1);
             const leg = inbound;
             const open = Boolean(openStops[stop.id]);
@@ -962,36 +983,16 @@ export function PlanScreen() {
                           </span>
                         ) : null}
                       </p>
-                      {inbound ? (
-                        <div className="mt-1 space-y-0.5">
-                          {LEG_MODES.map((mode) => {
-                            const hits =
-                              optionRows
-                                .find((r) => r.mode === mode)
-                                ?.legs.filter((l) => l.userIndex === userI && l.charge) ?? [];
-                            if (!hits.length) {
-                              return (
-                                <p key={mode} className="truncate text-[11px]" style={{ color: modeColor(mode) }}>
-                                  {modeLabel(mode)} · no charge
-                                </p>
-                              );
-                            }
-                            return hits.map((leg) => (
-                              <p
-                                key={`${mode}-${leg.to.id}-${leg.charge?.locationId}`}
-                                className="truncate text-[11px]"
-                                style={{ color: modeColor(mode) }}
-                              >
-                                {modeLabel(mode)}
-                                {leg.via ? " · via " : " · "}
-                                {leg.charge?.name}
-                                {leg.charge
-                                  ? ` · ${formatNumber(leg.charge.kwh, 0)} kWh · ${formatKrValue(leg.charge.kr, 0)} kr`
-                                  : ""}
-                              </p>
-                            ));
-                          })}
-                        </div>
+                      {inbound && !open ? (
+                        inbound.charge ? (
+                          <p className="truncate text-[11px]" style={{ color: modeColor(inbound.mode) }}>
+                            {inbound.via ? "via " : ""}
+                            {inbound.charge.name}
+                            {` · ${formatNumber(inbound.charge.kwh, 0)} kWh · ${formatKrValue(inbound.charge.kr, 0)} kr`}
+                          </p>
+                        ) : (
+                          <p className="truncate text-[11px] text-subtle">no charge</p>
+                        )
                       ) : null}
                     </div>
                     {inbound ? (
