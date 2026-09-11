@@ -3,6 +3,7 @@ import { type ChargeLocation } from "@/lib/charge-locations";
 import { type RouteCharger } from "@/routes/api/chargers";
 import { type RoutedLeg } from "./engine";
 import { seedsAlongPath } from "./seed-chargers";
+import { polylineBufferKm } from "./polyline";
 
 function downsample(path: [number, number][], max = 80) {
   if (path.length <= max) return path;
@@ -44,7 +45,10 @@ export function useRouteChargers(routes: RoutedLeg[]) {
     return `${a[0].toFixed(3)},${a[1].toFixed(3)}-${b[0].toFixed(3)},${b[1].toFixed(3)}-${path.length}`;
   }, [path]);
 
-  const local = useMemo(() => (path.length >= 2 ? seedsAlongPath(path, 32_000).map(asLocation) : []), [path]);
+  const local = useMemo(() => {
+    if (path.length < 2) return [];
+    return seedsAlongPath(path, polylineBufferKm(path).wide * 1000).map(asLocation);
+  }, [path]);
   const [live, setLive] = useState<ChargeLocation[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -60,7 +64,7 @@ export function useRouteChargers(routes: RoutedLeg[]) {
       void fetch("/api/chargers", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ path, radiusKm: 28 }),
+        body: JSON.stringify({ path }),
       })
         .then(async (res) => {
           const body = (await res.json()) as { chargers?: RouteCharger[]; error?: string };

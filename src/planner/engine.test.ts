@@ -22,7 +22,7 @@ import { networkFromOsmTags, isDcStation, networkFromOperator } from "./osm-oper
 import { estimateTolls, gatesOnPath } from "./tolls.ts";
 import { seedsAlongPath } from "./seed-chargers.ts";
 import { toDkk, CATALOG_FX, NETWORK_NATIVE } from "./charge-fx.ts";
-import { encodePolyline, decodePolyline } from "./polyline.ts";
+import { encodePolyline, decodePolyline, polylineBufferKm, chargersOnPath } from "./polyline.ts";
 import { countryProfile } from "./country-profiles.ts";
 
 describe("leg modes", () => {
@@ -264,5 +264,37 @@ describe("leg modes", () => {
     assert.equal(back.length, 3);
     assert.ok(Math.abs(back[0][0] - 38.5) < 1e-5);
     assert.ok(Math.abs(back[2][1] + 126.453) < 1e-5);
+  });
+
+  it("sizes the polyline buffer by trip length", () => {
+    const short: [number, number][] = [
+      [55.53, 9.49],
+      [55.56, 9.55],
+    ];
+    const mid: [number, number][] = [
+      [55.5324, 9.4918],
+      [55.1, 9.42],
+      [54.8236, 9.3594],
+    ];
+    const far: [number, number][] = [
+      [55.68, 12.57],
+      [54.8, 9.36],
+      [53.55, 9.99],
+      [52.52, 13.4],
+    ];
+    assert.equal(polylineBufferKm(short).tight, 6);
+    assert.equal(polylineBufferKm(mid).tight, 8);
+    assert.ok(polylineBufferKm(mid).wide <= 14);
+    assert.equal(polylineBufferKm(far).tight, 12);
+    assert.equal(polylineBufferKm(far).wide, 18);
+    const kept = chargersOnPath(
+      [
+        { lat: 55.5126, lng: 9.4629 },
+        { lat: 56.2, lng: 10.2 },
+      ],
+      mid,
+      8,
+    );
+    assert.equal(kept.length, 1);
   });
 });

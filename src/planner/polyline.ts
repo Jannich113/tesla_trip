@@ -1,3 +1,5 @@
+import { haversineM, minDistToPathM } from "./insert.ts";
+
 /** Google encoded polyline (precision 5), as used by OpenChargeMap `polyline`. */
 
 function encodeSigned(value: number) {
@@ -51,4 +53,32 @@ export function decodePolyline(encoded: string, precision = 5): [number, number]
     path.push([lat / factor, lng / factor]);
   }
   return path;
+}
+
+export function pathLengthKm(path: [number, number][]) {
+  let m = 0;
+  for (let i = 1; i < path.length; i++) {
+    m += haversineM({ lat: path[i - 1][0], lng: path[i - 1][1] }, { lat: path[i][0], lng: path[i][1] });
+  }
+  return m / 1000;
+}
+
+/**
+ * OCM `distance` is half the corridor width. Motorway HPC sits 1–8 km off
+ * the carriageway; 28 km was pulling in town AC. Tight first, widen if sparse.
+ */
+export function polylineBufferKm(path: [number, number][]) {
+  const km = pathLengthKm(path);
+  const tight = km < 30 ? 6 : km < 100 ? 8 : km < 300 ? 10 : 12;
+  const wide = Math.min(18, Math.round(tight * 1.7));
+  return { tight, wide, pathKm: Math.round(km * 10) / 10 };
+}
+
+export function chargersOnPath<T extends { lat: number; lng: number }>(
+  chargers: T[],
+  path: [number, number][],
+  radiusKm: number,
+) {
+  const band = Math.max(4_000, radiusKm * 1000);
+  return chargers.filter((c) => minDistToPathM(c.lat, c.lng, path) <= band);
 }
