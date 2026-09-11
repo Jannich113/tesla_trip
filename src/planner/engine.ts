@@ -66,6 +66,7 @@ export {
   focusHint,
   MODE_FOCUSES,
   DEFAULT_MODE_FOCUS,
+  pathMode,
   type DetourKm,
   type LegMode,
   type ModeFocus,

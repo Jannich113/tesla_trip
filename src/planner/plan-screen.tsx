@@ -35,6 +35,7 @@ import {
   modeColor,
   modeHint,
   modeLabel,
+  pathMode,
   focusHint,
   focusLabel,
   planTotals,
@@ -246,10 +247,15 @@ export function PlanScreen() {
     m === "eco" || m === "cheapest" || m === "fastest" ? m : ("fastest" as LegMode),
   );
   const mixed = activeModes.some((m) => m !== activeModes[0]);
-  const routes = routesFor(mixed ? "fastest" : (activeModes[0] ?? "fastest"));
   const selectedRoutes = mixed
-    ? stops.slice(0, -1).map((_, i) => routeMap[routeKey(stops[i], stops[i + 1], activeModes[i] ?? "fastest")]).filter((r): r is RoutedLeg => Boolean(r))
-    : routes;
+    ? stops
+        .slice(0, -1)
+        .map((_, i) => {
+          const m = activeModes[i] ?? "fastest";
+          return routeMap[routeKey(stops[i], stops[i + 1], pathMode(m, modeFocus[m]))];
+        })
+        .filter((r): r is RoutedLeg => Boolean(r))
+    : routesFor(pathMode(activeModes[0] ?? "fastest", modeFocus[activeModes[0] ?? "fastest"]));
 
   const searchRoutes = useMemo(() => {
     const all: RoutedLeg[] = [];
@@ -372,7 +378,7 @@ export function PlanScreen() {
 
   const optionRows = useMemo(() => {
     return LEG_MODES.map((mode) => {
-      const optionRoutes = routesFor(mode);
+      const optionRoutes = routesFor(pathMode(mode, modeFocus[mode]));
       if (optionRoutes.length !== Math.max(0, stops.length - 1) || stops.length < 2) {
         return { mode, totals: null as ReturnType<typeof planTotals> | null, kmh: 0, kwhPerMi: 0 };
       }
@@ -494,6 +500,7 @@ export function PlanScreen() {
       if (!showRoutes[mode]) continue;
       for (let i = 0; i < stops.length - 1; i++) {
         const hit =
+          routeMap[routeKey(stops[i], stops[i + 1], pathMode(mode, modeFocus[mode]))] ??
           routeMap[routeKey(stops[i], stops[i + 1], mode)] ??
           (mode === "cheapest" ? routeMap[routeKey(stops[i], stops[i + 1], "fastest")] : undefined);
         if (!hit) continue;
@@ -512,7 +519,7 @@ export function PlanScreen() {
       }
     }
     return out;
-  }, [stops, routeMap, showRoutes]);
+  }, [stops, routeMap, showRoutes, modeFocus]);
 
   const mapMarkers: MapMarker[] = useMemo(() => {
     const chargerMarkers: MapMarker[] = [];
@@ -698,7 +705,7 @@ export function PlanScreen() {
 
         <p className="mt-5 text-[11px] font-medium uppercase tracking-wide text-muted">Route options</p>
         <p className="mt-1 text-[11px] text-subtle">
-          Eco · distance. Fastest · pris. Cheapest · time. Switch any to pris, time, or distance.
+          Eco · distance. Fastest · pris. Cheapest · time (highway). Switch any to pris, time, or distance.
         </p>
         <ul className="mt-2 divide-y divide-border rounded-xl bg-surface-2">
           {optionRows.map((row) => {

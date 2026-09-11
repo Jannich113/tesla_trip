@@ -63,7 +63,7 @@ export function focusLabel(focus: ModeFocus) {
 
 export function focusHint(focus: ModeFocus) {
   if (focus === "pris") return "Lowest kr for the charge plus extra drive";
-  if (focus === "time") return "Least extra minutes — highway DC, small detour";
+  if (focus === "time") return "Highway speed, earliest arrival";
   return "Closest stall on this road";
 }
 
@@ -72,6 +72,12 @@ export const DEFAULT_MODE_FOCUS: Record<LegMode, ModeFocus> = {
   fastest: "pris",
   cheapest: "time",
 };
+
+/** Time always takes the highway/fastest corridor. */
+export function pathMode(mode: LegMode, focus?: ModeFocus): "eco" | "fastest" {
+  if (focus === "time") return "fastest";
+  return mode === "eco" ? "eco" : "fastest";
+}
 
 /** Pris may look a bit farther for a cheaper stall. */
 export function chargeSearchKm(_mode: LegMode, detourKm: number, focus?: ModeFocus) {
@@ -89,8 +95,9 @@ export function chargeFitScore(
   const kr = Math.max(0, opts.kr);
   const extra = opts.extraDriveKr ?? 0;
   if (focus === "time") {
-    const detourMin = distKm / 1.2;
-    return detourMin + (opts.dc ? 0 : 12) + extra * 0.02;
+    const kmh = opts.dc ? 130 : 80;
+    const detourMin = (distKm / kmh) * 60;
+    return detourMin + (opts.dc ? 0 : 14);
   }
   if (focus === "pris") return kr + extra * 0.45 + distKm * 0.8;
   return distKm * 14 + (opts.dc ? 1.5 : 0) + kr * 0.04;

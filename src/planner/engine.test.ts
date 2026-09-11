@@ -17,6 +17,7 @@ import {
   minutesBetweenDateTime,
   asDateTime,
   waitDelayMin,
+  pathMode,
 } from "./modes.ts";
 import { rateForNetwork, networkIdFor, roamExtra, EU_NETWORKS, EU_REGIONS, regionalOwn, regionalRoam } from "./networks.ts";
 import { alongFraction, pickViaOnPath, splitRoutedLeg } from "./insert.ts";
@@ -53,6 +54,15 @@ describe("leg modes", () => {
     assert.equal(formatWaitCap(0), "0");
     assert.equal(formatWaitCap(30), "30m");
     assert.equal(formatWaitCap(120), "2h");
+  });
+
+  it("time takes the highway corridor at 130 km/t", () => {
+    assert.equal(pathMode("eco", "time"), "fastest");
+    assert.equal(pathMode("cheapest", "time"), "fastest");
+    assert.equal(pathMode("eco", "distance"), "eco");
+    const highway = chargeFitScore("time", { distM: 8000, kr: 90, dc: true });
+    const local = chargeFitScore("time", { distM: 8000, kr: 20, dc: false });
+    assert.ok(highway < local);
   });
 
   it("each focus ranks a different charger first", () => {
