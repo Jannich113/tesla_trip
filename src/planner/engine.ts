@@ -160,7 +160,12 @@ export function airRoute(from: PlanStop, to: PlanStop): RoutedLeg {
   };
 }
 
+const routeCache = new Map<string, RoutedLeg>();
+
 export async function fetchRoute(from: PlanStop, to: PlanStop, mode: LegMode): Promise<RoutedLeg> {
+  const key = `${from.lat.toFixed(4)},${from.lng.toFixed(4)}|${to.lat.toFixed(4)},${to.lng.toFixed(4)}|${mode === "cheapest" ? "standard" : mode}`;
+  const hit = routeCache.get(key);
+  if (hit) return hit;
   try {
     const res = await fetch("/api/drive", {
       method: "POST",
@@ -174,6 +179,7 @@ export async function fetchRoute(from: PlanStop, to: PlanStop, mode: LegMode): P
     if (!res.ok) return airRoute(from, to);
     const body = (await res.json()) as RoutedLeg;
     if (!body.path?.length || !Number.isFinite(body.miles)) return airRoute(from, to);
+    routeCache.set(key, body);
     return body;
   } catch {
     return airRoute(from, to);

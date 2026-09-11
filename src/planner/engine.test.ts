@@ -23,7 +23,7 @@ import { networkFromOsmTags, isDcStation, networkFromOperator } from "./osm-oper
 import { estimateTolls, gatesOnPath } from "./tolls.ts";
 import { seedsAlongPath } from "./seed-chargers.ts";
 import { toDkk, CATALOG_FX, NETWORK_NATIVE } from "./charge-fx.ts";
-import { encodePolyline, decodePolyline, polylineBufferKm, chargersOnPath } from "./polyline.ts";
+import { encodePolyline, decodePolyline, polylineBufferKm, chargersOnPath, simplifyPath } from "./polyline.ts";
 import { countryProfile } from "./country-profiles.ts";
 
 describe("leg modes", () => {
@@ -300,5 +300,15 @@ describe("leg modes", () => {
       8,
     );
     assert.equal(kept.length, 1);
+  });
+
+  it("simplifies a dense path without dropping the ends", () => {
+    const path: [number, number][] = [];
+    for (let i = 0; i <= 400; i++) path.push([55.5 + i * 0.002, 9.4 + i * 0.001]);
+    const slim = simplifyPath(path, 80);
+    assert.ok(slim.length <= 81);
+    assert.ok(slim.length > 20);
+    assert.equal(slim[0][0], path[0][0]);
+    assert.equal(slim.at(-1)?.[0], path.at(-1)?.[0]);
   });
 });

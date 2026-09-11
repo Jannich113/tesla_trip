@@ -85,7 +85,7 @@ export function useRouteChargers(routes: RoutedLeg[], radiusKm?: number) {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [key, path, radiusKm]);
+  }, [key, radiusKm]);
 
   const chargers = live.length ? live : local;
   return { chargers, loading, error, localCount: local.length };

@@ -82,3 +82,26 @@ export function chargersOnPath<T extends { lat: number; lng: number }>(
   const band = Math.max(4_000, radiusKm * 1000);
   return chargers.filter((c) => minDistToPathM(c.lat, c.lng, path) <= band);
 }
+
+/** Keep shape, drop dense GPS points so Leaflet/OCM stay cheap. */
+export function simplifyPath(path: [number, number][], maxPts = 160): [number, number][] {
+  if (path.length <= maxPts) return path;
+  const totalM = pathLengthKm(path) * 1000;
+  const every = Math.max(60, totalM / Math.max(8, maxPts - 1));
+  const out: [number, number][] = [path[0]];
+  let acc = 0;
+  for (let i = 1; i < path.length - 1; i++) {
+    acc += haversineM(
+      { lat: path[i - 1][0], lng: path[i - 1][1] },
+      { lat: path[i][0], lng: path[i][1] },
+    );
+    if (acc >= every) {
+      out.push(path[i]);
+      acc = 0;
+      if (out.length >= maxPts - 1) break;
+    }
+  }
+  const last = path[path.length - 1];
+  if (out[out.length - 1] !== last) out.push(last);
+  return out;
+}

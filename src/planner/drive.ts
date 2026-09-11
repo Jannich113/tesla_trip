@@ -1,5 +1,6 @@
 import { costingFor, type LegMode } from "./modes";
 import { estimateTolls } from "./tolls";
+import { simplifyPath } from "./polyline";
 
 type Stop = { lat: number; lng: number };
 
@@ -90,7 +91,7 @@ async function valhalla(from: Stop, to: Stop, mode: LegMode): Promise<DriveRoute
     {
       miles: Number(summary.length) || 0,
       seconds: Number(summary.time) || 0,
-      path,
+      path: simplifyPath(path, 160),
       source: "valhalla",
     },
     mode,
@@ -138,7 +139,7 @@ async function osrmOnce(from: Stop, to: Stop, mode: LegMode, extra: string): Pro
     {
       miles: (Number(route.distance) || 0) / 1609.344,
       seconds: Number(route.duration) || 0,
-      path,
+      path: simplifyPath(path, 160),
       source: "osrm",
     },
     mode,

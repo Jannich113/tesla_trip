@@ -74,6 +74,7 @@ export function BayMap({
   const groupRef = useRef<import("leaflet").LayerGroup | null>(null);
   const onSelectRef = useRef(onSelect);
   const onDropRef = useRef(onDrop);
+  const fitKeyRef = useRef("");
   const [ready, setReady] = useState(false);
   onSelectRef.current = onSelect;
   onDropRef.current = onDrop;
@@ -139,7 +140,8 @@ export function BayMap({
       const selectedRoutes = routes.filter((r) => selectedSet.has(r.id));
       for (const route of routes) {
         const selected = selectedSet.has(route.id);
-        const pts = route.path && route.path.length >= 2 ? route.path : arc(route.from, route.to);
+        const raw = route.path && route.path.length >= 2 ? route.path : arc(route.from, route.to);
+        const pts = raw.length > 180 ? raw.filter((_, i) => i % Math.ceil(raw.length / 140) === 0 || i === raw.length - 1) : raw;
         pts.forEach((p) => bounds.push(p));
         L.polyline(pts, {
           color: route.color || "#1ecf8a",
@@ -158,11 +160,7 @@ export function BayMap({
 
       for (const marker of markers) {
         bounds.push([marker.lat, marker.lng]);
-        const onRoute = selectedRoutes.some((route) => {
-          const pts = route.path && route.path.length >= 2 ? route.path : [route.from, route.to];
-          return pts.some((p) => Math.abs(p[0] - marker.lat) < 1e-4 && Math.abs(p[1] - marker.lng) < 1e-4);
-        });
-        const selected = selectedSet.has(marker.id) || onRoute;
+        const selected = selectedSet.has(marker.id);
         if (marker.radiusM && marker.radiusM > 0 && (selected || dropping || markers.length <= 8)) {
           const circle = L.circle([marker.lat, marker.lng], {
             radius: marker.radiusM,
@@ -199,20 +197,29 @@ export function BayMap({
           .addTo(group);
       }
 
+      const focusKey = [
+        selectedId ?? "",
+        ...(selectedIds ?? []),
+        ...routes.map((r) => r.id),
+      ].join("|");
       const focus =
         selectedRoutes.length > 0
-          ? selectedRoutes.flatMap((r) => (r.path && r.path.length >= 2 ? r.path : arc(r.from, r.to)))
+          ? selectedRoutes.flatMap((r) => {
+              const raw = r.path && r.path.length >= 2 ? r.path : arc(r.from, r.to);
+              return raw.length > 80 ? [raw[0], raw[Math.floor(raw.length / 2)], raw[raw.length - 1]] : raw;
+            })
           : bounds;
-      if (focus.length >= 2) {
+      if (focus.length >= 2 && fitKeyRef.current !== focusKey) {
+        fitKeyRef.current = focusKey;
         map.fitBounds(L.latLngBounds(focus), {
           padding: [36, 36],
           maxZoom: selectedRoutes.length === 1 ? 12 : 8,
           animate: false,
         });
-      } else if (focus.length === 1) {
+      } else if (focus.length === 1 && fitKeyRef.current !== focusKey) {
+        fitKeyRef.current = focusKey;
         map.setView(focus[0], 12, { animate: false });
       }
-      map.invalidateSize();
     });
 
     return () => {

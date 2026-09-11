@@ -50,6 +50,7 @@ import { useElprisStore } from "@/store/elpris-store";
 import { NETWORK_NATIVE, scaleCatalogKr, type FxTable } from "./charge-fx";
 import { countryProfile } from "./country-profiles";
 import { minDistToPathM } from "./insert";
+import { simplifyPath } from "./polyline";
 import { useRouteChargers } from "./use-route-chargers";
 import { useChargePrices } from "./use-charge-prices";
 import { useLiveElpris } from "./use-live-elpris";
@@ -90,7 +91,7 @@ const PATH_MODES: LegMode[] = ["eco", "standard", "fastest"];
 
 export function PlanScreen() {
   const units = useVehicleStore((s) => s.units);
-  const soc = useVehicleStore((s) => s.soc);
+  const soc = useVehicleStore((s) => Math.round(s.soc));
   const shareLocation = useVehicleStore((s) => s.shareLocation);
   const { profile } = useVehicleProfile();
   const locationsStored = useChargeStore((s) => s.locations);
@@ -244,25 +245,7 @@ export function PlanScreen() {
     ? stops.slice(0, -1).map((_, i) => routeMap[routeKey(stops[i], stops[i + 1], activeModes[i] ?? "standard")]).filter((r): r is RoutedLeg => Boolean(r))
     : routes;
 
-  const searchRoutes = useMemo(() => {
-    const all: RoutedLeg[] = [];
-    const seen = new Set<string>();
-    for (const r of selectedRoutes) {
-      const k = `${r.path[0]?.join()}-${r.path.at(-1)?.join()}-${r.miles.toFixed(1)}`;
-      if (seen.has(k)) continue;
-      seen.add(k);
-      all.push(r);
-    }
-    for (const mode of LEG_MODES) {
-      for (const r of routesFor(mode)) {
-        const k = `${r.path[0]?.join()}-${r.path.at(-1)?.join()}-${mode}`;
-        if (seen.has(k)) continue;
-        seen.add(k);
-        all.push(r);
-      }
-    }
-    return all;
-  }, [selectedRoutes, routeMap, stops]);
+  const searchRoutes = useMemo(() => selectedRoutes, [selectedRoutes]);
 
   const { chargers: routeChargers, loading: chargersLoading } = useRouteChargers(
     searchRoutes,
@@ -477,8 +460,9 @@ export function PlanScreen() {
     toast(`Saved ${plan.name}`);
   }
 
-  const mapRoutes: MapRoute[] = [];
-  if (stops.length >= 2) {
+  const mapRoutes: MapRoute[] = useMemo(() => {
+    const out: MapRoute[] = [];
+    if (stops.length < 2) return out;
     for (const mode of LEG_MODES) {
       if (!showRoutes[mode]) continue;
       for (let i = 0; i < stops.length - 1; i++) {
@@ -488,9 +472,9 @@ export function PlanScreen() {
         if (!hit) continue;
         const raw =
           hit.path.length >= 2
-            ? hit.path
+            ? simplifyPath(hit.path, 120)
             : ([[stops[i].lat, stops[i].lng], [stops[i + 1].lat, stops[i + 1].lng]] as [number, number][]);
-        mapRoutes.push({
+        out.push({
           id: `opt-${mode}-${i}`,
           from: [stops[i].lat, stops[i].lng],
           to: [stops[i + 1].lat, stops[i + 1].lng],
@@ -500,70 +484,74 @@ export function PlanScreen() {
         });
       }
     }
-  }
+    return out;
+  }, [stops, routeMap, showRoutes]);
 
-  const chargerMarkers: MapMarker[] = [];
-  for (const [i, leg] of viewLegs.entries()) {
-    for (const spot of [leg.charge, leg.backup]) {
-      if (!spot) continue;
-      const loc = locations.find((x) => x.id === spot.locationId);
-      if (!loc) continue;
-      const isBackup = leg.backup?.locationId === spot.locationId && leg.charge?.locationId !== spot.locationId;
-      const required = Boolean(!isBackup && leg.needed);
-      const suggested = Boolean(!isBackup && !required && leg.suggested);
+  const mapMarkers: MapMarker[] = useMemo(() => {
+    const chargerMarkers: MapMarker[] = [];
+    for (const [i, leg] of viewLegs.entries()) {
+      for (const spot of [leg.charge, leg.backup]) {
+        if (!spot) continue;
+        const loc = locations.find((x) => x.id === spot.locationId);
+        if (!loc) continue;
+        const isBackup = leg.backup?.locationId === spot.locationId && leg.charge?.locationId !== spot.locationId;
+        const required = Boolean(!isBackup && leg.needed);
+        const suggested = Boolean(!isBackup && !required && leg.suggested);
+        chargerMarkers.push({
+          id: `chg-${i}-${spot.locationId}`,
+          lat: loc.lat,
+          lng: loc.lng,
+          label: required
+            ? `Required · ${spot.name}`
+            : suggested
+              ? `Suggested · ${spot.name}`
+              : isBackup
+                ? `Backup · ${spot.name}`
+                : spot.name,
+          kind: "charger",
+          badge: required ? "!" : suggested ? "+" : isBackup ? "B" : "C",
+        });
+      }
+    }
+    const billedIds = new Set(
+      chargerMarkers.map((m) => m.id.replace(/^chg-\d+-/, "").replace(/^corridor-/, "")),
+    );
+    let extra = 0;
+    for (const loc of routeChargers) {
+      if (extra >= 18) break;
+      if (billedIds.has(loc.id)) continue;
+      extra += 1;
       chargerMarkers.push({
-        id: `chg-${i}-${spot.locationId}`,
+        id: `corridor-${loc.id}`,
         lat: loc.lat,
         lng: loc.lng,
-        label: required
-          ? `Required · ${spot.name}`
-          : suggested
-            ? `Suggested · ${spot.name}`
-            : isBackup
-              ? `Backup · ${spot.name}`
-              : spot.name,
+        label: loc.short || loc.name,
         kind: "charger",
-        badge: required ? "!" : suggested ? "+" : isBackup ? "B" : "C",
+        badge: (loc.networkId || loc.short || "C").slice(0, 1).toUpperCase(),
       });
     }
-  }
-  const billedIds = new Set(
-    chargerMarkers.map((m) => m.id.replace(/^chg-\d+-/, "").replace(/^corridor-/, "")),
-  );
-  for (const loc of routeChargers) {
-    if (billedIds.has(loc.id)) continue;
-    const onPath = searchRoutes.some((r) => minDistToPathM(loc.lat, loc.lng, r.path) < 32_000);
-    if (!onPath) continue;
-    chargerMarkers.push({
-      id: `corridor-${loc.id}`,
-      lat: loc.lat,
-      lng: loc.lng,
-      label: loc.short || loc.name,
-      kind: "charger",
-      badge: (loc.networkId || loc.short || "C").slice(0, 1).toUpperCase(),
-    });
-  }
-  const mapMarkers: MapMarker[] = [
-    ...stops.map((s, i) => ({
-      id: s.id,
-      lat: s.lat,
-      lng: s.lng,
-      label: s.name,
-      kind: (s.id === "home" || s.name === "Home" ? "home" : "place") as MapMarker["kind"],
-      badge: String(i + 1),
-    })),
-    ...viewLegs
-      .filter((leg) => leg.via)
-      .map((leg) => ({
-        id: leg.to.id,
-        lat: leg.to.lat,
-        lng: leg.to.lng,
-        label: `via ${leg.to.name}`,
-        kind: "charger" as MapMarker["kind"],
-        badge: "⚡",
+    return [
+      ...stops.map((s, i) => ({
+        id: s.id,
+        lat: s.lat,
+        lng: s.lng,
+        label: s.name,
+        kind: (s.id === "home" || s.name === "Home" ? "home" : "place") as MapMarker["kind"],
+        badge: String(i + 1),
       })),
-    ...chargerMarkers,
-  ];
+      ...viewLegs
+        .filter((leg) => leg.via)
+        .map((leg) => ({
+          id: leg.to.id,
+          lat: leg.to.lat,
+          lng: leg.to.lng,
+          label: `via ${leg.to.name}`,
+          kind: "charger" as MapMarker["kind"],
+          badge: "⚡",
+        })),
+      ...chargerMarkers,
+    ];
+  }, [viewLegs, locations, routeChargers, stops]);
 
   const live = elpris?.current
     ? withTillæg(elpris.current.krPerKwh, provider.tillægOre)
