@@ -515,7 +515,7 @@ export function PlanScreen() {
       toast("Add a destination first");
       return;
     }
-    const fallback = name.trim() || stops.map((s) => s.name).join(" → ");
+    const fallback = name.trim() || tripTitle(stops);
     setSaveLabel(fallback);
     setNaming(true);
   }
@@ -746,7 +746,7 @@ export function PlanScreen() {
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder={stops.length >= 2 ? `${stops[0].name} → ${stops[stops.length - 1].name}` : "Name this plan"}
+          placeholder={stops.length >= 2 ? tripTitle(stops) : "Name this plan"}
           className="w-full bg-transparent text-sm font-medium text-foreground outline-none placeholder:text-subtle"
         />
         <div className="mt-3 flex rounded-full bg-surface-2 p-1">
@@ -1861,6 +1861,13 @@ function teslaDestUrl(stop: { lat: number; lng: number }) {
     throw new Error("Destination is missing coordinates");
   }
   return `https://www.tesla.com/navigation?lat=${stop.lat}&lng=${stop.lng}`;
+}
+
+function tripTitle(stops: { name: string }[]) {
+  const start = stops[0]?.name?.trim();
+  const end = stops[stops.length - 1]?.name?.trim();
+  if (start && end && start !== end) return `${start} → ${end}`;
+  return start || end || "";
 }
 
 function isShareCancel(err: unknown) {
