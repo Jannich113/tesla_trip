@@ -3,7 +3,7 @@ import { type ChargeLocation } from "@/lib/charge-locations";
 import { type RouteCharger } from "@/routes/api/chargers";
 import { type RoutedLeg } from "./engine";
 import { seedsAlongPath } from "./seed-chargers";
-import { withRetry } from "./retry";
+import { withRetry, fetchWithTimeout } from "./retry";
 
 function downsample(path: [number, number][], max = 80) {
   if (path.length <= max) return path;
@@ -71,11 +71,11 @@ export function useRouteChargers(routes: RoutedLeg[], radiusKm?: number) {
     const timer = window.setTimeout(() => {
       setLoading(true);
       void withRetry(async () => {
-        const res = await fetch("/api/chargers", {
+        const res = await fetchWithTimeout("/api/chargers", {
           method: "POST",
           headers: { "Content-Type": "application/json", Accept: "application/json" },
           body: JSON.stringify({ paths, radiusKm }),
-        });
+        }, 8000);
         const body = (await res.json()) as { chargers?: RouteCharger[]; error?: string };
         if (!res.ok) throw new Error(body.error || `Chargers ${res.status}`);
         return { rows: (body.chargers ?? []).map(asLocation), warning: body.error };

@@ -34,13 +34,13 @@ describe("retry", () => {
         withRetry(
           async () => {
             n += 1;
-            throw new DOMException("The user aborted a request.", "AbortError");
+            throw new Error("The user cancelled the share");
           },
           { delaysMs: [0, 0] },
         ),
-      (err: unknown) => err instanceof DOMException && err.name === "AbortError",
+      /cancelled/,
     );
     assert.equal(n, 1);
-    assert.equal(isRetryable(new DOMException("x", "AbortError")), false);
+    assert.equal(isRetryable(new Error("The user cancelled the share")), false);
   });
 });

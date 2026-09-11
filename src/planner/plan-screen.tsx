@@ -298,7 +298,16 @@ export function PlanScreen() {
     });
     const byId = new Map(keep.map((l) => [l.id, l]));
     for (const c of routeChargers) byId.set(c.id, c);
-    return [...byId.values()];
+    const all = [...byId.values()];
+    if (all.length <= 48 || !paths.length) return all;
+    return all
+      .map((l) => ({
+        l,
+        d: Math.min(...paths.map((p) => minDistToPathM(l.lat, l.lng, p))),
+      }))
+      .sort((a, b) => a.d - b.d)
+      .slice(0, 48)
+      .map((s) => s.l);
   }, [locationsStored, routeChargers, searchRoutes]);
 
   const driveMinGuess = selectedRoutes.reduce((n, r) => n + r.seconds / 60, 0);
@@ -613,7 +622,7 @@ export function PlanScreen() {
         if (!hit) continue;
         const raw =
           hit.path.length >= 2
-            ? simplifyPath(hit.path, 120)
+            ? simplifyPath(hit.path, 48)
             : ([[stops[i].lat, stops[i].lng], [stops[i + 1].lat, stops[i + 1].lng]] as [number, number][]);
         out.push({
           id: `opt-${mode}-${i}`,

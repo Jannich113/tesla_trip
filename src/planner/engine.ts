@@ -33,7 +33,7 @@ import {
   splitRoutedLeg,
 } from "./insert";
 import { estimateTolls } from "./tolls";
-import { withRetry } from "./retry";
+import { withRetry, fetchWithTimeout } from "./retry";
 
 export { alongFraction, haversineM, minDistToPathM, pathMeters, pickViaOnPath, splitRoutedLeg } from "./insert";
 
@@ -179,7 +179,7 @@ export async function fetchRoute(from: PlanStop, to: PlanStop, mode: LegMode): P
   if (hit) return hit;
   try {
     const body = await withRetry(async () => {
-      const res = await fetch("/api/drive", {
+      const res = await fetchWithTimeout("/api/drive", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({
@@ -187,7 +187,7 @@ export async function fetchRoute(from: PlanStop, to: PlanStop, mode: LegMode): P
           to: { lat: to.lat, lng: to.lng },
           mode,
         }),
-      });
+      }, 8000);
       if (!res.ok) throw new Error(`Route ${res.status}`);
       const json = (await res.json()) as RoutedLeg;
       if (!json.path?.length || !Number.isFinite(json.miles)) throw new Error("Empty route");
@@ -454,23 +454,34 @@ export function pickCharges(opts: {
   const userBand = Math.max(detourKm * 1000, 80);
   const searchBand = Math.max(chargeSearchKm(mode, detourKm, focus) * 1000, userBand);
 
-  const scored = locations.map((loc) => {
-    const distM = minDistToPathM(loc.lat, loc.lng, path);
-    const priced = toPriced(
-      loc,
+  const nearby = locations
+    .map((loc) => ({ loc, distM: minDistToPathM(loc.lat, loc.lng, path) }))
+    .filter(
+      (s) =>
+        s.distM <= Math.max(searchBand, 40_000) ||
+        s.loc.id === preferId ||
+        s.loc.id === backupId,
+    )
+    .sort((a, b) => a.distM - b.distM)
+    .slice(0, 24);
+
+  const scored = nearby.map((s) => ({
+    loc: s.loc,
+    distM: s.distM,
+    priced: toPriced(
+      s.loc,
       kwhNeed,
       acKr,
       hours,
       acKw,
-      distM,
-      distM <= userBand,
+      s.distM,
+      s.distM <= userBand,
       preferCheap,
       clockHhmm,
       maxWaitMin,
       memberships,
-    );
-    return { loc, distM, priced };
-  });
+    ),
+  }));
 
   const extraDriveKr = (distM: number) => {
     const miles = distM / 1609.344;
@@ -533,7 +544,7 @@ export function pickCharges(opts: {
             : `${backupSrc.priced.label} · farther`,
         }
       : null,
-    options: ranked.map((s) => {
+    options: ranked.slice(0, 16).map((s) => {
       const priced = tag(s.priced, s.loc.id);
       return s.priced.inBand ? priced : { ...priced, label: `${priced.label} · farther` };
     }),

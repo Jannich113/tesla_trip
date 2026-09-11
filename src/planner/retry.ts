@@ -1,7 +1,6 @@
 export const NETWORK_RETRY_DELAYS_MS = [250, 800] as const;
 
 export function isRetryable(err: unknown) {
-  if (err instanceof DOMException && err.name === "AbortError") return false;
   if (err instanceof Error && /cancel/i.test(err.message)) return false;
   return true;
 }
@@ -26,6 +25,21 @@ export async function withRetry<T>(
     }
   }
   throw last instanceof Error ? last : new Error("Retry failed");
+}
+
+export async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}, ms = 7000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  try {
+    const parent = init.signal;
+    if (parent) {
+      if (parent.aborted) ctrl.abort();
+      else parent.addEventListener("abort", () => ctrl.abort(), { once: true });
+    }
+    return await fetch(input, { ...init, signal: ctrl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function wait(ms: number) {

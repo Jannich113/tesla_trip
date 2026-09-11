@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import "leaflet/dist/leaflet.css";
 import { cn } from "@/lib/utils";
 
@@ -99,7 +99,7 @@ function prune<T extends { remove: () => void }>(store: Map<string, T>, keep: Se
   }
 }
 
-export function BayMap({
+function BayMapImpl({
   markers,
   routes = [],
   selectedId,
@@ -218,8 +218,8 @@ export function BayMap({
       );
       const selectedRoutes = routes.filter((r) => selectedSet.has(r.id));
       const pins =
-        markers.length > 14
-          ? markers.filter((m) => m.kind !== "charger").concat(markers.filter((m) => m.kind === "charger").slice(0, 8))
+        markers.length > 10
+          ? markers.filter((m) => m.kind !== "charger").concat(markers.filter((m) => m.kind === "charger").slice(0, 6))
           : markers;
 
       const keepRoutes = new Set<string>();
@@ -278,7 +278,6 @@ export function BayMap({
             L.DomEvent.stopPropagation(e);
             onSelectRef.current?.(marker.id);
           });
-          dot.bindTooltip(marker.label, { sticky: true, opacity: 0.92, className: "map-pin-tip", direction: "top" });
           dot.addTo(map);
           dotsRef.current.set(marker.id, dot);
         } else {
@@ -385,3 +384,5 @@ export function BayMap({
     </div>
   );
 }
+
+export const BayMap = memo(BayMapImpl);

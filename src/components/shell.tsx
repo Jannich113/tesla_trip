@@ -94,7 +94,11 @@ export function Dashboard() {
   }, []);
 
   useEffect(() => {
-    const id = window.setInterval(() => tick(), 1000);
+    const id = window.setInterval(() => {
+      const mode = useVehicleStore.getState().mode;
+      if (mode === "parked") return;
+      tick();
+    }, 1000);
     return () => window.clearInterval(id);
   }, [tick]);
 
