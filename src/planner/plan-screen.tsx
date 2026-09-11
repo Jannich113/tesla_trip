@@ -781,48 +781,6 @@ export function PlanScreen() {
                     Avoid motorways, toll gates and road fees
                   </label>
                 ) : null}
-                {row.legs.length ? (
-                  <ol className="mt-2 space-y-1 pl-5 text-xs">
-                    {row.legs.map((leg, i) => (
-                      <li key={`${row.mode}-${i}-${leg.to.id}`}>
-                        {i === 0 ? (
-                          <p className="text-muted">
-                            {leg.from.name}
-                            <span className="text-subtle"> → </span>
-                          </p>
-                        ) : null}
-                        {leg.charge ? (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setAllModes(row.mode);
-                              setSelected(`chg-${row.mode}-${i}-${leg.charge!.locationId}`);
-                            }}
-                            className="flex w-full items-baseline justify-between gap-2 text-left"
-                          >
-                            <span className="min-w-0 truncate font-medium" style={{ color: modeColor(row.mode) }}>
-                              {leg.via ? "via " : ""}
-                              {leg.charge.name}
-                              {leg.needed ? " · required" : leg.suggested ? " · suggested" : ""}
-                            </span>
-                            <span className="shrink-0 tabular-nums text-muted">
-                              {formatNumber(leg.charge.kwh, 0)} kWh · {formatKrValue(leg.charge.kr, 0)} kr
-                            </span>
-                          </button>
-                        ) : null}
-                        {!leg.via ? (
-                          <p className={cn(leg.charge ? "text-subtle" : "text-muted")}>
-                            {leg.to.name}
-                            <span className="text-subtle">
-                              {" "}
-                              · {formatDistance(leg.route.miles, units, 0)} · {minutesToHm(leg.route.seconds / 60)}
-                            </span>
-                          </p>
-                        ) : null}
-                      </li>
-                    ))}
-                  </ol>
-                ) : null}
                 </div>
               </li>
             );
@@ -941,6 +899,68 @@ export function PlanScreen() {
 
       <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
         <p className="text-sm font-medium">Stops</p>
+        <div className="mt-3 space-y-4">
+          {optionRows.map((row) => (
+            <div key={`stops-${row.mode}`}>
+              <p className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide">
+                <span className="size-2 rounded-full" style={{ background: modeColor(row.mode) }} />
+                <span style={{ color: modeColor(row.mode) }}>{modeLabel(row.mode)}</span>
+                {row.totals ? (
+                  <span className="font-normal normal-case tracking-normal text-subtle">
+                    {row.totals.charges
+                      ? `${row.totals.charges} ${row.totals.charges === 1 ? "charge" : "charges"}`
+                      : "no charge"}
+                  </span>
+                ) : null}
+              </p>
+              {row.legs.length ? (
+                <ol className="mt-1.5 space-y-1">
+                  {row.legs.map((leg, i) => (
+                    <li key={`${row.mode}-${i}-${leg.to.id}`} className="text-xs">
+                      {i === 0 ? (
+                        <p className="text-muted">
+                          {leg.from.name}
+                          <span className="text-subtle"> → </span>
+                        </p>
+                      ) : null}
+                      {leg.charge ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAllModes(row.mode);
+                            setSelected(`chg-${row.mode}-${i}-${leg.charge!.locationId}`);
+                          }}
+                          className="flex w-full items-baseline justify-between gap-2 text-left"
+                        >
+                          <span className="min-w-0 truncate font-medium" style={{ color: modeColor(row.mode) }}>
+                            {leg.via ? "via " : ""}
+                            {leg.charge.name}
+                            {leg.needed ? " · required" : leg.suggested ? " · suggested" : ""}
+                          </span>
+                          <span className="shrink-0 tabular-nums text-muted">
+                            {formatNumber(leg.charge.kwh, 0)} kWh · {formatKrValue(leg.charge.kr, 0)} kr
+                          </span>
+                        </button>
+                      ) : null}
+                      {!leg.via ? (
+                        <p className={cn(leg.charge ? "text-subtle" : "text-muted")}>
+                          {leg.to.name}
+                          <span className="text-subtle">
+                            {" "}
+                            · {formatDistance(leg.route.miles, units, 0)} · {minutesToHm(leg.route.seconds / 60)}
+                          </span>
+                        </p>
+                      ) : null}
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <p className="mt-1 text-xs text-subtle">{routing ? "Routing…" : "Add a destination"}</p>
+              )}
+            </div>
+          ))}
+        </div>
+        <p className="mt-5 text-[11px] font-medium uppercase tracking-wide text-muted">Edit plan</p>
         <ol className="mt-2">
           {timeline.map(({ stop, inbound, outbound, via, index: i }) => {
             const userI = outbound?.userIndex ?? inbound?.userIndex ?? Math.max(0, i - 1);
