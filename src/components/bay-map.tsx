@@ -10,6 +10,7 @@ export type MapMarker = {
   kind: "home" | "place" | "charger";
   badge?: string;
   radiusM?: number;
+  color?: string;
 };
 
 export type MapRoute = {
@@ -69,7 +70,7 @@ function overlayKey(
 ) {
   const sel = `${selectedId ?? ""}:${(selectedIds ?? []).join(",")}`;
   const m = markers
-    .map((x) => `${x.id}:${x.lat.toFixed(3)},${x.lng.toFixed(3)}:${x.badge ?? ""}:${x.kind}`)
+    .map((x) => `${x.id}:${x.lat.toFixed(3)},${x.lng.toFixed(3)}:${x.badge ?? ""}:${x.kind}:${x.color ?? ""}`)
     .join("|");
   const r = routes
     .map((x) => {
@@ -81,7 +82,8 @@ function overlayKey(
   return `${sel}#${m}#${r}#${dropping ? 1 : 0}`;
 }
 
-function pinColor(kind: MapMarker["kind"], badge?: string) {
+function pinColor(kind: MapMarker["kind"], badge?: string, color?: string) {
+  if (color) return color;
   if (badge === "!") return "#ff5c5c";
   if (badge === "+") return "#1ecf8a";
   if (kind === "home") return "#c8cdd4";
@@ -259,7 +261,7 @@ export function BayMap({
       for (const marker of pins) {
         keepDots.add(marker.id);
         const selected = selectedSet.has(marker.id);
-        const color = pinColor(marker.kind, marker.badge);
+        const color = pinColor(marker.kind, marker.badge, marker.color);
         let dot = dotsRef.current.get(marker.id);
         if (!dot) {
           dot = L.circleMarker([marker.lat, marker.lng], {

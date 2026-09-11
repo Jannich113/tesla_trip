@@ -78,6 +78,12 @@ const ROUTE_OFFSET_M: Record<LegMode, number> = {
   cheapest: 280,
 };
 
+const CHARGE_OFFSET: Record<LegMode, [number, number]> = {
+  eco: [-0.0016, -0.0009],
+  fastest: [0, 0],
+  cheapest: [0.0016, 0.0009],
+};
+
 function routeKey(
   from: { lat: number; lng: number },
   to: { lat: number; lng: number },
@@ -376,7 +382,7 @@ export function PlanScreen() {
     return LEG_MODES.map((mode) => {
       const optionRoutes = routesFor(pathMode(mode, cheapAvoidFees));
       if (optionRoutes.length !== Math.max(0, stops.length - 1) || stops.length < 2) {
-        return { mode, totals: null as ReturnType<typeof planTotals> | null, kmh: 0, kwhPerMi: 0 };
+        return { mode, totals: null as ReturnType<typeof planTotals> | null, kmh: 0, kwhPerMi: 0, legs: [] as PricedLeg[] };
       }
       const priced = pricePlan({
         ...planArgs,
@@ -392,6 +398,7 @@ export function PlanScreen() {
         totals: planTotals(priced),
         kmh,
         kwhPerMi: interpolateWhPerMi(speedEff, kmh) / 1000,
+        legs: priced,
       };
     });
   }, [routeMap, stops, detours, waits, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc, networkAbo, cheapAvoidFees]);
@@ -421,11 +428,14 @@ export function PlanScreen() {
 
   function onMapSelect(id: string) {
     setSelected(id);
-    const chg = /^chg-(\d+)-(.+)$/.exec(id);
+    const chg = /^chg-(?:(eco|fastest|cheapest)-)?(\d+)-(.+)$/.exec(id);
     if (chg) {
-      const i = Number(chg[1]);
-      const locId = chg[2];
-      const leg = viewLegs[i];
+      const mode = (chg[1] as LegMode | undefined) ?? null;
+      const i = Number(chg[2]);
+      const locId = chg[3];
+      if (mode) setAllModes(mode);
+      const source = mode ? optionRows.find((r) => r.mode === mode)?.legs ?? [] : viewLegs;
+      const leg = source[i];
       if (!leg) return;
       if (leg.backup?.locationId === locId) {
         setPrefer((cur) => ({ ...cur, [i]: locId }));
@@ -455,7 +465,10 @@ export function PlanScreen() {
     const ids = new Set<string>();
     if (!selected) return [] as string[];
     ids.add(selected);
-    const legHit = /^leg-(\d+)$/.exec(selected) ?? /^chg-(\d+)-/.exec(selected);
+    const legHit =
+      /^leg-(\d+)$/.exec(selected) ??
+      /^chg-(?:eco|fastest|cheapest)-(\d+)-/.exec(selected) ??
+      /^chg-(\d+)-/.exec(selected);
     if (legHit) {
       const i = Number(legHit[1]);
       ids.add(`leg-${i}`);
@@ -463,6 +476,10 @@ export function PlanScreen() {
       const leg = viewLegs[i];
       if (leg?.charge) ids.add(`chg-${i}-${leg.charge.locationId}`);
       if (leg?.backup) ids.add(`chg-${i}-${leg.backup.locationId}`);
+      for (const mode of LEG_MODES) {
+        const mleg = optionRows.find((r) => r.mode === mode)?.legs[i];
+        if (mleg?.charge) ids.add(`chg-${mode}-${i}-${mleg.charge.locationId}`);
+      }
       if (stops[i]) ids.add(stops[i].id);
       if (stops[i + 1]) ids.add(stops[i + 1].id);
     }
@@ -474,7 +491,7 @@ export function PlanScreen() {
       if (leg?.backup) ids.add(`chg-${stopIdx - 1}-${leg.backup.locationId}`);
     }
     return [...ids];
-  }, [selected, viewLegs, stops]);
+  }, [selected, viewLegs, stops, optionRows]);
 
   function onSave() {
     const plan = savePlan();
@@ -515,27 +532,31 @@ export function PlanScreen() {
 
   const mapMarkers: MapMarker[] = useMemo(() => {
     const chargerMarkers: MapMarker[] = [];
-    for (const [i, leg] of viewLegs.entries()) {
-      for (const spot of [leg.charge, leg.backup]) {
-        if (!spot) continue;
-        const loc = locations.find((x) => x.id === spot.locationId);
-        if (!loc) continue;
-        const isBackup = leg.backup?.locationId === spot.locationId && leg.charge?.locationId !== spot.locationId;
-        const required = Boolean(!isBackup && leg.needed);
-        const suggested = Boolean(!isBackup && !required && leg.suggested);
+    for (const row of optionRows) {
+      if (!showRoutes[row.mode]) continue;
+      const [dLat, dLng] = CHARGE_OFFSET[row.mode];
+      const color = modeColor(row.mode);
+      for (const [i, leg] of row.legs.entries()) {
+        const spot = leg.charge;
+        const lat = spot
+          ? (locations.find((x) => x.id === spot.locationId)?.lat ?? (leg.via ? leg.to.lat : undefined))
+          : leg.via
+            ? leg.to.lat
+            : undefined;
+        const lng = spot
+          ? (locations.find((x) => x.id === spot.locationId)?.lng ?? (leg.via ? leg.to.lng : undefined))
+          : leg.via
+            ? leg.to.lng
+            : undefined;
+        if (lat == null || lng == null) continue;
         chargerMarkers.push({
-          id: `chg-${i}-${spot.locationId}`,
-          lat: loc.lat,
-          lng: loc.lng,
-          label: required
-            ? `Required · ${spot.name}`
-            : suggested
-              ? `Suggested · ${spot.name}`
-              : isBackup
-                ? `Backup · ${spot.name}`
-                : spot.name,
+          id: spot ? `chg-${row.mode}-${i}-${spot.locationId}` : `via-${row.mode}-${leg.to.id}`,
+          lat: lat + dLat,
+          lng: lng + dLng,
+          label: `${modeLabel(row.mode)} · ${spot?.name ?? leg.to.name}`,
           kind: "charger",
-          badge: required ? "!" : suggested ? "+" : isBackup ? "B" : "C",
+          badge: row.mode === "eco" ? "E" : row.mode === "cheapest" ? "$" : "F",
+          color,
         });
       }
     }
@@ -548,19 +569,9 @@ export function PlanScreen() {
         kind: (s.id === "home" || s.name === "Home" ? "home" : "place") as MapMarker["kind"],
         badge: String(i + 1),
       })),
-      ...viewLegs
-        .filter((leg) => leg.via)
-        .map((leg) => ({
-          id: leg.to.id,
-          lat: leg.to.lat,
-          lng: leg.to.lng,
-          label: `via ${leg.to.name}`,
-          kind: "charger" as MapMarker["kind"],
-          badge: "⚡",
-        })),
       ...chargerMarkers,
     ];
-  }, [viewLegs, locations, stops]);
+  }, [optionRows, locations, stops, showRoutes]);
 
   const live = elpris?.current
     ? withTillæg(elpris.current.krPerKwh, provider.tillægOre)
@@ -769,6 +780,48 @@ export function PlanScreen() {
                     />
                     Avoid motorways, toll gates and road fees
                   </label>
+                ) : null}
+                {row.legs.length ? (
+                  <ol className="mt-2 space-y-1 pl-5 text-xs">
+                    {row.legs.map((leg, i) => (
+                      <li key={`${row.mode}-${i}-${leg.to.id}`}>
+                        {i === 0 ? (
+                          <p className="text-muted">
+                            {leg.from.name}
+                            <span className="text-subtle"> → </span>
+                          </p>
+                        ) : null}
+                        {leg.charge ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAllModes(row.mode);
+                              setSelected(`chg-${row.mode}-${i}-${leg.charge!.locationId}`);
+                            }}
+                            className="flex w-full items-baseline justify-between gap-2 text-left"
+                          >
+                            <span className="min-w-0 truncate font-medium" style={{ color: modeColor(row.mode) }}>
+                              {leg.via ? "via " : ""}
+                              {leg.charge.name}
+                              {leg.needed ? " · required" : leg.suggested ? " · suggested" : ""}
+                            </span>
+                            <span className="shrink-0 tabular-nums text-muted">
+                              {formatNumber(leg.charge.kwh, 0)} kWh · {formatKrValue(leg.charge.kr, 0)} kr
+                            </span>
+                          </button>
+                        ) : null}
+                        {!leg.via ? (
+                          <p className={cn(leg.charge ? "text-subtle" : "text-muted")}>
+                            {leg.to.name}
+                            <span className="text-subtle">
+                              {" "}
+                              · {formatDistance(leg.route.miles, units, 0)} · {minutesToHm(leg.route.seconds / 60)}
+                            </span>
+                          </p>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ol>
                 ) : null}
                 </div>
               </li>
