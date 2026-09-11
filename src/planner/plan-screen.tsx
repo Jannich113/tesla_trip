@@ -190,7 +190,10 @@ export function PlanScreen() {
         jobs.push({ from, to, mode, key: routeKey(from, to, mode) });
       }
     }
-    const missing = jobs.some((job) => !routeMap[job.key]);
+    const missing = jobs.some((job) => {
+      const hit = routeMap[job.key];
+      return !hit || hit.source === "air" || hit.path.length < 8;
+    });
     if (missing) setRouting(true);
     else setRouting(false);
     void (async () => {

@@ -189,25 +189,38 @@ export function cachedRoutes(): Record<string, RoutedLeg> {
 }
 
 export async function fetchRoute(from: PlanStop, to: PlanStop, mode: LegMode): Promise<RoutedLeg> {
-  const key = `${from.lat.toFixed(4)},${from.lng.toFixed(4)}|${to.lat.toFixed(4)},${to.lng.toFixed(4)}|${mode === "cheapest" ? "fastest" : mode}|v3`;
+  const key = `${from.lat.toFixed(4)},${from.lng.toFixed(4)}|${to.lat.toFixed(4)},${to.lng.toFixed(4)}|${mode === "cheapest" ? "fastest" : mode}|v4`;
   const hit = routeCache.get(key);
-  if (hit && hit.source !== "air") return hit;
+  if (hit && hit.source !== "air" && hit.path.length >= 8) return hit;
   try {
     const body = await withRetry(async () => {
       const qs = new URLSearchParams({
         from: `${from.lat.toFixed(4)},${from.lng.toFixed(4)}`,
         to: `${to.lat.toFixed(4)},${to.lng.toFixed(4)}`,
         mode,
-        v: "3",
+        v: "4",
       });
-      const res = await fetchWithTimeout(`/api/drive?${qs}`, {
+      let res = await fetchWithTimeout(`/api/drive?${qs}`, {
         headers: { Accept: "application/json" },
-      }, 8000);
+      }, 20_000);
+      if (!res.ok) {
+        res = await fetchWithTimeout("/api/drive", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({
+            from: { lat: from.lat, lng: from.lng },
+            to: { lat: to.lat, lng: to.lng },
+            mode,
+          }),
+        }, 20_000);
+      }
       if (!res.ok) throw new Error(`Route ${res.status}`);
       const json = (await res.json()) as RoutedLeg;
-      if (!json.path?.length || !Number.isFinite(json.miles)) throw new Error("Empty route");
+      if (json.source === "air" || (json.path?.length ?? 0) < 8 || !Number.isFinite(json.miles)) {
+        throw new Error("Empty route");
+      }
       return json;
-    });
+    }, { delaysMs: [400, 1200] });
     routeCache.set(key, body);
     return body;
   } catch {

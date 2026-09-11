@@ -1,6 +1,6 @@
 import { costingFor, type LegMode } from "./modes";
 import { estimateTolls } from "./tolls";
-import { simplifyPath } from "./polyline";
+import { decodePolyline, simplifyPath } from "./polyline";
 import { noStore, publicCache } from "@/lib/http-cache";
 
 type Stop = { lat: number; lng: number };
@@ -46,12 +46,15 @@ function pickValhallaTrip(
 
 function pathFromShape(shape: { coordinates?: [number, number][] } | string | undefined) {
   const path: [number, number][] = [];
+  if (typeof shape === "string" && shape.length > 4) {
+    return simplifyPath(decodePolyline(shape, 6), 160);
+  }
   if (shape && typeof shape === "object" && Array.isArray(shape.coordinates)) {
     for (const [lng, lat] of shape.coordinates) {
       if (Number.isFinite(lat) && Number.isFinite(lng)) path.push([lat, lng]);
     }
   }
-  return path;
+  return simplifyPath(path, 160);
 }
 
 async function valhalla(from: Stop, to: Stop, mode: LegMode): Promise<DriveRouteJson | null> {
@@ -67,8 +70,8 @@ async function valhalla(from: Stop, to: Stop, mode: LegMode): Promise<DriveRoute
       costing: "auto",
       costing_options: { auto: costing },
       directions_options: { units: "miles" },
-      shape_format: "geojson",
-      alternates: mode === "eco" ? 3 : 2,
+      shape_format: "polyline6",
+      alternates: 0,
     }),
   });
   if (!res.ok) return null;
@@ -128,7 +131,7 @@ async function osrmOnce(from: Stop, to: Stop, mode: LegMode, extra: string): Pro
   const url =
     `https://router.project-osrm.org/route/v1/driving/` +
     `${from.lng},${from.lat};${to.lng},${to.lat}` +
-    `?overview=full&geometries=geojson&alternatives=true${extra}`;
+    `?overview=simplified&geometries=geojson&alternatives=${mode === "eco" ? "true" : "false"}${extra}`;
   const res = await fetch(url, { headers: { Accept: "application/json" } });
   if (!res.ok) return null;
   const body = (await res.json()) as { routes?: OsrmRoute[] };
