@@ -390,8 +390,9 @@ export function pickCharges(opts: {
   speedEff: SpeedEff;
   clockHhmm: string;
   maxWaitMin: number;
+  backupId?: string | null;
 }): { primary: PricedCharge; backup: PricedCharge | null } | null {
-  const { kwhNeed, path, detourKm, mode, locations, acKr, hours, acKw, speedEff, clockHhmm, maxWaitMin } = opts;
+  const { kwhNeed, path, detourKm, mode, locations, acKr, hours, acKw, speedEff, clockHhmm, maxWaitMin, backupId } = opts;
   if (kwhNeed <= 0.05 || !locations.length) return null;
   const preferCheap = mode === "cheapest";
   const userBand = Math.max(detourKm * 1000, 80);
@@ -437,6 +438,9 @@ export function pickCharges(opts: {
   if (!primarySrc) return null;
 
   const backupSrc =
+    (backupId
+      ? scored.find((s) => s.loc.id === backupId && s.loc.id !== primarySrc.loc.id)
+      : null) ??
     inSearch.find((s) => s.loc.id !== primarySrc.loc.id) ??
     outside.find((s) => s.loc.id !== primarySrc.loc.id) ??
     null;
@@ -466,6 +470,7 @@ export function pricePlan(opts: {
   legWhen?: LegWhen[];
   acceptCharge?: boolean[];
   chargeToSoc?: Array<number | null | undefined>;
+  backupIds?: Array<string | null | undefined>;
 }): PricedLeg[] {
   const { stops, modes, detours, routes, usableKwh, locations, hours, acKw, acKr, speedEff } =
     opts;
@@ -532,6 +537,7 @@ export function pricePlan(opts: {
           speedEff,
           clockHhmm: readyAt,
           maxWaitMin,
+          backupId: opts.backupIds?.[i] ?? null,
         })
       : null;
     const charge = pick?.primary ?? null;

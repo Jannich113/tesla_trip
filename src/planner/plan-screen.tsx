@@ -123,6 +123,7 @@ export function PlanScreen() {
   const [prefer, setPrefer] = useState<Record<number, string>>({});
   const [acceptCharge, setAcceptCharge] = useState<Record<number, boolean>>({});
   const [chargeToSoc, setChargeToSoc] = useState<Record<number, number>>({});
+  const [backupLoc, setBackupLoc] = useState<Record<number, string>>({});
   const [showRoutes, setShowRoutes] = useState<Record<LegMode, boolean>>({
     eco: true,
     standard: true,
@@ -191,6 +192,7 @@ export function PlanScreen() {
     setPrefer({});
     setAcceptCharge({});
     setChargeToSoc({});
+    setBackupLoc({});
   }, [stops, detours]);
 
   const carWhPerMi = epaWhPerMi(profile.usableKwh, profile.epaRangeMi);
@@ -246,6 +248,7 @@ export function PlanScreen() {
     legWhen,
     acceptCharge: stops.slice(1).map((_, i) => Boolean(acceptCharge[i])),
     chargeToSoc: stops.slice(1).map((_, i) => chargeToSoc[i] ?? null),
+    backupIds: stops.slice(1).map((_, i) => backupLoc[i] ?? null),
   };
 
   const legs: PricedLeg[] = useMemo(() => {
@@ -255,7 +258,7 @@ export function PlanScreen() {
       modes: activeModes,
       routes: selectedRoutes,
     });
-  }, [stops, activeModes, detours, selectedRoutes, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc]);
+  }, [stops, activeModes, detours, selectedRoutes, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc]);
 
   const viewLegs = useMemo(() => {
     return legs.map((leg, i) => {
@@ -289,7 +292,7 @@ export function PlanScreen() {
         kwhPerMi: interpolateWhPerMi(speedEff, kmh) / 1000,
       };
     });
-  }, [routeMap, stops, detours, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc]);
+  }, [routeMap, stops, detours, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc]);
 
   function addStop(hit: AddressHit) {
     addStopToStore({ name: hit.label.split(",")[0] || hit.label, lat: hit.lat, lng: hit.lng });
@@ -1061,13 +1064,66 @@ export function PlanScreen() {
                             }
                             className="block w-full text-left"
                           >
-                            <ChargeChoice title="Backup" spot={leg.backup} active={false} />
+                            <ChargeChoice
+                              title={backupLoc[i - 1] ? "Backup · manual" : "Backup"}
+                              spot={leg.backup}
+                              active={false}
+                            />
                           </button>
                         ) : (
                           <p className="text-[11px] text-subtle">No backup in this detour</p>
                         )}
+                        <label className="block text-xs text-muted">
+                          Backup location
+                          <select
+                            value={backupLoc[i - 1] ?? ""}
+                            onChange={(e) => {
+                              const id = e.target.value;
+                              setBackupLoc((cur) => {
+                                const next = { ...cur };
+                                if (!id) delete next[i - 1];
+                                else next[i - 1] = id;
+                                return next;
+                              });
+                            }}
+                            className="mt-1 h-9 w-full rounded-full bg-surface-2 px-3 text-xs text-foreground outline-none"
+                          >
+                            <option value="">Auto</option>
+                            {locations
+                              .filter((loc) => loc.id !== leg.charge?.locationId)
+                              .map((loc) => (
+                                <option key={loc.id} value={loc.id}>
+                                  {loc.short || loc.name}
+                                </option>
+                              ))}
+                          </select>
+                        </label>
                       </div>
-                    ) : null}
+                    ) : (
+                      <label className="mt-3 block text-xs text-muted">
+                        Backup location
+                        <select
+                          value={backupLoc[i - 1] ?? ""}
+                          onChange={(e) => {
+                            const id = e.target.value;
+                            setBackupLoc((cur) => {
+                              const next = { ...cur };
+                              if (!id) delete next[i - 1];
+                              else next[i - 1] = id;
+                              return next;
+                            });
+                          }}
+                          className="mt-1 h-9 w-full rounded-full bg-surface-2 px-3 text-xs text-foreground outline-none"
+                        >
+                          <option value="">Auto</option>
+                          {locations.map((loc) => (
+                            <option key={loc.id} value={loc.id}>
+                              {loc.short || loc.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
                       </div>
                     ) : null}
                   </div>
