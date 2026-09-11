@@ -10,6 +10,7 @@ import {
   addMinutesHhmm,
   asDateTime,
   chargeSearchKm,
+  cheapDetourKm,
   chargeFitScore,
   defaultFocus,
   DEFAULT_DETOUR_KM,
@@ -69,6 +70,7 @@ export {
   DEFAULT_MODE_FOCUS,
   pathMode,
   stallKw,
+  cheapDetourKm,
   type DetourKm,
   type LegMode,
   type ModeFocus,
@@ -476,21 +478,27 @@ export function pickCharges(opts: {
   backupId?: string | null;
   preferId?: string | null;
   memberships?: Record<string, boolean>;
+  routeSeconds?: number;
 }): { primary: PricedCharge; backup: PricedCharge | null; options: PricedCharge[] } | null {
   const { kwhNeed, path, detourKm, mode, locations, acKr, hours, acKw, speedEff, clockHhmm, maxWaitMin, backupId, preferId, memberships = {} } = opts;
   const focus = opts.focus ?? defaultFocus(mode);
   if (kwhNeed <= 0.05 || !locations.length) return null;
   const preferCheap = focus === "pris";
   const userBand = Math.max(detourKm * 1000, 80);
-  const searchBand = Math.max(chargeSearchKm(mode, detourKm, focus) * 1000, userBand);
+  const searchBand = Math.max(chargeSearchKm(mode, detourKm, focus, opts.routeSeconds) * 1000, userBand);
+  const maxExtraMin =
+    preferCheap && opts.routeSeconds
+      ? (opts.routeSeconds * 0.15) / 60
+      : Infinity;
 
   const nearby = locations
     .map((loc) => ({ loc, distM: minDistToPathM(loc.lat, loc.lng, path) }))
     .filter(
       (s) =>
-        s.distM <= Math.max(searchBand, 40_000) ||
         s.loc.id === preferId ||
-        s.loc.id === backupId,
+        s.loc.id === backupId ||
+        (s.distM <= Math.max(searchBand, 40_000) &&
+          (s.distM / 1000 / 80) * 60 <= maxExtraMin),
     );
   const locRate = (loc: ChargeLocation) => {
     const id = networkIdFor(loc.kind, loc.networkId);
@@ -664,13 +672,16 @@ export function pricePlan(opts: {
         totalKwh: kwh,
         mode,
         focus,
-        detourKm: job.detourKm,
+        detourKm: mode === "cheapest" ? Math.max(job.detourKm, cheapDetourKm(route.seconds)) : job.detourKm,
         excludeIds: usedVias,
         memberships: opts.memberships,
       };
       const viaLoc =
         pickViaOnPath(viaOpts) ??
-        pickViaOnPath({ ...viaOpts, detourKm: Math.max(job.detourKm, 40) });
+        pickViaOnPath({
+          ...viaOpts,
+          detourKm: Math.max(viaOpts.detourKm, 40),
+        });
       const split = viaLoc ? splitRoutedLeg(route, viaLoc.lat, viaLoc.lng) : null;
       if (viaLoc && split) {
         usedVias.add(viaLoc.id);
@@ -760,7 +771,7 @@ export function pricePlan(opts: {
       ? pickCharges({
           kwhNeed: Math.max(kwhNeed, 5),
           path: route.path,
-          detourKm: job.detourKm,
+          detourKm: mode === "cheapest" ? Math.max(job.detourKm, cheapDetourKm(route.seconds)) : job.detourKm,
           mode,
           focus,
           locations,
@@ -773,6 +784,7 @@ export function pricePlan(opts: {
           backupId: via ? job.to.id.replace(/^via-/, "") : opts.backupIds?.[userIndex] ?? null,
           preferId: opts.preferIds?.[userIndex] ?? null,
           memberships: opts.memberships,
+          routeSeconds: route.seconds,
         })
       : null;
     const charge = pick?.primary ?? null;

@@ -17,6 +17,7 @@ import {
   minutesBetweenDateTime,
   asDateTime,
   waitDelayMin,
+  cheapDetourKm,
   pathMode,
   stallKw,
 } from "./modes.ts";
@@ -58,6 +59,13 @@ describe("leg modes", () => {
     assert.equal(formatWaitCap(0), "0");
     assert.equal(formatWaitCap(30), "30m");
     assert.equal(formatWaitCap(120), "2h");
+  });
+
+  it("cheapest may detour up to 15% of fastest time", () => {
+    assert.equal(cheapDetourKm(2 * 3600), 24);
+    assert.equal(cheapDetourKm(15 * 3600), 80);
+    assert.ok(chargeSearchKm("cheapest", 12, "pris", 2 * 3600) >= 24);
+    assert.ok(chargeSearchKm("cheapest", 12, "pris", 15 * 3600) >= 80);
   });
 
   it("eco and cheapest search farther for chargers than fastest", () => {

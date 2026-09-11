@@ -41,7 +41,7 @@ export function modeLabel(mode: LegMode) {
  */
 export function modeHint(mode: LegMode) {
   if (mode === "eco") return "Avoids motorways, toll gates and road fees as much as possible.";
-  if (mode === "cheapest") return "Lowest charging cost. Optional: also skip motorways and tolls.";
+  if (mode === "cheapest") return "Lowest charging cost. May detour up to 15% extra time for a cheaper stall.";
   return "Motorways and tolls for earliest arrival.";
 }
 
@@ -79,11 +79,22 @@ export function pathMode(mode: LegMode, avoidFees = false): LegMode {
   return "fastest";
 }
 
+/** Extra drive time cheapest may spend vs Fastest to reach a cheaper stall. */
+export const CHEAP_TIME_FRAC = 0.15;
+
+export function cheapDetourKm(routeSeconds: number) {
+  const km = (Math.max(0, routeSeconds) / 3600) * CHEAP_TIME_FRAC * 80;
+  return Math.min(80, Math.max(12, Math.round(km)));
+}
+
 /** Eco is off the motorway — look farther toward services. Cheapest hunts a wider band. */
-export function chargeSearchKm(mode: LegMode, detourKm: number, focus?: ModeFocus) {
+export function chargeSearchKm(mode: LegMode, detourKm: number, focus?: ModeFocus, routeSeconds?: number) {
   const km = Math.max(8, detourKm);
   if (mode === "eco" || focus === "distance") return Math.max(30, Math.round(km * 2.2));
-  if (mode === "cheapest" || focus === "pris") return Math.max(40, Math.round(km * 2.5));
+  if (mode === "cheapest" || focus === "pris") {
+    const timeKm = routeSeconds != null ? cheapDetourKm(routeSeconds) : 40;
+    return Math.max(km, timeKm);
+  }
   return Math.max(18, km);
 }
 
