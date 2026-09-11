@@ -733,12 +733,19 @@ export function PlanScreen() {
         <p className="text-sm font-medium">Stops</p>
         <ol className="mt-2">
           {stops.map((stop, i) => {
-            const leg = i > 0 ? viewLegs[i - 1] : null;
+            const inbound = i > 0 ? viewLegs[i - 1] : null;
+            const outbound = viewLegs[i] ?? null;
+            const leg = inbound;
             const open = Boolean(openStops[stop.id]);
             const selectedHere =
               selected === stop.id ||
               selected === `leg-${i - 1}` ||
               Boolean(selected?.startsWith(`chg-${i - 1}-`));
+            const leftPct = inbound ? inbound.arriveSoc : soc;
+            const chargeLeg = outbound;
+            const chargeTo =
+              chargeLeg?.advice && chargeLeg.charge ? chargeLeg.startSoc : null;
+            const chargeRequired = Boolean(chargeLeg?.needed);
             return (
               <li
                 key={stop.id}
@@ -761,26 +768,32 @@ export function PlanScreen() {
                     </span>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm">{stop.name}</p>
-                      {leg ? (
-                        <>
-                          <p className="text-xs text-muted">
-                            {modeLabel(leg.mode)}
-                            <span className="tabular-nums"> · {formatNumber(leg.arriveSoc, 0)}%</span>
-                            {leg.needed ? (
-                              <span className="font-medium text-amber-300"> · required</span>
-                            ) : leg.suggested ? (
-                              <span className="font-medium text-emerald-400"> · suggested</span>
-                            ) : null}
-                          </p>
-                          {!open && leg.backup ? (
-                            <p className="truncate text-[11px] text-subtle">Backup · {leg.backup.name}</p>
-                          ) : !open && leg.charge ? (
-                            <p className="truncate text-[11px] text-subtle">{leg.charge.name}</p>
-                          ) : null}
-                        </>
-                      ) : (
-                        <p className="text-xs text-muted">{formatNumber(soc, 0)}% now</p>
-                      )}
+                      <p className="text-xs text-muted">
+                        <span className="tabular-nums">
+                          {formatNumber(leftPct, 0)}%{i === 0 ? " now" : " left"}
+                        </span>
+                        {chargeTo != null ? (
+                          <span
+                            className={cn(
+                              "tabular-nums",
+                              chargeRequired ? "font-medium text-amber-300" : "font-medium text-emerald-400",
+                            )}
+                          >
+                            {" · "}
+                            charge to {formatNumber(chargeTo, 0)}%
+                            {chargeRequired ? " required" : " recommended"}
+                          </span>
+                        ) : null}
+                      </p>
+                      {!open && inbound?.backup ? (
+                        <p className="truncate text-[11px] text-subtle">Backup · {inbound.backup.name}</p>
+                      ) : !open && inbound?.charge ? (
+                        <p className="truncate text-[11px] text-subtle">{inbound.charge.name}</p>
+                      ) : !open && outbound?.backup ? (
+                        <p className="truncate text-[11px] text-subtle">Backup · {outbound.backup.name}</p>
+                      ) : !open && outbound?.charge ? (
+                        <p className="truncate text-[11px] text-subtle">{outbound.charge.name}</p>
+                      ) : null}
                     </div>
                     {i > 0 ? (
                       <ChevronDown className={cn("size-4 shrink-0 text-muted transition", open && "rotate-180")} />
