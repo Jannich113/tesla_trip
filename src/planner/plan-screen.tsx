@@ -99,6 +99,12 @@ export function PlanScreen() {
   const [hits, setHits] = useState<AddressHit[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [prefer, setPrefer] = useState<Record<number, string>>({});
+  const [showRoutes, setShowRoutes] = useState<Record<LegMode, boolean>>({
+    eco: true,
+    standard: true,
+    fastest: true,
+    cheapest: false,
+  });
   const { data: elpris, error: elprisError, loading: elprisLoading } = useLiveElpris(area);
 
   useEffect(() => {
@@ -277,6 +283,59 @@ export function PlanScreen() {
     toast(`Added ${loc.short || loc.name} as a stop`);
   }
 
+  function onMapSelect(id: string) {
+    setSelected(id);
+    const chg = /^chg-(\d+)-(.+)$/.exec(id);
+    if (chg) {
+      const i = Number(chg[1]);
+      const locId = chg[2];
+      const leg = viewLegs[i];
+      if (!leg) return;
+      if (leg.backup?.locationId === locId) {
+        setPrefer((cur) => ({ ...cur, [i]: locId }));
+        toast("Backup charger selected");
+      } else if (leg.charge?.locationId === locId) {
+        setPrefer((cur) => {
+          const next = { ...cur };
+          delete next[i];
+          return next;
+        });
+      }
+      return;
+    }
+    const opt = /^opt-(eco|standard|fastest|cheapest)-(\d+)$/.exec(id);
+    if (opt) {
+      const mode = opt[1] as LegMode;
+      const i = Number(opt[2]);
+      setLegMode(i, mode);
+      setSelected(`leg-${i}`);
+    }
+  }
+
+  const selectedIds = (() => {
+    const ids = new Set<string>();
+    if (!selected) return [] as string[];
+    ids.add(selected);
+    const legHit = /^leg-(\d+)$/.exec(selected) ?? /^chg-(\d+)-/.exec(selected);
+    if (legHit) {
+      const i = Number(legHit[1]);
+      ids.add(`leg-${i}`);
+      const leg = viewLegs[i];
+      if (leg?.charge) ids.add(`chg-${i}-${leg.charge.locationId}`);
+      if (leg?.backup) ids.add(`chg-${i}-${leg.backup.locationId}`);
+      if (stops[i]) ids.add(stops[i].id);
+      if (stops[i + 1]) ids.add(stops[i + 1].id);
+    }
+    const stopIdx = stops.findIndex((s) => s.id === selected);
+    if (stopIdx > 0) {
+      ids.add(`leg-${stopIdx - 1}`);
+      const leg = viewLegs[stopIdx - 1];
+      if (leg?.charge) ids.add(`chg-${stopIdx - 1}-${leg.charge.locationId}`);
+      if (leg?.backup) ids.add(`chg-${stopIdx - 1}-${leg.backup.locationId}`);
+    }
+    return [...ids];
+  })();
+
   function onSave() {
     const plan = savePlan();
     if (!plan) {
@@ -286,14 +345,32 @@ export function PlanScreen() {
     toast(`Saved ${plan.name}`);
   }
 
-  const mapRoutes: MapRoute[] = viewLegs.map((leg, i) => ({
-    id: `leg-${i}`,
-    from: [leg.from.lat, leg.from.lng],
-    to: [leg.to.lat, leg.to.lng],
-    weight: 3,
-    path: leg.route.path,
-    color: modeColor(leg.mode),
-  }));
+  const mapRoutes: MapRoute[] = [];
+  const seenPath = new Set<string>();
+  function addRoute(id: string, from: PlanStop, to: PlanStop, route: RoutedLeg, color: string, weight: number) {
+    const key = route.path.map((p) => p.join(",")).join("|") || `${from.id}-${to.id}`;
+    if (weight < 3 && seenPath.has(key)) return;
+    if (weight >= 3) seenPath.add(key);
+    mapRoutes.push({
+      id,
+      from: [from.lat, from.lng],
+      to: [to.lat, to.lng],
+      weight,
+      path: route.path,
+      color,
+    });
+  }
+  for (const [i, leg] of viewLegs.entries()) {
+    addRoute(`leg-${i}`, leg.from, leg.to, leg.route, modeColor(leg.mode), 3);
+  }
+  for (const mode of LEG_MODES) {
+    if (!showRoutes[mode]) continue;
+    const option = routesFor(mode);
+    if (option.length !== stops.length - 1) continue;
+    for (let i = 0; i < option.length; i++) {
+      addRoute(`opt-${mode}-${i}`, stops[i], stops[i + 1], option[i], modeColor(mode), 1);
+    }
+  }
 
   const chargerMarkers: MapMarker[] = [];
   for (const [i, leg] of viewLegs.entries()) {
@@ -580,16 +657,38 @@ export function PlanScreen() {
         </section>
       ) : null}
 
-      <BayMap
-        markers={mapMarkers}
-        routes={mapRoutes}
-        selectedId={selected}
-        onSelect={setSelected}
-        onDrop={dropStop}
-        dropping
-        caption={routing ? "Routing…" : "Tap map to add a stop"}
-        hidden={!shareLocation}
-      />
+      <div className="space-y-2">
+        <div className="flex flex-wrap gap-1">
+          {LEG_MODES.map((mode) => {
+            const on = showRoutes[mode];
+            return (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setShowRoutes((cur) => ({ ...cur, [mode]: !cur[mode] }))}
+                className={cn(
+                  "h-8 rounded-full px-3 text-[11px] font-medium",
+                  on ? "text-background" : "bg-surface-2 text-muted",
+                )}
+                style={on ? { background: modeColor(mode) } : undefined}
+              >
+                {modeLabel(mode)}
+              </button>
+            );
+          })}
+        </div>
+        <BayMap
+          markers={mapMarkers}
+          routes={mapRoutes}
+          selectedId={selected}
+          selectedIds={selectedIds}
+          onSelect={onMapSelect}
+          onDrop={dropStop}
+          dropping
+          caption={routing ? "Routing…" : "Tap a leg or charger · tap map to add a stop"}
+          hidden={!shareLocation}
+        />
+      </div>
 
       <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
         <p className="text-sm font-medium">Stops</p>
@@ -597,8 +696,20 @@ export function PlanScreen() {
           {stops.map((stop, i) => {
             const leg = i > 0 ? viewLegs[i - 1] : null;
             return (
-              <li key={stop.id} className="border-b border-border py-3 last:border-0">
-                <div className="flex items-center gap-3">
+              <li
+                key={stop.id}
+                className={cn(
+                  "border-b border-border py-3 last:border-0",
+                  (selected === stop.id ||
+                    selected === `leg-${i - 1}` ||
+                    selected?.startsWith(`chg-${i - 1}-`)) &&
+                    "rounded-xl bg-surface-2/80 px-2",
+                )}
+              >
+                <div
+                  className="flex items-center gap-3"
+                  onClick={() => setSelected(i > 0 ? `leg-${i - 1}` : stop.id)}
+                >
                   <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-surface-2 text-xs tabular-nums text-muted">
                     {i + 1}
                   </span>

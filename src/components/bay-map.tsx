@@ -144,12 +144,15 @@ export function BayMap({
         pts.forEach((p) => bounds.push(p));
         L.polyline(pts, {
           color: route.color || "#1ecf8a",
-          opacity: selected ? 0.95 : selectedSet.size ? 0.16 : 0.28,
-          weight: selected ? 4 : 1.6 + (route.weight / maxW) * 2.4,
+          opacity: selected ? 0.95 : selectedSet.size ? 0.22 : route.weight >= 3 ? 0.7 : 0.45,
+          weight: selected ? 4.5 : 1.6 + (route.weight / maxW) * 2.4,
           lineCap: "round",
           interactive: true,
         })
-          .on("click", () => onSelectRef.current?.(route.id))
+          .on("click", (e) => {
+            L.DomEvent.stopPropagation(e);
+            onSelectRef.current?.(route.id);
+          })
           .addTo(group);
       }
 
@@ -187,7 +190,10 @@ export function BayMap({
           }),
           zIndexOffset: selected ? 600 : 0,
         })
-          .on("click", () => onSelectRef.current?.(marker.id))
+          .on("click", (e) => {
+            L.DomEvent.stopPropagation(e);
+            onSelectRef.current?.(marker.id);
+          })
           .addTo(group);
       }
 
