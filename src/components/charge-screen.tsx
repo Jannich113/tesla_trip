@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { PeriodPills } from "@/components/period-pills";
-import { formatUsd, laDayString, periodCaption, tripTotals, type Period, formatNumber } from "@/lib/history";
+import { formatUsd, laDayString, periodCaption, tripTotals, type Period } from "@/lib/history";
+import { formatNumber } from "@/lib/vehicle";
 import { totalsFor, useChargeStore } from "@/store/charge-store";
 
 export function ChargeScreen() {
