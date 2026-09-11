@@ -32,7 +32,7 @@ import { countryProfile } from "./country-profiles.ts";
 describe("leg modes", () => {
   it("eco is shortest + avoids highways and tolls", () => {
     const c = costingFor("eco");
-    assert.equal(c.shortest, true);
+    assert.equal(c.shortest, false);
     assert.equal(c.use_highways, 0);
     assert.equal(c.use_tolls, 0);
   });

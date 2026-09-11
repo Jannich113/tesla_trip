@@ -301,10 +301,11 @@ export function hoursFrom<T extends { hour: string; ymd?: string }>(hours: T[], 
 export function costingFor(mode: LegMode): AutoCosting {
   if (mode === "eco") {
     return {
-      shortest: true,
+      shortest: false,
       use_highways: 0,
       use_tolls: 0,
-      use_ferry: 0.15,
+      use_ferry: 0.2,
+      top_speed: 90,
     };
   }
   return {

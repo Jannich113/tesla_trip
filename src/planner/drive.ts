@@ -152,7 +152,7 @@ async function osrmOnce(from: Stop, to: Stop, mode: LegMode, extra: string): Pro
 }
 
 async function osrm(from: Stop, to: Stop, mode: LegMode): Promise<DriveRouteJson | null> {
-  const extras = mode === "eco" ? ["&exclude=motorway,toll", "&exclude=motorway", ""] : [""];
+  const extras = mode === "eco" ? ["&exclude=motorway,toll", "&exclude=motorway"] : [""];
   for (const extra of extras) {
     const routed = await osrmOnce(from, to, mode, extra).catch(() => null);
     if (routed) return routed;
@@ -164,7 +164,11 @@ function pickRouted(mode: LegMode, routes: DriveRouteJson[]): DriveRouteJson | n
   const list = routes.filter((r) => r.path.length >= 2 && r.miles > 0);
   if (!list.length) return null;
   if (mode === "eco") {
-    return list.reduce((best, r) => {
+    // Valhalla "avoid highways" still returns the motorway because it is
+    // shortest. Prefer an OSRM motorway/toll-excluded corridor when we have one.
+    const osrm = list.filter((r) => r.source === "osrm");
+    const pool = osrm.length ? osrm : list;
+    return pool.reduce((best, r) => {
       const rt = r.tollKr ?? 0;
       const bt = best.tollKr ?? 0;
       if (rt !== bt) return rt < bt ? r : best;
