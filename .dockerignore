@@ -1,0 +1,12 @@
+.git
+.nitro
+.output
+.tanstack
+node_modules
+screenshots
+artifacts
+attachments
+dist
+*.log
+.env
+.env.*
