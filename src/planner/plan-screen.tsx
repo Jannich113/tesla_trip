@@ -44,7 +44,7 @@ import { HOME_USD_PER_KWH } from "@/lib/history";
 import { useChargeStore } from "@/store/charge-store";
 import { useElprisStore } from "@/store/elpris-store";
 import { useLiveElpris } from "./use-live-elpris";
-import { EU_NETWORKS } from "./networks";
+import { EU_NETWORKS, roamExtra, roamRate } from "./networks";
 import { useVehicleProfile } from "@/hooks/use-vehicle-profile";
 import { useVehicleStore } from "@/store/vehicle-store";
 
@@ -1181,6 +1181,14 @@ function NetworksPanel({
   abo: Record<string, boolean>;
   onToggle: (id: string, on: boolean) => void;
 }) {
+  const rows = [...EU_NETWORKS].sort((a, b) => {
+    const ae = roamExtra(a, Boolean(abo[a.id]));
+    const be = roamExtra(b, Boolean(abo[b.id]));
+    if (ae == null && be == null) return a.name.localeCompare(b.name);
+    if (ae == null) return 1;
+    if (be == null) return -1;
+    return be - ae;
+  });
   return (
     <section className="space-y-3">
       <p className="text-sm text-muted">
@@ -1188,10 +1196,60 @@ function NetworksPanel({
         you have that membership — trip cost uses the cheaper kWh. Monthly fees stay out of the
         route total.
       </p>
+      <div className="overflow-hidden rounded-xl bg-surface shadow-[var(--shadow-border)]">
+        <p className="px-4 pt-4 text-[11px] font-medium uppercase tracking-wide text-muted">
+          Roaming vs own
+        </p>
+        <table className="mt-2 w-full text-left text-xs">
+          <thead className="text-[11px] uppercase tracking-wide text-subtle">
+            <tr>
+              <th className="px-4 py-2 font-medium">Network</th>
+              <th className="px-2 py-2 font-medium">Own</th>
+              <th className="px-2 py-2 font-medium">Roam</th>
+              <th className="px-4 py-2 text-right font-medium">Extra</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((n) => {
+              const on = Boolean(abo[n.id]);
+              const own = on ? n.aboKr : n.spotKr;
+              const roam = roamRate(n, on);
+              const extra = roamExtra(n, on);
+              return (
+                <tr key={n.id} className="border-t border-border">
+                  <td className="px-4 py-2">{n.name}</td>
+                  <td className="px-2 py-2 tabular-nums text-muted">
+                    {n.unlimited && on ? "0" : formatKrPerKwh(own, 2)}
+                  </td>
+                  <td className="px-2 py-2 tabular-nums text-muted">
+                    {roam == null ? "own only" : formatKrPerKwh(roam, 2)}
+                  </td>
+                  <td
+                    className={cn(
+                      "px-4 py-2 text-right tabular-nums",
+                      extra == null
+                        ? "text-subtle"
+                        : extra > 0.15
+                          ? "text-amber-300"
+                          : extra > 0
+                            ? "text-muted"
+                            : "text-emerald-400",
+                    )}
+                  >
+                    {extra == null ? "—" : `${extra > 0 ? "+" : ""}${formatKrPerKwh(extra, 2)}`}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
       <ul className="space-y-2">
         {EU_NETWORKS.map((n) => {
           const on = Boolean(abo[n.id]);
           const rate = on ? n.aboKr : n.spotKr;
+          const roam = roamRate(n, on);
+          const extra = roamExtra(n, on);
           return (
             <li key={n.id} className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
               <div className="flex items-start justify-between gap-3">
@@ -1220,7 +1278,11 @@ function NetworksPanel({
               </p>
               <p className="mt-1 text-sm tabular-nums">
                 Using {n.unlimited && on ? "0 kr/kWh" : formatKrPerKwh(rate, 2)}
+                {roam == null
+                  ? " · no roam"
+                  : ` · roam ${formatKrPerKwh(roam, 2)}${extra != null && extra !== 0 ? ` (${extra > 0 ? "+" : ""}${formatKrPerKwh(extra, 2)})` : ""}`}
               </p>
+              <p className="mt-1 text-[11px] text-subtle">{n.roamNote}</p>
               <p className="mt-1 text-[11px] text-subtle">{n.note}</p>
             </li>
           );

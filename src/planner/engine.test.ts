@@ -16,7 +16,7 @@ import {
   asDateTime,
   waitDelayMin,
 } from "./modes.ts";
-import { rateForNetwork, networkIdFor } from "./networks.ts";
+import { rateForNetwork, networkIdFor, roamExtra, EU_NETWORKS } from "./networks.ts";
 
 describe("leg modes", () => {
   it("eco is shortest + avoids highways and tolls", () => {
@@ -136,5 +136,12 @@ describe("leg modes", () => {
     assert.ok(rateForNetwork("ionity", false)! > rateForNetwork("ionity", true)!);
     assert.equal(rateForNetwork("clever", true), 0);
     assert.ok(rateForNetwork("clever", false)! > 1);
+  });
+
+  it("roaming extra is on eMSPs, not Tesla or Fastned", () => {
+    const tesla = EU_NETWORKS.find((n) => n.id === "tesla")!;
+    const enbw = EU_NETWORKS.find((n) => n.id === "enbw")!;
+    assert.equal(roamExtra(tesla, true), null);
+    assert.ok(roamExtra(enbw, true)! > 1);
   });
 });
