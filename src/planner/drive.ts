@@ -1,6 +1,7 @@
 import { costingFor, type LegMode } from "./modes";
 import { estimateTolls } from "./tolls";
 import { decodePolyline, simplifyPath } from "./polyline";
+import { haversineM } from "./insert";
 import { noStore, publicCache } from "@/lib/http-cache";
 
 type Stop = { lat: number; lng: number };
@@ -45,16 +46,30 @@ function pickValhallaTrip(
 }
 
 function pathFromShape(shape: { coordinates?: [number, number][] } | string | undefined) {
-  const path: [number, number][] = [];
   if (typeof shape === "string" && shape.length > 4) {
-    return simplifyPath(decodePolyline(shape, 6), 160);
+    for (const prec of [6, 5]) {
+      const decoded = decodePolyline(shape, prec);
+      if (decoded.length >= 8) return simplifyPath(decoded, 160);
+    }
+    return [];
   }
+  const path: [number, number][] = [];
   if (shape && typeof shape === "object" && Array.isArray(shape.coordinates)) {
     for (const [lng, lat] of shape.coordinates) {
       if (Number.isFinite(lat) && Number.isFinite(lng)) path.push([lat, lng]);
     }
   }
   return simplifyPath(path, 160);
+}
+
+function anchored(path: [number, number][], from: Stop, to: Stop) {
+  if (path.length < 8) return false;
+  const a = path[0];
+  const b = path[path.length - 1];
+  return (
+    haversineM({ lat: a[0], lng: a[1] }, from) < 50_000 &&
+    haversineM({ lat: b[0], lng: b[1] }, to) < 50_000
+  );
 }
 
 async function valhalla(from: Stop, to: Stop, mode: LegMode): Promise<DriveRouteJson | null> {
@@ -230,7 +245,10 @@ export async function handleDriveRequest(request: Request): Promise<Response> {
       valhalla(from, to, mode).catch(() => null),
       osrm(from, to, mode).catch(() => null),
     ]);
-    const routed = pickRouted(mode, [v, o].filter((r): r is DriveRouteJson => Boolean(r)));
+    const routed = pickRouted(
+      mode,
+      [v, o].filter((r): r is DriveRouteJson => Boolean(r && anchored(r.path, from, to))),
+    );
     if (!routed) {
       return Response.json({ error: "No route" }, { status: 502, headers: noStore });
     }

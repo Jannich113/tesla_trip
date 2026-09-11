@@ -345,9 +345,14 @@ export const usePlanStore = create<PlanStore>()(
         seq: s.seq,
       }),
       onRehydrateStorage: () => (state) => {
-        if (state?.routeCache) primeRouteCache(state.routeCache);
-        for (const plan of state?.saved ?? []) {
-          if (plan.routes) primeRouteCache(plan.routes);
+        if (!state) return;
+        state.routeCache = slimRoutes(state.routeCache) ?? {};
+        primeRouteCache(state.routeCache);
+        for (const plan of state.saved ?? []) {
+          if (plan.routes) {
+            plan.routes = slimRoutes(plan.routes);
+            if (plan.routes) primeRouteCache(plan.routes);
+          }
         }
       },
     },
