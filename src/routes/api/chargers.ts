@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { noStore } from "@/lib/http-cache";
 import { env } from "@/lib/env.server";
 import { haversineM } from "@/planner/insert";
 import { isDcStation, networkFromOperator, networkFromOsmTags } from "@/planner/osm-operator";
@@ -294,7 +295,7 @@ export const Route = createFileRoute("/api/chargers")({
             .map((p) => downsample((p ?? []).filter((pt) => Number.isFinite(pt[0]) && Number.isFinite(pt[1]))))
             .filter((p) => p.length >= 2)
             .slice(0, 6);
-          if (!rawPaths.length) return Response.json({ chargers: [], source: "none" });
+          if (!rawPaths.length) return Response.json({ chargers: [], source: "none" }, { headers: noStore });
           const asked = Number(body.radiusKm);
           const chunks = await Promise.all(rawPaths.map((path) => searchCorridor(path, asked)));
           let chargers: RouteCharger[] = [];
@@ -323,11 +324,11 @@ export const Route = createFileRoute("/api/chargers")({
             corridors: rawPaths.length,
             bufferKm,
             updatedAt: new Date().toISOString(),
-          });
+          }, { headers: noStore });
         } catch (err) {
           return Response.json(
             { error: err instanceof Error ? err.message : "charger search failed", chargers: [] },
-            { status: 502 },
+            { status: 502, headers: noStore },
           );
         }
       },

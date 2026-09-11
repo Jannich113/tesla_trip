@@ -1,6 +1,7 @@
 import { costingFor, type LegMode } from "./modes";
 import { estimateTolls } from "./tolls";
 import { simplifyPath } from "./polyline";
+import { noStore, publicCache } from "@/lib/http-cache";
 
 type Stop = { lat: number; lng: number };
 
@@ -177,36 +178,58 @@ function pickRouted(mode: LegMode, routes: DriveRouteJson[]): DriveRouteJson | n
   return valhalla ?? list[0];
 }
 
+function parsePoint(raw: string | null): Stop | null {
+  if (!raw) return null;
+  const [lat, lng] = raw.split(",").map(Number);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return { lat, lng };
+}
+
+function parseMode(raw: string | null | undefined): LegMode {
+  return raw === "eco" || raw === "cheapest" || raw === "fastest" ? raw : "fastest";
+}
+
+async function readDriveInput(request: Request): Promise<{ from: Stop; to: Stop; mode: LegMode } | { error: string }> {
+  if (request.method === "GET") {
+    const url = new URL(request.url);
+    const from = parsePoint(url.searchParams.get("from"));
+    const to = parsePoint(url.searchParams.get("to"));
+    if (!from || !to) return { error: "Need two points" };
+    return { from, to, mode: parseMode(url.searchParams.get("mode")) };
+  }
+  const body = (await request.json()) as { from?: Stop; to?: Stop; mode?: LegMode };
+  const from = body.from;
+  const to = body.to;
+  if (
+    !from ||
+    !to ||
+    !Number.isFinite(from.lat) ||
+    !Number.isFinite(from.lng) ||
+    !Number.isFinite(to.lat) ||
+    !Number.isFinite(to.lng)
+  ) {
+    return { error: "Need two points" };
+  }
+  return { from, to, mode: parseMode(body.mode) };
+}
+
 export async function handleDriveRequest(request: Request): Promise<Response> {
   try {
-    const body = (await request.json()) as {
-      from?: Stop;
-      to?: Stop;
-      mode?: LegMode;
-    };
-    const from = body.from;
-    const to = body.to;
-    const mode = body.mode === "eco" || body.mode === "cheapest" || body.mode === "fastest" ? body.mode : "fastest";
-    if (
-      !from ||
-      !to ||
-      !Number.isFinite(from.lat) ||
-      !Number.isFinite(from.lng) ||
-      !Number.isFinite(to.lat) ||
-      !Number.isFinite(to.lng)
-    ) {
-      return Response.json({ error: "Need two points" }, { status: 400 });
+    const input = await readDriveInput(request);
+    if ("error" in input) {
+      return Response.json({ error: input.error }, { status: 400, headers: noStore });
     }
+    const { from, to, mode } = input;
     const [v, o] = await Promise.all([
       valhalla(from, to, mode).catch(() => null),
       osrm(from, to, mode).catch(() => null),
     ]);
     const routed = pickRouted(mode, [v, o].filter((r): r is DriveRouteJson => Boolean(r)));
     if (!routed) {
-      return Response.json({ error: "No route" }, { status: 502 });
+      return Response.json({ error: "No route" }, { status: 502, headers: noStore });
     }
-    return Response.json(routed);
+    return Response.json(routed, { headers: publicCache(3600, 6 * 3600) });
   } catch {
-    return Response.json({ error: "Routing failed" }, { status: 500 });
+    return Response.json({ error: "Routing failed" }, { status: 500, headers: noStore });
   }
 }

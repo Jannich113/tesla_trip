@@ -193,14 +193,13 @@ export async function fetchRoute(from: PlanStop, to: PlanStop, mode: LegMode): P
   if (hit && hit.source !== "air") return hit;
   try {
     const body = await withRetry(async () => {
-      const res = await fetchWithTimeout("/api/drive", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({
-          from: { lat: from.lat, lng: from.lng },
-          to: { lat: to.lat, lng: to.lng },
-          mode,
-        }),
+      const qs = new URLSearchParams({
+        from: `${from.lat.toFixed(4)},${from.lng.toFixed(4)}`,
+        to: `${to.lat.toFixed(4)},${to.lng.toFixed(4)}`,
+        mode,
+      });
+      const res = await fetchWithTimeout(`/api/drive?${qs}`, {
+        headers: { Accept: "application/json" },
       }, 8000);
       if (!res.ok) throw new Error(`Route ${res.status}`);
       const json = (await res.json()) as RoutedLeg;

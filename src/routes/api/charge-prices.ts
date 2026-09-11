@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { noStore, publicCache } from "@/lib/http-cache";
 import { type ChargePricesResponse } from "@/planner/charge-prices";
 import { COUNTRY_PROFILES } from "@/planner/country-profiles";
 import { CATALOG_FX, NETWORK_NATIVE, toDkk, type FxTable } from "@/planner/charge-fx";
@@ -68,14 +69,12 @@ export const Route = createFileRoute("/api/charge-prices")({
           const force = new URL(request.url).searchParams.get("refresh") === "1";
           const body = await gather(force);
           return Response.json(body, {
-            headers: {
-              "Cache-Control": force ? "no-store" : "public, max-age=300",
-            },
+            headers: force ? noStore : publicCache(300, 3600),
           });
         } catch (err) {
           return Response.json(
             { error: err instanceof Error ? err.message : "charge prices failed" },
-            { status: 502 },
+            { status: 502, headers: noStore },
           );
         }
       },

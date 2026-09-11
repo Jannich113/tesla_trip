@@ -11,7 +11,13 @@ export const Route = createFileRoute("/api/tesla/callback")({
         const result = code && state ? await completeOwnerLink(code, state) : "denied";
         const dest = new URL("/", url.origin);
         dest.searchParams.set("tesla", result ?? "error");
-        return Response.redirect(dest.toString(), 302);
+        return new Response(null, {
+          status: 302,
+          headers: {
+            Location: dest.toString(),
+            "Cache-Control": "private, no-store",
+          },
+        });
       },
     },
   },
