@@ -37,6 +37,7 @@ import {
   pricePlan,
   remainingHours,
   SPEED_KMH,
+  splitDateTime,
 } from "./engine";
 import { usePlanStore } from "./store";
 import { withRetry } from "./retry";
@@ -977,10 +978,13 @@ export function PlanScreen() {
                   <p className="truncate text-sm">{plan.name}</p>
                   <p className="text-xs text-muted">
                     {plan.startAt || plan.when
-                      ? formatDateTime(plan.startAt || plan.when)
+                      ? `Start ${formatPlanDate(plan.startAt || plan.when)}`
                       : `${plan.stops.length} stops`}
-                    {plan.min != null && Number.isFinite(plan.min) ? ` · ${minutesToHm(plan.min)}` : ""}
-                    {plan.kr != null && Number.isFinite(plan.kr) ? ` · ${formatKrValue(plan.kr, 0)} kr` : ""}
+                  </p>
+                  <p className="text-xs text-muted">
+                    {plan.min != null && Number.isFinite(plan.min) ? minutesToHm(plan.min) : "—"}
+                    <span className="text-subtle"> · </span>
+                    {plan.kr != null && Number.isFinite(plan.kr) ? `${formatKrValue(plan.kr, 0)} kr` : "—"}
                   </p>
                   <p className="truncate text-[11px] text-subtle">
                     {plan.stops.map((s) => s.name).join(" → ")}
@@ -1880,6 +1884,12 @@ function tripTitle(stops: { name: string }[]) {
   const end = stops[stops.length - 1]?.name?.trim();
   if (start && end && start !== end) return `${start} → ${end}`;
   return start || end || "";
+}
+
+function formatPlanDate(value: string) {
+  const { ymd, hhmm } = splitDateTime(value);
+  const [y, m, d] = ymd.split("-");
+  return `${d}/${m}/${y} ${hhmm}`;
 }
 
 function isShareCancel(err: unknown) {
