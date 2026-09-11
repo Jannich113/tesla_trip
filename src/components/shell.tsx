@@ -30,17 +30,40 @@ function LightBar() {
   );
 }
 
+const TAB_IDS: Tab[] = ["home", "trips", "costs", "elpris", "vehicle"];
+
+function readTabFromLocation(): Tab {
+  const params = new URLSearchParams(window.location.search);
+  const raw = params.get("tab");
+  if (raw && (TAB_IDS as string[]).includes(raw)) return raw as Tab;
+  return "home";
+}
+
+function writeTabToLocation(next: Tab) {
+  const url = new URL(window.location.href);
+  if (next === "home") url.searchParams.delete("tab");
+  else url.searchParams.set("tab", next);
+  // Keep other query params (e.g. tesla=) until the toast effect clears them.
+  window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
 export function Dashboard() {
-  const [tab, setTab] = useState<Tab>("home");
+  const [tab, setTab] = useState<Tab>(() => readTabFromLocation());
   const wake = useVehicleStore((s) => s.wake);
   const waking = useVehicleStore((s) => s.waking);
   const tick = useVehicleStore((s) => s.tick);
+
+  const selectTab = (next: Tab) => {
+    setTab(next);
+    writeTabToLocation(next);
+  };
 
   useEffect(() => {
     void useVehicleStore.persist.rehydrate();
     void useChargeStore.persist.rehydrate();
     void useTripStore.persist.rehydrate();
-    const tesla = new URLSearchParams(window.location.search).get("tesla");
+    const params = new URLSearchParams(window.location.search);
+    const tesla = params.get("tesla");
     if (!tesla) return;
     const messages: Record<string, string> = {
       ok: "Juniper linked to the owner Tesla account",
@@ -51,7 +74,9 @@ export function Dashboard() {
       not_configured: "Tesla owner credentials are not on this app yet",
     };
     toast(messages[tesla] ?? "Tesla owner sign-in did not complete");
-    window.history.replaceState({}, "", "/");
+    params.delete("tesla");
+    const qs = params.toString();
+    window.history.replaceState({}, "", qs ? `/?${qs}` : "/");
   }, []);
 
   useEffect(() => {
@@ -104,9 +129,16 @@ export function Dashboard() {
                 <li key={item.id}>
                   <button
                     type="button"
-                    onClick={() => setTab(item.id)}
+                    onPointerDown={(e) => {
+                      if (e.button !== 0) return;
+                      selectTab(item.id);
+                    }}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      selectTab(item.id);
+                    }}
                     className={cn(
-                      "flex h-14 w-full flex-col items-center justify-center gap-0.5 text-[11px] font-medium",
+                      "flex h-14 w-full touch-manipulation flex-col items-center justify-center gap-0.5 text-[11px] font-medium",
                       "transition-[color,scale] duration-150 ease-[var(--ease-out)] active:scale-[0.96]",
                       active ? "text-foreground" : "text-muted",
                     )}
