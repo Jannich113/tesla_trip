@@ -3,6 +3,7 @@ import { type HourPrice } from "@/lib/elpris";
 import { type Units } from "@/lib/vehicle";
 import {
   type LegMode,
+  type ModeFocus,
   type SpeedEff,
   addDaysYmd,
   addMinutesDateTime,
@@ -10,6 +11,7 @@ import {
   asDateTime,
   chargeSearchKm,
   chargeFitScore,
+  defaultFocus,
   DEFAULT_DETOUR_KM,
   dkNowDateTime,
   dkNowParts,
@@ -46,6 +48,7 @@ export {
   asDateTime,
   chargeSearchKm,
   chargeFitScore,
+  defaultFocus,
   defaultSpeedEff,
   dkNowDateTime,
   driveKwhAtSpeed,
@@ -59,8 +62,13 @@ export {
   modeHint,
   modeLabel,
   normalizeMode,
+  focusLabel,
+  focusHint,
+  MODE_FOCUSES,
+  DEFAULT_MODE_FOCUS,
   type DetourKm,
   type LegMode,
+  type ModeFocus,
   type SpeedEff,
   type SpeedKmh,
 } from "./modes";
@@ -424,6 +432,7 @@ export function pickCharges(opts: {
   path: [number, number][];
   detourKm: number;
   mode: LegMode;
+  focus?: ModeFocus;
   locations: ChargeLocation[];
   acKr: number;
   hours: HourPrice[];
@@ -435,10 +444,11 @@ export function pickCharges(opts: {
   memberships?: Record<string, boolean>;
 }): { primary: PricedCharge; backup: PricedCharge | null; options: PricedCharge[] } | null {
   const { kwhNeed, path, detourKm, mode, locations, acKr, hours, acKw, speedEff, clockHhmm, maxWaitMin, backupId, memberships = {} } = opts;
+  const focus = opts.focus ?? defaultFocus(mode);
   if (kwhNeed <= 0.05 || !locations.length) return null;
-  const preferCheap = mode === "cheapest";
+  const preferCheap = focus === "pris";
   const userBand = Math.max(detourKm * 1000, 80);
-  const searchBand = Math.max(chargeSearchKm(mode, detourKm) * 1000, userBand);
+  const searchBand = Math.max(chargeSearchKm(mode, detourKm, focus) * 1000, userBand);
 
   const scored = locations.map((loc) => {
     const distM = minDistToPathM(loc.lat, loc.lng, path);
@@ -465,17 +475,19 @@ export function pickCharges(opts: {
   };
 
   const byRank = (a: (typeof scored)[0], b: (typeof scored)[0]) => {
-    const as = chargeFitScore(mode, {
+    const as = chargeFitScore(focus, {
       distM: a.distM,
       kr: a.priced.kr,
       dc: a.loc.kind === "supercharger",
       extraDriveKr: extraDriveKr(a.distM),
+      extraKwh: extraDriveKr(a.distM) / Math.max(acKr, 0.01),
     });
-    const bs = chargeFitScore(mode, {
+    const bs = chargeFitScore(focus, {
       distM: b.distM,
       kr: b.priced.kr,
       dc: b.loc.kind === "supercharger",
       extraDriveKr: extraDriveKr(b.distM),
+      extraKwh: extraDriveKr(b.distM) / Math.max(acKr, 0.01),
     });
     return as - bs || a.distM - b.distM;
   };
@@ -540,6 +552,7 @@ export function pricePlan(opts: {
   backupIds?: Array<string | null | undefined>;
   memberships?: Record<string, boolean>;
   waitCapMin?: number[];
+  focuses?: ModeFocus[];
 }): PricedLeg[] {
   const { stops, modes, detours, routes, usableKwh, locations, hours, acKw, acKr, speedEff } =
     opts;
@@ -552,6 +565,7 @@ export function pricePlan(opts: {
     from: PlanStop;
     to: PlanStop;
     mode: LegMode;
+    focus: ModeFocus;
     detourKm: number;
     route: RoutedLeg;
     userIndex: number;
@@ -562,6 +576,7 @@ export function pricePlan(opts: {
     from: stops[i],
     to: stops[i + 1],
     mode: modes[i] ?? "fastest",
+    focus: opts.focuses?.[i] ?? defaultFocus(modes[i] ?? "fastest"),
     detourKm: detours[i] ?? DEFAULT_DETOUR_KM,
     route,
     userIndex: i,
@@ -573,6 +588,7 @@ export function pricePlan(opts: {
   while (jobs.length && out.length < 24) {
     const job = jobs.shift()!;
     const { mode, route, userIndex, via } = job;
+    const focus = job.focus;
     const kwh = driveKwh(route.miles, route.seconds, speedEff);
     const fullArrive = 100 - (kwh / Math.max(usableKwh, 1)) * 100;
     if (fullArrive < RESERVE_SOC && job.depth < 4) {
@@ -583,6 +599,7 @@ export function pricePlan(opts: {
         budgetKwh,
         totalKwh: kwh,
         mode,
+        focus,
         detourKm: job.detourKm,
         excludeIds: usedVias,
       });
@@ -599,6 +616,7 @@ export function pricePlan(opts: {
           from: viaStop,
           to: job.to,
           mode,
+          focus,
           detourKm: job.detourKm,
           route: split.after,
           userIndex,
@@ -609,6 +627,7 @@ export function pricePlan(opts: {
           from: job.from,
           to: viaStop,
           mode,
+          focus,
           detourKm: job.detourKm,
           route: split.before,
           userIndex,
@@ -631,7 +650,7 @@ export function pricePlan(opts: {
     const goodPrice = Boolean(cheap && cheap.krPerKwh <= live * CHEAP_VS_LIVE);
     const lowEnough = soc < 55 || socAfter < SUGGEST_SOC;
     const deep = socAfter < SUGGEST_SOC;
-    const suggested = !required && ((goodPrice && lowEnough) || (deep && mode !== "fastest"));
+    const suggested = !required && ((goodPrice && lowEnough) || (deep && focus !== "kwh"));
     const autoNeedSoc = required
       ? Math.max(TARGET_SOC - soc, RESERVE_SOC + (kwh / usableKwh) * 100 - soc)
       : Math.min(TARGET_SOC - soc, Math.max((kwh / usableKwh) * 100, 12));
@@ -645,7 +664,7 @@ export function pricePlan(opts: {
         ? Math.min(100, Math.max(minTarget, rawTarget))
         : null;
     const target = userTarget ?? autoTarget;
-    const wantCharge = required || suggested || mode === "cheapest" || userTarget != null;
+    const wantCharge = required || suggested || focus === "pris" || userTarget != null;
     const kwhNeed = Math.max((target - soc) / 100, 0) * usableKwh;
     const autoKwh = Math.max((autoTarget - soc) / 100, 0) * usableKwh;
     const chargeMinEst = (Math.max(kwhNeed, 5) / Math.max(acKw, 1)) * 60;
@@ -662,8 +681,8 @@ export function pricePlan(opts: {
       : null;
     const maxWaitMin =
       arriveCap != null
-        ? Math.min(arriveCap, mode === "cheapest" ? cheapestCap : arriveCap)
-        : mode === "cheapest"
+        ? Math.min(arriveCap, focus === "pris" ? cheapestCap : arriveCap)
+        : focus === "pris"
           ? Math.max(maxNoDelay, cheapestCap)
           : suggested
             ? maxNoDelay
@@ -674,6 +693,7 @@ export function pricePlan(opts: {
           path: route.path,
           detourKm: job.detourKm,
           mode,
+          focus,
           locations,
           acKr: searchHours[0]?.krPerKwh ?? acKr,
           hours: searchHours,

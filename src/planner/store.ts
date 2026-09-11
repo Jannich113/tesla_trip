@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { geo } from "@/lib/places";
 import { type LegMode, type LegWhen, type PlanStop } from "./engine";
-import { DEFAULT_DETOUR_KM, DEFAULT_WAIT_MIN, normalizeMode, type SpeedEff } from "./modes";
+import { DEFAULT_DETOUR_KM, DEFAULT_MODE_FOCUS, DEFAULT_WAIT_MIN, normalizeFocus, normalizeMode, type ModeFocus, type SpeedEff } from "./modes";
 
 export type WhenKind = "depart" | "arrive";
 
@@ -11,6 +11,7 @@ export type SavedPlan = {
   name: string;
   stops: PlanStop[];
   modes: LegMode[];
+  modeFocus?: Record<LegMode, ModeFocus>;
   detours: number[];
   waits: number[];
   whenKind: WhenKind;
@@ -38,6 +39,7 @@ type PlanState = {
   name: string;
   stops: PlanStop[];
   modes: LegMode[];
+  modeFocus: Record<LegMode, ModeFocus>;
   detours: number[];
   waits: number[];
   whenKind: WhenKind;
@@ -57,6 +59,7 @@ type PlanStore = PlanState & {
   moveStop: (id: string, dir: -1 | 1) => void;
   setLegMode: (index: number, mode: LegMode) => void;
   setAllModes: (mode: LegMode) => void;
+  setModeFocus: (mode: LegMode, focus: ModeFocus) => void;
   setLegDetour: (index: number, km: number) => void;
   setLegWait: (index: number, min: number) => void;
   setWhenKind: (kind: WhenKind) => void;
@@ -76,6 +79,7 @@ const empty = (): PlanState => ({
   name: "",
   stops: [homeStop()],
   modes: [],
+  modeFocus: { ...DEFAULT_MODE_FOCUS },
   detours: [],
   waits: [],
   whenKind: "depart",
@@ -190,6 +194,15 @@ export const usePlanStore = create<PlanStore>()(
         set({ modes: get().stops.slice(1).map(() => normalizeMode(mode)) });
       },
 
+      setModeFocus: (mode, focus) => {
+        set({
+          modeFocus: {
+            ...get().modeFocus,
+            [normalizeMode(mode)]: normalizeFocus(focus, mode),
+          },
+        });
+      },
+
       setLegDetour: (index, km) => {
         const detours = get().detours.length
           ? [...get().detours]
@@ -215,7 +228,7 @@ export const usePlanStore = create<PlanStore>()(
       },
 
       savePlan: () => {
-        const { name, stops, modes, detours, waits, whenKind, when, legWhen, whPerMi, speedEff, saved, seq } = get();
+        const { name, stops, modes, modeFocus, detours, waits, whenKind, when, legWhen, whPerMi, speedEff, saved, seq } = get();
         if (stops.length < 2) return null;
         const label = name.trim() || stops.map((s) => s.name).join(" → ");
         const plan: SavedPlan = {
@@ -223,6 +236,7 @@ export const usePlanStore = create<PlanStore>()(
           name: label,
           stops,
           modes,
+          modeFocus,
           detours,
           waits,
           whenKind,
@@ -247,6 +261,11 @@ export const usePlanStore = create<PlanStore>()(
           name: plan.name,
           stops: plan.stops,
           modes: (plan.modes ?? []).map(normalizeMode),
+          modeFocus: {
+            eco: normalizeFocus(plan.modeFocus?.eco, "eco"),
+            fastest: normalizeFocus(plan.modeFocus?.fastest, "fastest"),
+            cheapest: normalizeFocus(plan.modeFocus?.cheapest, "cheapest"),
+          },
           detours: plan.detours,
           waits: plan.waits ?? plan.stops.slice(1).map(() => DEFAULT_WAIT_MIN),
           whenKind: plan.whenKind ?? "depart",
@@ -273,6 +292,7 @@ export const usePlanStore = create<PlanStore>()(
         name: s.name,
         stops: s.stops,
         modes: s.modes,
+        modeFocus: s.modeFocus,
         detours: s.detours,
         waits: s.waits,
         whenKind: s.whenKind,

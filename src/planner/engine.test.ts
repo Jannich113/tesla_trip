@@ -56,15 +56,15 @@ describe("leg modes", () => {
     assert.equal(formatWaitCap(120), "2h");
   });
 
-  it("each mode ranks a different charger first", () => {
-    const closeAc = chargeFitScore("eco", { distM: 400, kr: 80, dc: false });
-    const farDc = chargeFitScore("eco", { distM: 9000, kr: 40, dc: true });
+  it("each focus ranks a different charger first", () => {
+    const closeAc = chargeFitScore("distance", { distM: 400, kr: 80, dc: false });
+    const farDc = chargeFitScore("distance", { distM: 9000, kr: 40, dc: true });
     assert.ok(closeAc < farDc);
-    const highwayDc = chargeFitScore("fastest", { distM: 1200, kr: 90, dc: true });
-    const roadsideAc = chargeFitScore("fastest", { distM: 400, kr: 50, dc: false });
+    const highwayDc = chargeFitScore("kwh", { distM: 1200, kr: 90, dc: true, extraKwh: 0.3 });
+    const roadsideAc = chargeFitScore("kwh", { distM: 400, kr: 50, dc: false, extraKwh: 2.4 });
     assert.ok(highwayDc < roadsideAc);
-    const cheapFar = chargeFitScore("cheapest", { distM: 8000, kr: 20, extraDriveKr: 6, dc: false });
-    const dearNear = chargeFitScore("cheapest", { distM: 400, kr: 90, extraDriveKr: 0.4, dc: true });
+    const cheapFar = chargeFitScore("pris", { distM: 8000, kr: 20, extraDriveKr: 6, dc: false });
+    const dearNear = chargeFitScore("pris", { distM: 400, kr: 90, extraDriveKr: 0.4, dc: true });
     assert.ok(cheapFar < dearNear);
   });
 

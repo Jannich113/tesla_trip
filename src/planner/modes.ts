@@ -40,24 +40,58 @@ export function modeColor(mode: LegMode) {
   return "#6ea8ff";
 }
 
-/** Detour pill is the search radius. Cheapest may look a bit farther for a cheaper stall. */
-export function chargeSearchKm(mode: LegMode, detourKm: number) {
+export const MODE_FOCUSES = ["distance", "kwh", "pris"] as const;
+export type ModeFocus = (typeof MODE_FOCUSES)[number];
+
+export function defaultFocus(mode: LegMode): ModeFocus {
+  if (mode === "cheapest") return "pris";
+  if (mode === "fastest") return "kwh";
+  return "distance";
+}
+
+export function normalizeFocus(focus: string | null | undefined, mode?: LegMode): ModeFocus {
+  if (focus === "distance" || focus === "kwh" || focus === "pris") return focus;
+  return defaultFocus(mode ?? "fastest");
+}
+
+export function focusLabel(focus: ModeFocus) {
+  if (focus === "kwh") return "kWh";
+  if (focus === "pris") return "Pris";
+  return "Distance";
+}
+
+export function focusHint(focus: ModeFocus) {
+  if (focus === "kwh") return "Lowest energy, including the detour";
+  if (focus === "pris") return "Lowest kr for the charge plus extra drive";
+  return "Closest stall on this road";
+}
+
+export const DEFAULT_MODE_FOCUS: Record<LegMode, ModeFocus> = {
+  eco: "distance",
+  fastest: "kwh",
+  cheapest: "pris",
+};
+
+/** Detour pill is the search radius. Pris-focus may look a bit farther for a cheaper stall. */
+export function chargeSearchKm(mode: LegMode, detourKm: number, focus?: ModeFocus) {
   const km = Math.max(0, detourKm);
-  if (mode === "cheapest") return Math.max(km, Math.round(km * 1.25));
+  const f = focus ?? defaultFocus(mode);
+  if (f === "pris") return Math.max(km, Math.round(km * 1.25));
   return km;
 }
 
-/** Lower is a better fit for this route style. */
+/** Lower is a better fit for this focus. */
 export function chargeFitScore(
-  mode: LegMode,
-  opts: { distM: number; kr: number; dc: boolean; extraDriveKr?: number },
+  focus: ModeFocus,
+  opts: { distM: number; kr: number; dc: boolean; extraDriveKr?: number; extraKwh?: number },
 ) {
   const distKm = Math.max(0, opts.distM) / 1000;
   const kr = Math.max(0, opts.kr);
   const extra = opts.extraDriveKr ?? 0;
-  if (mode === "cheapest") return kr + extra * 0.45 + distKm * 0.8;
-  if (mode === "eco") return distKm * 14 + (opts.dc ? 1.5 : 0) + kr * 0.04;
-  return (opts.dc ? 0 : 16) + distKm * 10 + kr * 0.03;
+  const kwh = opts.extraKwh ?? distKm * 0.2;
+  if (focus === "pris") return kr + extra * 0.45 + distKm * 0.8;
+  if (focus === "kwh") return kwh * 50 + distKm * 1.2 + (opts.dc ? 0 : 0.4);
+  return distKm * 14 + (opts.dc ? 1.5 : 0) + kr * 0.04;
 }
 
 export function formatWaitCap(min: number) {

@@ -9,7 +9,9 @@ import {
   DEFAULT_DETOUR_KM,
   DEFAULT_WAIT_MIN,
   LEG_MODES,
+  MODE_FOCUSES,
   type LegMode,
+  type ModeFocus,
   type LegWhen,
   type PlanStop,
   type PricedCharge,
@@ -33,6 +35,8 @@ import {
   modeColor,
   modeHint,
   modeLabel,
+  focusHint,
+  focusLabel,
   planTotals,
   pricePlan,
   remainingHours,
@@ -113,6 +117,8 @@ export function PlanScreen() {
   const setLegDetour = usePlanStore((s) => s.setLegDetour);
   const setLegWait = usePlanStore((s) => s.setLegWait);
   const setAllModes = usePlanStore((s) => s.setAllModes);
+  const modeFocus = usePlanStore((s) => s.modeFocus);
+  const setModeFocus = usePlanStore((s) => s.setModeFocus);
   const whenKind = usePlanStore((s) => s.whenKind);
   const when = usePlanStore((s) => s.when);
   const legWhen = usePlanStore((s) => s.legWhen);
@@ -268,7 +274,7 @@ export function PlanScreen() {
       DEFAULT_DETOUR_KM,
       ...stops.slice(1).flatMap((_, i) =>
         (["eco", "fastest", "cheapest"] as LegMode[]).map((m) =>
-          chargeSearchKm(m, detours[i] ?? DEFAULT_DETOUR_KM),
+          chargeSearchKm(m, detours[i] ?? DEFAULT_DETOUR_KM, modeFocus[m]),
         ),
       ),
     ),
@@ -310,6 +316,7 @@ export function PlanScreen() {
     chargeToSoc: stops.slice(1).map((_, i) => chargeToSoc[i] ?? null),
     backupIds: stops.slice(1).map((_, i) => backupLoc[i] ?? null),
     memberships: networkAbo,
+    focuses: activeModes.map((m) => modeFocus[m]),
   };
 
   const legs: PricedLeg[] = useMemo(() => {
@@ -319,7 +326,7 @@ export function PlanScreen() {
       modes: activeModes,
       routes: selectedRoutes,
     });
-  }, [stops, activeModes, detours, waits, selectedRoutes, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc, networkAbo]);
+  }, [stops, activeModes, modeFocus, detours, waits, selectedRoutes, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc, networkAbo]);
 
   const viewLegs = useMemo(() => {
     return legs.map((leg, i) => {
@@ -372,6 +379,7 @@ export function PlanScreen() {
       const priced = pricePlan({
         ...planArgs,
         modes: stops.slice(1).map(() => mode),
+        focuses: stops.slice(1).map(() => modeFocus[mode]),
         routes: optionRoutes,
       });
       const miles = optionRoutes.reduce((n, r) => n + r.miles, 0);
@@ -384,7 +392,7 @@ export function PlanScreen() {
         kwhPerMi: interpolateWhPerMi(speedEff, kmh) / 1000,
       };
     });
-  }, [routeMap, stops, detours, waits, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc, networkAbo]);
+  }, [routeMap, stops, detours, waits, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc, networkAbo, modeFocus]);
 
   function addStop(hit: AddressHit) {
     addStopToStore({ name: hit.label.split(",")[0] || hit.label, lat: hit.lat, lng: hit.lng });
@@ -690,7 +698,7 @@ export function PlanScreen() {
 
         <p className="mt-5 text-[11px] font-medium uppercase tracking-wide text-muted">Route options</p>
         <p className="mt-1 text-[11px] text-subtle">
-          Eco stays on its road, fastest grabs highway DC, cheapest hunts price on the fast path.
+          Eco · distance. Fastest · kWh. Cheapest · pris. Switch any to kWh, pris, or distance.
         </p>
         <ul className="mt-2 divide-y divide-border rounded-xl bg-surface-2">
           {optionRows.map((row) => {
@@ -705,12 +713,14 @@ export function PlanScreen() {
                   Math.abs(fastest.mi - t.mi) < 0.8 &&
                   Math.abs(fastest.driveMin - t.driveMin) < 2,
               );
+            const focus = modeFocus[row.mode];
             return (
               <li key={row.mode}>
+                <div className={cn("px-3 py-3", on && "bg-background/40")}>
                 <button
                   type="button"
                   onClick={() => setAllModes(row.mode)}
-                  className={cn("flex w-full items-start gap-3 px-3 py-3 text-left", on && "bg-background/40")}
+                  className="flex w-full items-start gap-3 text-left"
                 >
                   <span
                     className="mt-1.5 size-2.5 shrink-0 rounded-full"
@@ -739,7 +749,7 @@ export function PlanScreen() {
                           {t.charges > 0
                             ? `${t.charges} ${t.charges === 1 ? "charge" : "charges"}`
                             : "no charge"}
-                          {row.mode === "cheapest" || t.waitMin > 0
+                          {focus === "pris" || t.waitMin > 0
                             ? ` · ${t.waitMin > 0 ? minutesToHm(t.waitMin) : "no"} wait`
                             : ""}
                         </span>
@@ -749,6 +759,26 @@ export function PlanScreen() {
                     )}
                   </span>
                 </button>
+                <div className="mt-2 flex gap-1 pl-5">
+                  {MODE_FOCUSES.map((f) => {
+                    const selectedFocus = f === focus;
+                    return (
+                      <button
+                        key={f}
+                        type="button"
+                        onClick={() => setModeFocus(row.mode, f)}
+                        className={cn(
+                          "h-7 rounded-full px-2.5 text-[11px] font-medium",
+                          selectedFocus ? "bg-foreground text-background" : "bg-surface text-muted",
+                        )}
+                      >
+                        {focusLabel(f)}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="mt-1 pl-5 text-[11px] text-subtle">{focusHint(focus)}</p>
+                </div>
               </li>
             );
           })}
@@ -1020,6 +1050,28 @@ export function PlanScreen() {
                     <p className="text-[11px] text-subtle">
                       {modeHint((modes[userI] ?? "fastest") as LegMode)}
                     </p>
+                    <div className="mt-2 flex gap-1">
+                      {MODE_FOCUSES.map((f) => {
+                        const mode = (modes[userI] ?? "fastest") as LegMode;
+                        const on = modeFocus[mode] === f;
+                        return (
+                          <button
+                            key={f}
+                            type="button"
+                            onClick={() => setModeFocus(mode, f)}
+                            className={cn(
+                              "h-7 rounded-full px-2.5 text-[11px] font-medium",
+                              on ? "bg-foreground text-background" : "bg-surface-2 text-muted",
+                            )}
+                          >
+                            {focusLabel(f)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="mt-1 text-[11px] text-subtle">
+                      {focusHint(modeFocus[(modes[userI] ?? "fastest") as LegMode])}
+                    </p>
                     <div className="mt-3 flex gap-1">
                       <button
                         type="button"
@@ -1108,7 +1160,7 @@ export function PlanScreen() {
                         );
                       })}
                     </div>
-                    {(modes[userI] ?? "fastest") === "cheapest" ? (
+                    {(modeFocus[(modes[userI] ?? "fastest") as LegMode] ?? "kwh") === "pris" ? (
                       <>
                         <p className="mt-3 text-[11px] font-medium uppercase tracking-wide text-muted">
                           Max wait for cheap price
