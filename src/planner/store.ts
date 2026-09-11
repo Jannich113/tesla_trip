@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { geo } from "@/lib/places";
 import { type LegMode, type LegWhen, type PlanStop } from "./engine";
-import { DEFAULT_DETOUR_KM, DEFAULT_WAIT_MIN, type SpeedEff } from "./modes";
+import { DEFAULT_DETOUR_KM, DEFAULT_WAIT_MIN, normalizeMode, type SpeedEff } from "./modes";
 
 export type WhenKind = "depart" | "arrive";
 
@@ -110,7 +110,7 @@ export const usePlanStore = create<PlanStore>()(
         };
         set({
           stops: [...get().stops, stop],
-          modes: [...get().modes, "standard"],
+          modes: [...get().modes, "fastest"],
           detours: [...get().detours, DEFAULT_DETOUR_KM],
           waits: [...get().waits, DEFAULT_WAIT_MIN],
           legWhen: [...get().legWhen, autoWhen()],
@@ -131,7 +131,7 @@ export const usePlanStore = create<PlanStore>()(
         const legWhen = [...get().legWhen];
         const at = Math.max(1, Math.min(index, stops.length));
         stops.splice(at, 0, stop);
-        modes.splice(at - 1, 0, "standard");
+        modes.splice(at - 1, 0, "fastest");
         detours.splice(at - 1, 0, DEFAULT_DETOUR_KM);
         waits.splice(at - 1, 0, DEFAULT_WAIT_MIN);
         legWhen.splice(at - 1, 0, autoWhen());
@@ -181,13 +181,13 @@ export const usePlanStore = create<PlanStore>()(
       setLegMode: (index, mode) => {
         const modes = get().modes.length
           ? [...get().modes]
-          : get().stops.slice(1).map(() => "standard" as LegMode);
-        modes[index] = mode;
+          : get().stops.slice(1).map(() => "fastest" as LegMode);
+        modes[index] = normalizeMode(mode);
         set({ modes });
       },
 
       setAllModes: (mode) => {
-        set({ modes: get().stops.slice(1).map(() => mode) });
+        set({ modes: get().stops.slice(1).map(() => normalizeMode(mode)) });
       },
 
       setLegDetour: (index, km) => {
@@ -246,7 +246,7 @@ export const usePlanStore = create<PlanStore>()(
         set({
           name: plan.name,
           stops: plan.stops,
-          modes: plan.modes,
+          modes: (plan.modes ?? []).map(normalizeMode),
           detours: plan.detours,
           waits: plan.waits ?? plan.stops.slice(1).map(() => DEFAULT_WAIT_MIN),
           whenKind: plan.whenKind ?? "depart",

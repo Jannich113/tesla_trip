@@ -32,7 +32,7 @@ function pickValhallaTrip(
       Number(trip.summary?.length ?? Infinity) < Number(best.summary?.length ?? Infinity) ? trip : best,
     );
   }
-  if (mode === "fastest") {
+  if (mode === "fastest" || mode === "cheapest") {
     return trips.reduce((best, trip) =>
       Number(trip.summary?.time ?? Infinity) < Number(best.summary?.time ?? Infinity) ? trip : best,
     );
@@ -64,7 +64,7 @@ async function valhalla(from: Stop, to: Stop, mode: LegMode): Promise<DriveRoute
       costing_options: { auto: costing },
       directions_options: { units: "miles" },
       shape_format: "geojson",
-      alternates: mode === "standard" || mode === "cheapest" ? 0 : 2,
+      alternates: mode === "eco" ? 2 : 0,
     }),
   });
   if (!res.ok) return null;
@@ -112,7 +112,7 @@ function pickOsrm(routes: OsrmRoute[], mode: LegMode) {
       Number(route.distance ?? Infinity) < Number(best.distance ?? Infinity) ? route : best,
     );
   }
-  if (mode === "fastest") {
+  if (mode === "fastest" || mode === "cheapest") {
     return routes.reduce((best, route) =>
       Number(route.duration ?? Infinity) < Number(best.duration ?? Infinity) ? route : best,
     );
@@ -178,7 +178,7 @@ export async function handleDriveRequest(request: Request): Promise<Response> {
     };
     const from = body.from;
     const to = body.to;
-    const mode = body.mode ?? "standard";
+    const mode = body.mode === "eco" || body.mode === "cheapest" || body.mode === "fastest" ? body.mode : "fastest";
     if (
       !from ||
       !to ||

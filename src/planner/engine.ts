@@ -56,6 +56,7 @@ export {
   modeColor,
   modeHint,
   modeLabel,
+  normalizeMode,
   type DetourKm,
   type LegMode,
   type SpeedEff,
@@ -148,7 +149,7 @@ export function airRoute(from: PlanStop, to: PlanStop): RoutedLeg {
     [from.lat, from.lng],
     [to.lat, to.lng],
   ];
-  const toll = estimateTolls(path, miles, false, "standard");
+  const toll = estimateTolls(path, miles, false, "fastest");
   return {
     miles,
     seconds: (miles / 42) * 3600,
@@ -163,7 +164,7 @@ export function airRoute(from: PlanStop, to: PlanStop): RoutedLeg {
 const routeCache = new Map<string, RoutedLeg>();
 
 export async function fetchRoute(from: PlanStop, to: PlanStop, mode: LegMode): Promise<RoutedLeg> {
-  const key = `${from.lat.toFixed(4)},${from.lng.toFixed(4)}|${to.lat.toFixed(4)},${to.lng.toFixed(4)}|${mode === "cheapest" ? "standard" : mode}`;
+  const key = `${from.lat.toFixed(4)},${from.lng.toFixed(4)}|${to.lat.toFixed(4)},${to.lng.toFixed(4)}|${mode === "cheapest" ? "fastest" : mode}`;
   const hit = routeCache.get(key);
   if (hit) return hit;
   try {
@@ -555,7 +556,7 @@ export function pricePlan(opts: {
   const jobs: Job[] = routes.map((route, i) => ({
     from: stops[i],
     to: stops[i + 1],
-    mode: modes[i] ?? "standard",
+    mode: modes[i] ?? "fastest",
     detourKm: detours[i] ?? DEFAULT_DETOUR_KM,
     route,
     userIndex: i,

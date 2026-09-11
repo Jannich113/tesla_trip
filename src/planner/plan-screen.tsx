@@ -72,10 +72,9 @@ function offsetPath(path: [number, number][], meters: number): [number, number][
 }
 
 const ROUTE_OFFSET_M: Record<LegMode, number> = {
-  eco: -480,
-  standard: -160,
-  fastest: 160,
-  cheapest: 480,
+  eco: -280,
+  fastest: 0,
+  cheapest: 280,
 };
 
 function routeKey(
@@ -83,11 +82,11 @@ function routeKey(
   to: { lat: number; lng: number },
   mode: LegMode,
 ) {
-  const path = mode === "cheapest" ? "standard" : mode;
+  const path = mode === "cheapest" ? "fastest" : mode;
   return `${from.lat.toFixed(4)},${from.lng.toFixed(4)}|${to.lat.toFixed(4)},${to.lng.toFixed(4)}|${path}`;
 }
 
-const PATH_MODES: LegMode[] = ["eco", "standard", "fastest"];
+const PATH_MODES: LegMode[] = ["eco", "fastest"];
 
 export function PlanScreen() {
   const units = useVehicleStore((s) => s.units);
@@ -141,7 +140,6 @@ export function PlanScreen() {
   const [backupLoc, setBackupLoc] = useState<Record<number, string>>({});
   const [showRoutes, setShowRoutes] = useState<Record<LegMode, boolean>>({
     eco: true,
-    standard: true,
     fastest: true,
     cheapest: true,
   });
@@ -238,11 +236,13 @@ export function PlanScreen() {
     return list;
   }
 
-  const activeModes = modes.length ? modes : stops.slice(1).map(() => "standard" as LegMode);
+  const activeModes = (modes.length ? modes : stops.slice(1).map(() => "fastest" as LegMode)).map((m) =>
+    m === "eco" || m === "cheapest" || m === "fastest" ? m : ("fastest" as LegMode),
+  );
   const mixed = activeModes.some((m) => m !== activeModes[0]);
-  const routes = routesFor(mixed ? "standard" : (activeModes[0] ?? "standard"));
+  const routes = routesFor(mixed ? "fastest" : (activeModes[0] ?? "fastest"));
   const selectedRoutes = mixed
-    ? stops.slice(0, -1).map((_, i) => routeMap[routeKey(stops[i], stops[i + 1], activeModes[i] ?? "standard")]).filter((r): r is RoutedLeg => Boolean(r))
+    ? stops.slice(0, -1).map((_, i) => routeMap[routeKey(stops[i], stops[i + 1], activeModes[i] ?? "fastest")]).filter((r): r is RoutedLeg => Boolean(r))
     : routes;
 
   const searchRoutes = useMemo(() => selectedRoutes, [selectedRoutes]);
@@ -251,7 +251,7 @@ export function PlanScreen() {
     searchRoutes,
     Math.max(
       DEFAULT_DETOUR_KM,
-      ...stops.slice(1).map((_, i) => chargeSearchKm(activeModes[i] ?? "standard", detours[i] ?? DEFAULT_DETOUR_KM)),
+      ...stops.slice(1).map((_, i) => chargeSearchKm(activeModes[i] ?? "fastest", detours[i] ?? DEFAULT_DETOUR_KM)),
     ),
   );
 
@@ -416,7 +416,7 @@ export function PlanScreen() {
       openLegStop(i);
       return;
     }
-    const opt = /^opt-(eco|standard|fastest|cheapest)-(\d+)$/.exec(id);
+    const opt = /^opt-(eco|fastest|cheapest)-(\d+)$/.exec(id);
     if (opt) {
       const mode = opt[1] as LegMode;
       const i = Number(opt[2]);
@@ -468,7 +468,7 @@ export function PlanScreen() {
       for (let i = 0; i < stops.length - 1; i++) {
         const hit =
           routeMap[routeKey(stops[i], stops[i + 1], mode)] ??
-          (mode === "cheapest" ? routeMap[routeKey(stops[i], stops[i + 1], "standard")] : undefined);
+          (mode === "cheapest" ? routeMap[routeKey(stops[i], stops[i + 1], "fastest")] : undefined);
         if (!hit) continue;
         const raw =
           hit.path.length >= 2
@@ -671,20 +671,20 @@ export function PlanScreen() {
 
         <p className="mt-5 text-[11px] font-medium uppercase tracking-wide text-muted">Route options</p>
         <p className="mt-1 text-[11px] text-subtle">
-          Eco / fastest change the roads. Cheapest keeps the standard path and hunts cheaper power.
+          Eco / fastest change the roads. Cheapest uses the fast path and hunts cheaper power.
         </p>
         <ul className="mt-2 divide-y divide-border rounded-xl bg-surface-2">
           {optionRows.map((row) => {
             const on = !mixed && activeModes[0] === row.mode;
             const t = row.totals;
-            const standard = optionRows.find((r) => r.mode === "standard")?.totals;
+            const fastest = optionRows.find((r) => r.mode === "fastest")?.totals;
             const sameCorridor =
               Boolean(
                 t &&
-                  standard &&
-                  row.mode !== "standard" &&
-                  Math.abs(standard.mi - t.mi) < 0.8 &&
-                  Math.abs(standard.driveMin - t.driveMin) < 2,
+                  fastest &&
+                  row.mode !== "fastest" &&
+                  Math.abs(fastest.mi - t.mi) < 0.8 &&
+                  Math.abs(fastest.driveMin - t.driveMin) < 2,
               );
             return (
               <li key={row.mode}>
@@ -711,7 +711,7 @@ export function PlanScreen() {
                           <span className="text-subtle"> · </span>
                           {formatNumber(row.kmh, 0)} km/t
                           {row.mode === "cheapest"
-                            ? " · standard path"
+                            ? " · fastest path"
                             : sameCorridor
                               ? " · same corridor"
                               : ""}
@@ -742,7 +742,7 @@ export function PlanScreen() {
               ? "Routing…"
               : mixed
                 ? "Mixed legs"
-                : `${modeLabel(activeModes[0] ?? "standard")} · ${viewLegs.length} ${viewLegs.length === 1 ? "leg" : "legs"}`}
+                : `${modeLabel(activeModes[0] ?? "fastest")} · ${viewLegs.length} ${viewLegs.length === 1 ? "leg" : "legs"}`}
         </p>
         <p className="mt-2 text-4xl font-medium tracking-tight tabular-nums">
           {formatDistance(totals.mi, units, totals.mi >= 100 ? 0 : 1)}
@@ -766,9 +766,6 @@ export function PlanScreen() {
           {viewLegs[0] ? ` · first window ${formatDateTime(viewLegs[0].departAt)}` : ""}
           {totals.requiredKwh > 0 ? ` · ${formatNumber(totals.requiredKwh, 1)} kWh required` : ""}
         </p>
-        {hours.length ? (
-          <HourRibbon hours={hours} currentHour={elpris?.current?.hour ?? null} cheapHour={cheap?.hour ?? null} />
-        ) : null}
         <div className="mt-4 flex gap-2">
           <button
             type="button"
@@ -983,7 +980,7 @@ export function PlanScreen() {
                   <div className="mt-2 pl-10">
                     <div className="flex rounded-full bg-surface-2 p-1">
                       {LEG_MODES.map((mode) => {
-                        const on = (modes[userI] ?? "standard") === mode;
+                        const on = (modes[userI] ?? "fastest") === mode;
                         return (
                           <button
                             key={mode}
@@ -1002,7 +999,7 @@ export function PlanScreen() {
                     {open ? (
                       <div className="mt-3">
                     <p className="text-[11px] text-subtle">
-                      {modeHint((modes[userI] ?? "standard") as LegMode)}
+                      {modeHint((modes[userI] ?? "fastest") as LegMode)}
                     </p>
                     <div className="mt-3 flex gap-1">
                       <button
@@ -1092,7 +1089,7 @@ export function PlanScreen() {
                         );
                       })}
                     </div>
-                    {(modes[userI] ?? "standard") === "cheapest" ? (
+                    {(modes[userI] ?? "fastest") === "cheapest" ? (
                       <>
                         <p className="mt-3 text-[11px] font-medium uppercase tracking-wide text-muted">
                           Max wait for cheap price
@@ -1595,58 +1592,6 @@ function ChargeChoice({
       <div className="shrink-0 text-right">
         <p className="text-sm tabular-nums">{formatKrValue(spot.kr, 2)} kr</p>
         <p className="text-[11px] tabular-nums text-subtle">{formatKrPerKwh(spot.rateKr, 2)}</p>
-      </div>
-    </div>
-  );
-}
-
-function HourRibbon({
-  hours,
-  currentHour,
-  cheapHour,
-}: {
-  hours: HourPrice[];
-  currentHour: string | null;
-  cheapHour: string | null;
-}) {
-  const shown = hours.slice(0, 24);
-  const { min, max } = shown.reduce(
-    (acc, h) => ({
-      min: Math.min(acc.min, h.krPerKwh),
-      max: Math.max(acc.max, h.krPerKwh),
-    }),
-    { min: Infinity, max: -Infinity },
-  );
-  const span = max - min || 1;
-  return (
-    <div className="mt-4">
-      <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Live hours</p>
-      <div className="mt-2 flex h-10 items-end gap-px">
-        {shown.map((h) => {
-          const t = (h.krPerKwh - min) / span;
-          const current = h.hour === currentHour;
-          const cheapMark = h.hour === cheapHour && h.hour !== currentHour;
-          return (
-            <div
-              key={h.timeDk}
-              title={`${h.hour}:00 · ${formatKrPerKwh(h.krPerKwh, 3)}`}
-              className={cn(
-                "min-w-0 flex-1 rounded-sm",
-                current && "bg-foreground",
-                cheapMark && "bg-accent",
-                !current && !cheapMark && t >= 0.75 && "bg-danger/70",
-                !current && !cheapMark && t < 0.75 && t > 0.33 && "bg-muted",
-                !current && !cheapMark && t <= 0.33 && "bg-accent/50",
-              )}
-              style={{ height: `${18 + Math.round(t * 22)}px` }}
-            />
-          );
-        })}
-      </div>
-      <div className="mt-1 flex justify-between text-[11px] tabular-nums text-subtle">
-        <span>{shown[0]?.hour}:00</span>
-        <span>now · cheap in accent</span>
-        <span>{shown[shown.length - 1]?.hour}:00</span>
       </div>
     </div>
   );

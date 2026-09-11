@@ -34,12 +34,6 @@ describe("leg modes", () => {
     assert.equal(c.use_tolls, 0);
   });
 
-  it("standard is the recommended time route", () => {
-    const c = costingFor("standard");
-    assert.equal(c.shortest, false);
-    assert.ok(c.use_highways > 0.4 && c.use_highways < 0.7);
-  });
-
   it("fastest prefers highways and tolls", () => {
     const c = costingFor("fastest");
     assert.equal(c.shortest, false);
@@ -47,8 +41,8 @@ describe("leg modes", () => {
     assert.equal(c.use_tolls, 1);
   });
 
-  it("cheapest uses the same recommended path as standard", () => {
-    assert.deepEqual(costingFor("cheapest"), costingFor("standard"));
+  it("cheapest uses the same path as fastest", () => {
+    assert.deepEqual(costingFor("cheapest"), costingFor("fastest"));
   });
 
   it("charge search radius equals the detour for every mode", () => {
@@ -210,7 +204,7 @@ describe("leg modes", () => {
       locations: [mid],
       budgetKwh: 40,
       totalKwh: 80,
-      mode: "standard",
+      mode: "fastest",
       detourKm: 10,
     });
     assert.equal(via?.id, "loc-mid");
