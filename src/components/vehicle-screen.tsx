@@ -85,9 +85,16 @@ export function VehicleScreen() {
           className="h-44 w-full object-cover object-[center_60%]"
         />
         <div className="space-y-1 px-5 py-4">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted">
-            Named in the Tesla app
-          </p>
+          <div className="flex items-center gap-2">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted">
+              Named in the Tesla app
+            </p>
+            {VEHICLE.isDemo ? (
+              <span className="rounded-full bg-surface-2 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted">
+                Demo data
+              </span>
+            ) : null}
+          </div>
           <h2 className="text-2xl font-medium tracking-tight">{VEHICLE.name}</h2>
           <p className="text-sm text-muted">
             {VEHICLE.year} {VEHICLE.model} {VEHICLE.trim}
@@ -142,7 +149,14 @@ export function VehicleScreen() {
       </section>
 
       <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
-        <p className="text-sm font-medium">Identity</p>
+        <div className="flex items-center gap-2">
+          <p className="text-sm font-medium">Identity</p>
+          {VEHICLE.isDemo ? (
+            <span className="rounded-full bg-surface-2 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted">
+              Sample
+            </span>
+          ) : null}
+        </div>
         <dl className="mt-3 space-y-3">
           <Row label="VIN" value={formatVin(VEHICLE.vin, s.maskVin)} mono />
           <Row label="Access" value="Owner only" />

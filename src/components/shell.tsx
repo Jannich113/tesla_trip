@@ -69,6 +69,7 @@ export function Dashboard() {
               <p className="text-sm font-medium leading-none">{VEHICLE.name}</p>
               <p className="mt-1 text-[11px] text-muted">
                 {VEHICLE.model} · {VEHICLE.trim}
+                {VEHICLE.isDemo ? " · Demo" : ""}
               </p>
             </div>
           </div>
