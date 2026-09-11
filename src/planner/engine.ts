@@ -59,6 +59,7 @@ export {
   hoursFrom,
   interpolateWhPerMi,
   avgSpeedKmh,
+  splitDateTime,
   modeColor,
   modeHint,
   modeLabel,
