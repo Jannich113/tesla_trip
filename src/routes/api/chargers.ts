@@ -257,36 +257,71 @@ function mergeChargers(seed: RouteCharger[], live: RouteCharger[]) {
   return [...out.values()];
 }
 
+async function searchCorridor(path: [number, number][], asked: number) {
+  const buf = polylineBufferKm(path);
+  const tightKm = buf.tight;
+  const wideKm = Math.min(
+    40,
+    Math.max(buf.wide, tightKm, Number.isFinite(asked) && asked > 0 ? asked : 0),
+  );
+  const radiusM = wideKm * 1000;
+  const seed = seedsAlongPath(path, radiusM);
+  const samples = samplePath(path, 40_000, 8);
+  const ocm = await fetchOcm(path, samples, tightKm, wideKm);
+  const osm = ocm.length >= 8 ? [] : chargersOnPath(await fetchOverpass(samples, radiusM), path, wideKm);
+  return {
+    chargers: mergeChargers(seed, [...ocm, ...osm]),
+    source: ocm.length ? "ocm+seed" : osm.length ? "overpass+seed" : seed.length ? "seed" : "none",
+    seed: seed.length,
+    live: ocm.length + osm.length,
+    ocm: ocm.length,
+    samples: samples.length,
+    bufferKm: { tight: tightKm, wide: wideKm, pathKm: buf.pathKm },
+  };
+}
+
 export const Route = createFileRoute("/api/chargers")({
   server: {
     handlers: {
       POST: async ({ request }) => {
         try {
-          const body = (await request.json()) as { path?: [number, number][]; radiusKm?: number };
-          const path = downsample((body.path ?? []).filter((p) => Number.isFinite(p[0]) && Number.isFinite(p[1])));
-          if (path.length < 2) return Response.json({ chargers: [], source: "none" });
-          const buf = polylineBufferKm(path);
+          const body = (await request.json()) as {
+            path?: [number, number][];
+            paths?: [number, number][][];
+            radiusKm?: number;
+          };
+          const rawPaths = (body.paths?.length ? body.paths : body.path ? [body.path] : [])
+            .map((p) => downsample((p ?? []).filter((pt) => Number.isFinite(pt[0]) && Number.isFinite(pt[1]))))
+            .filter((p) => p.length >= 2)
+            .slice(0, 6);
+          if (!rawPaths.length) return Response.json({ chargers: [], source: "none" });
           const asked = Number(body.radiusKm);
-          const tightKm = buf.tight;
-          const wideKm = Math.min(
-            40,
-            Math.max(buf.wide, tightKm, Number.isFinite(asked) && asked > 0 ? asked : 0),
-          );
-          const radiusM = wideKm * 1000;
-          const seed = seedsAlongPath(path, radiusM);
-          const samples = samplePath(path, 40_000, 8);
-          const ocm = await fetchOcm(path, samples, tightKm, wideKm);
-          const osm = ocm.length >= 8 ? [] : chargersOnPath(await fetchOverpass(samples, radiusM), path, wideKm);
-          const chargers = mergeChargers(seed, [...ocm, ...osm]);
+          const chunks = await Promise.all(rawPaths.map((path) => searchCorridor(path, asked)));
+          let chargers: RouteCharger[] = [];
+          let seed = 0;
+          let ocm = 0;
+          let live = 0;
+          let samples = 0;
+          let source = "none";
+          let bufferKm = chunks[0]?.bufferKm;
+          for (const chunk of chunks) {
+            chargers = mergeChargers(chargers, chunk.chargers);
+            seed += chunk.seed;
+            ocm += chunk.ocm;
+            live += chunk.live;
+            samples += chunk.samples;
+            if (chunk.source !== "none") source = chunk.source;
+          }
           return Response.json({
             chargers,
-            source: ocm.length ? "ocm+seed" : osm.length ? "overpass+seed" : "seed",
-            seed: seed.length,
-            live: ocm.length + osm.length,
-            ocm: ocm.length,
-            samples: samples.length,
+            source,
+            seed,
+            live,
+            ocm,
+            samples,
             polyline: true,
-            bufferKm: { tight: tightKm, wide: wideKm, pathKm: buf.pathKm },
+            corridors: rawPaths.length,
+            bufferKm,
             updatedAt: new Date().toISOString(),
           });
         } catch (err) {

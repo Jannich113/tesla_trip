@@ -245,13 +245,32 @@ export function PlanScreen() {
     ? stops.slice(0, -1).map((_, i) => routeMap[routeKey(stops[i], stops[i + 1], activeModes[i] ?? "fastest")]).filter((r): r is RoutedLeg => Boolean(r))
     : routes;
 
-  const searchRoutes = useMemo(() => selectedRoutes, [selectedRoutes]);
+  const searchRoutes = useMemo(() => {
+    const all: RoutedLeg[] = [];
+    const seen = new Set<string>();
+    for (const mode of PATH_MODES) {
+      for (const r of routesFor(mode)) {
+        const a = r.path[0];
+        const b = r.path.at(-1);
+        if (!a || !b) continue;
+        const k = `${a.join()}-${b.join()}-${r.miles.toFixed(1)}`;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        all.push(r);
+      }
+    }
+    return all;
+  }, [routeMap, stops]);
 
   const { chargers: routeChargers, loading: chargersLoading } = useRouteChargers(
     searchRoutes,
     Math.max(
       DEFAULT_DETOUR_KM,
-      ...stops.slice(1).map((_, i) => chargeSearchKm(activeModes[i] ?? "fastest", detours[i] ?? DEFAULT_DETOUR_KM)),
+      ...stops.slice(1).flatMap((_, i) =>
+        (["eco", "fastest", "cheapest"] as LegMode[]).map((m) =>
+          chargeSearchKm(m, detours[i] ?? DEFAULT_DETOUR_KM),
+        ),
+      ),
     ),
   );
 
@@ -671,7 +690,7 @@ export function PlanScreen() {
 
         <p className="mt-5 text-[11px] font-medium uppercase tracking-wide text-muted">Route options</p>
         <p className="mt-1 text-[11px] text-subtle">
-          Eco / fastest change the roads. Cheapest uses the fast path and hunts cheaper power.
+          Eco stays on its road, fastest grabs highway DC, cheapest hunts price on the fast path.
         </p>
         <ul className="mt-2 divide-y divide-border rounded-xl bg-surface-2">
           {optionRows.map((row) => {

@@ -1,4 +1,4 @@
-import { chargeSearchKm, type LegMode } from "./modes.ts";
+import { chargeFitScore, chargeSearchKm, type LegMode } from "./modes.ts";
 
 export type ViaLoc = {
   id: string;
@@ -106,7 +106,6 @@ export function pickViaOnPath(opts: {
   if (totalKwh <= 0 || budgetKwh <= 0 || path.length < 2) return null;
   const exclude = new Set(opts.excludeIds ?? []);
   const searchBand = Math.max(chargeSearchKm(mode, detourKm) * 1000, 4_000);
-  const preferCheap = mode === "cheapest";
   let best: ViaLoc | null = null;
   let bestScore = -Infinity;
   for (const loc of locations) {
@@ -117,10 +116,13 @@ export function pickViaOnPath(opts: {
     if (frac < 0.12 || frac > 0.88) continue;
     const energyTo = totalKwh * frac;
     if (energyTo > budgetKwh * 0.95) continue;
-    const dc = loc.kind === "supercharger" ? 1 : 0;
-    const score = preferCheap
-      ? energyTo * 4 - loc.usdPerKwh * 20 - distM / 1000
-      : energyTo * 8 + dc * 40 - distM / 800;
+    const fit = chargeFitScore(mode, {
+      distM,
+      kr: loc.usdPerKwh * 6.85 * 20,
+      dc: loc.kind === "supercharger",
+      extraDriveKr: (distM / 1000) * 1.2,
+    });
+    const score = energyTo * 6 - fit;
     if (score > bestScore) {
       bestScore = score;
       best = loc;

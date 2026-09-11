@@ -3,7 +3,6 @@ import { type ChargeLocation } from "@/lib/charge-locations";
 import { type RouteCharger } from "@/routes/api/chargers";
 import { type RoutedLeg } from "./engine";
 import { seedsAlongPath } from "./seed-chargers";
-import { polylineBufferKm } from "./polyline";
 
 function downsample(path: [number, number][], max = 80) {
   if (path.length <= max) return path;
@@ -30,26 +29,34 @@ function asLocation(c: RouteCharger | ChargeLocation): ChargeLocation {
 }
 
 export function useRouteChargers(routes: RoutedLeg[], radiusKm?: number) {
-  const path = useMemo(() => {
-    const out: [number, number][] = [];
+  const paths = useMemo(() => {
+    const out: [number, number][][] = [];
+    const seen = new Set<string>();
     for (const r of routes) {
-      for (const pt of r.path) out.push(pt);
+      if (r.path.length < 2) continue;
+      const k = `${r.path[0][0].toFixed(3)},${r.path[0][1].toFixed(3)}-${r.path.at(-1)![0].toFixed(3)},${r.path.at(-1)![1].toFixed(3)}-${r.miles.toFixed(0)}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(downsample(r.path, 60));
     }
-    return downsample(out);
+    return out.slice(0, 6);
   }, [routes]);
 
   const key = useMemo(() => {
-    if (path.length < 2) return "";
-    const a = path[0];
-    const b = path[path.length - 1];
-    return `${a[0].toFixed(3)},${a[1].toFixed(3)}-${b[0].toFixed(3)},${b[1].toFixed(3)}-${path.length}`;
-  }, [path]);
+    if (!paths.length) return "";
+    return paths
+      .map((p) => `${p[0][0].toFixed(3)},${p[0][1].toFixed(3)}>${p.at(-1)![0].toFixed(3)},${p.at(-1)![1].toFixed(3)}:${p.length}`)
+      .join("|") + `:${radiusKm ?? 0}`;
+  }, [paths, radiusKm]);
 
   const local = useMemo(() => {
-    if (path.length < 2) return [];
-    const km = Math.max(polylineBufferKm(path).wide, radiusKm ?? 0);
-    return seedsAlongPath(path, km * 1000).map(asLocation);
-  }, [path, radiusKm]);
+    const km = Math.max(12, radiusKm ?? 0);
+    const byId = new Map<string, ChargeLocation>();
+    for (const path of paths) {
+      for (const c of seedsAlongPath(path, km * 1000)) byId.set(c.id, asLocation(c));
+    }
+    return [...byId.values()];
+  }, [paths, radiusKm]);
   const [live, setLive] = useState<ChargeLocation[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -65,7 +72,7 @@ export function useRouteChargers(routes: RoutedLeg[], radiusKm?: number) {
       void fetch("/api/chargers", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ path, radiusKm }),
+        body: JSON.stringify({ paths, radiusKm }),
       })
         .then(async (res) => {
           const body = (await res.json()) as { chargers?: RouteCharger[]; error?: string };

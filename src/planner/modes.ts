@@ -40,9 +40,24 @@ export function modeColor(mode: LegMode) {
   return "#6ea8ff";
 }
 
-/** Detour pill is the charge-search radius for every mode, including cheapest. */
-export function chargeSearchKm(_mode: LegMode, detourKm: number) {
-  return Math.max(0, detourKm);
+/** Detour pill is the search radius. Cheapest may look a bit farther for a cheaper stall. */
+export function chargeSearchKm(mode: LegMode, detourKm: number) {
+  const km = Math.max(0, detourKm);
+  if (mode === "cheapest") return Math.max(km, Math.round(km * 1.25));
+  return km;
+}
+
+/** Lower is a better fit for this route style. */
+export function chargeFitScore(
+  mode: LegMode,
+  opts: { distM: number; kr: number; dc: boolean; extraDriveKr?: number },
+) {
+  const distKm = Math.max(0, opts.distM) / 1000;
+  const kr = Math.max(0, opts.kr);
+  const extra = opts.extraDriveKr ?? 0;
+  if (mode === "cheapest") return kr + extra * 0.45 + distKm * 0.8;
+  if (mode === "eco") return distKm * 14 + (opts.dc ? 1.5 : 0) + kr * 0.04;
+  return (opts.dc ? 0 : 16) + distKm * 10 + kr * 0.03;
 }
 
 export function formatWaitCap(min: number) {

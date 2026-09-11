@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   addMinutesHhmm,
   chargeSearchKm,
+  chargeFitScore,
   costingFor,
   defaultSpeedEff,
   driveKwhAtSpeed,
@@ -46,13 +47,25 @@ describe("leg modes", () => {
   });
 
   it("charge search radius equals the detour for every mode", () => {
-    assert.equal(chargeSearchKm("cheapest", 12), 12);
-    assert.equal(chargeSearchKm("cheapest", 30), 30);
+    assert.equal(chargeSearchKm("cheapest", 12), 15);
+    assert.equal(chargeSearchKm("cheapest", 30), 38);
     assert.equal(chargeSearchKm("eco", 8), 8);
     assert.equal(chargeSearchKm("fastest", 18), 18);
     assert.equal(formatWaitCap(0), "0");
     assert.equal(formatWaitCap(30), "30m");
     assert.equal(formatWaitCap(120), "2h");
+  });
+
+  it("each mode ranks a different charger first", () => {
+    const closeAc = chargeFitScore("eco", { distM: 400, kr: 80, dc: false });
+    const farDc = chargeFitScore("eco", { distM: 9000, kr: 40, dc: true });
+    assert.ok(closeAc < farDc);
+    const highwayDc = chargeFitScore("fastest", { distM: 1200, kr: 90, dc: true });
+    const roadsideAc = chargeFitScore("fastest", { distM: 400, kr: 50, dc: false });
+    assert.ok(highwayDc < roadsideAc);
+    const cheapFar = chargeFitScore("cheapest", { distM: 8000, kr: 20, extraDriveKr: 6, dc: false });
+    const dearNear = chargeFitScore("cheapest", { distM: 400, kr: 90, extraDriveKr: 0.4, dc: true });
+    assert.ok(cheapFar < dearNear);
   });
 
   it("hoursFrom starts pricing at the planned clock", () => {

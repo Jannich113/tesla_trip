@@ -9,6 +9,7 @@ import {
   addMinutesHhmm,
   asDateTime,
   chargeSearchKm,
+  chargeFitScore,
   DEFAULT_DETOUR_KM,
   dkNowDateTime,
   dkNowParts,
@@ -44,6 +45,7 @@ export {
   addMinutesHhmm,
   asDateTime,
   chargeSearchKm,
+  chargeFitScore,
   defaultSpeedEff,
   dkNowDateTime,
   driveKwhAtSpeed,
@@ -458,19 +460,24 @@ export function pickCharges(opts: {
 
   const extraDriveKr = (distM: number) => {
     const miles = distM / 1609.344;
-    const seconds = (miles * 1.609344) / 80 * 3600;
+    const seconds = ((miles * 1.609344) / 80) * 3600;
     return driveKwh(miles, seconds, speedEff) * acKr;
   };
 
   const byRank = (a: (typeof scored)[0], b: (typeof scored)[0]) => {
-    if (preferCheap) {
-      const aCost = a.priced.kr + extraDriveKr(a.distM) * 0.4;
-      const bCost = b.priced.kr + extraDriveKr(b.distM) * 0.4;
-      return aCost - bCost || a.distM - b.distM;
-    }
-    const dc = Number(b.loc.kind === "supercharger") - Number(a.loc.kind === "supercharger");
-    if (dc) return dc;
-    return a.distM - b.distM;
+    const as = chargeFitScore(mode, {
+      distM: a.distM,
+      kr: a.priced.kr,
+      dc: a.loc.kind === "supercharger",
+      extraDriveKr: extraDriveKr(a.distM),
+    });
+    const bs = chargeFitScore(mode, {
+      distM: b.distM,
+      kr: b.priced.kr,
+      dc: b.loc.kind === "supercharger",
+      extraDriveKr: extraDriveKr(b.distM),
+    });
+    return as - bs || a.distM - b.distM;
   };
 
   const nearestId = [...scored].sort((a, b) => a.distM - b.distM)[0]?.loc.id;
@@ -494,9 +501,7 @@ export function pickCharges(opts: {
     outside.find((s) => s.loc.id !== primarySrc.loc.id) ??
     null;
 
-  const ranked = preferCheap
-    ? [...scored].sort(byRank)
-    : [...scored].sort((a, b) => a.distM - b.distM || a.priced.kr - b.priced.kr);
+  const ranked = [...scored].sort(byRank);
 
   return {
     primary: tag(primarySrc.priced, primarySrc.loc.id),
