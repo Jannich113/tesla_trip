@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, MapPinned } from "lucide-react";
+import { Link } from "@tanstack/react-router";
 import { BayMap, type MapMarker, type MapRoute } from "@/components/bay-map";
 import { PeriodPills } from "@/components/period-pills";
 import {
@@ -308,6 +309,13 @@ export function TripsScreen() {
               {albums.length ? `${albums.length} saved` : "Group trips into a named trip"}
             </p>
           </div>
+          <Link
+            to="/plan"
+            className="flex size-10 items-center justify-center rounded-full bg-surface-2 text-muted"
+            aria-label="Open trip planner"
+          >
+            <MapPinned className="size-4" />
+          </Link>
           <button
             type="button"
             onClick={() => {

@@ -16,7 +16,12 @@ export function PreviewHostBridge() {
   useEffect(() => {
     return installPreviewHostBridge({
       navigate: (path) => {
-        router.history.push(path);
+        const url = new URL(path, window.location.origin);
+        void router.navigate({
+          to: url.pathname,
+          search: url.search,
+          hash: url.hash,
+        } as never);
       },
       getRoutePaths: () => collectRoutePathsFromTree(router.routeTree),
     });

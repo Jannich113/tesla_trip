@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { MapPin } from "lucide-react";
+import { MapPin, MapPinned } from "lucide-react";
+import { Link } from "@tanstack/react-router";
 import { BatteryBar } from "@/components/battery-bar";
 import {
   formatDistance,
@@ -125,6 +126,19 @@ export function HomeScreen() {
             hint="Benzin savings"
           />
         </div>
+
+        <Link
+          to="/plan"
+          className="flex items-center gap-3 rounded-xl bg-surface px-4 py-4 shadow-[var(--shadow-border)]"
+        >
+          <span className="flex size-10 items-center justify-center rounded-lg bg-surface-2 text-muted">
+            <MapPinned className="size-4" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium">Trip planner</p>
+            <p className="truncate text-xs text-muted">Eco, fastest or cheapest per stop</p>
+          </div>
+        </Link>
 
         <div className="flex items-center gap-3 rounded-xl bg-surface px-4 py-4 shadow-[var(--shadow-border)]">
           <span className="flex size-10 items-center justify-center rounded-lg bg-surface-2 text-muted">
