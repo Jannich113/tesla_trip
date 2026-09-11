@@ -698,7 +698,7 @@ export function PlanScreen() {
 
         <p className="mt-5 text-[11px] font-medium uppercase tracking-wide text-muted">Route options</p>
         <p className="mt-1 text-[11px] text-subtle">
-          Eco · distance. Fastest · kWh. Cheapest · time. Switch any to kWh, time, or distance.
+          Eco · distance. Fastest · pris. Cheapest · time. Switch any to pris, time, or distance.
         </p>
         <ul className="mt-2 divide-y divide-border rounded-xl bg-surface-2">
           {optionRows.map((row) => {
@@ -749,7 +749,7 @@ export function PlanScreen() {
                           {t.charges > 0
                             ? `${t.charges} ${t.charges === 1 ? "charge" : "charges"}`
                             : "no charge"}
-                          {focus === "time" || t.waitMin > 0
+                          {focus === "pris" || t.waitMin > 0
                             ? ` · ${t.waitMin > 0 ? minutesToHm(t.waitMin) : "no"} wait`
                             : ""}
                         </span>
@@ -1160,6 +1160,31 @@ export function PlanScreen() {
                         );
                       })}
                     </div>
+                    {(modeFocus[(modes[userI] ?? "fastest") as LegMode] ?? "pris") === "pris" ? (
+                      <>
+                        <p className="mt-3 text-[11px] font-medium uppercase tracking-wide text-muted">
+                          Max wait for cheap price
+                        </p>
+                        <div className="mt-1 flex gap-1">
+                          {WAIT_MIN.map((min) => {
+                            const on = (waits[userI] ?? DEFAULT_WAIT_MIN) === min;
+                            return (
+                              <button
+                                key={min}
+                                type="button"
+                                onClick={() => setLegWait(userI, min)}
+                                className={cn(
+                                  "h-8 flex-1 rounded-full text-[11px] font-medium",
+                                  on ? "bg-foreground text-background" : "bg-surface-2 text-muted",
+                                )}
+                              >
+                                {formatWaitCap(min)}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </>
+                    ) : null}
                     {leg?.charge ? (
                       <div className="mt-3 space-y-2">
                         <ChargeChoice

@@ -446,7 +446,7 @@ export function pickCharges(opts: {
   const { kwhNeed, path, detourKm, mode, locations, acKr, hours, acKw, speedEff, clockHhmm, maxWaitMin, backupId, memberships = {} } = opts;
   const focus = opts.focus ?? defaultFocus(mode);
   if (kwhNeed <= 0.05 || !locations.length) return null;
-  const preferCheap = false;
+  const preferCheap = focus === "pris";
   const userBand = Math.max(detourKm * 1000, 80);
   const searchBand = Math.max(chargeSearchKm(mode, detourKm, focus) * 1000, userBand);
 
@@ -650,7 +650,7 @@ export function pricePlan(opts: {
     const goodPrice = Boolean(cheap && cheap.krPerKwh <= live * CHEAP_VS_LIVE);
     const lowEnough = soc < 55 || socAfter < SUGGEST_SOC;
     const deep = socAfter < SUGGEST_SOC;
-    const suggested = !required && ((goodPrice && lowEnough) || (deep && focus !== "kwh"));
+    const suggested = !required && ((goodPrice && lowEnough) || (deep && focus !== "time"));
     const autoNeedSoc = required
       ? Math.max(TARGET_SOC - soc, RESERVE_SOC + (kwh / usableKwh) * 100 - soc)
       : Math.min(TARGET_SOC - soc, Math.max((kwh / usableKwh) * 100, 12));
@@ -664,7 +664,7 @@ export function pricePlan(opts: {
         ? Math.min(100, Math.max(minTarget, rawTarget))
         : null;
     const target = userTarget ?? autoTarget;
-    const wantCharge = required || suggested || userTarget != null;
+    const wantCharge = required || suggested || focus === "pris" || userTarget != null;
     const kwhNeed = Math.max((target - soc) / 100, 0) * usableKwh;
     const autoKwh = Math.max((autoTarget - soc) / 100, 0) * usableKwh;
     const chargeMinEst = (Math.max(kwhNeed, 5) / Math.max(acKw, 1)) * 60;
@@ -681,10 +681,12 @@ export function pricePlan(opts: {
       : null;
     const maxWaitMin =
       arriveCap != null
-        ? Math.min(arriveCap, focus === "time" ? Math.min(cheapestCap, maxNoDelay) : arriveCap)
-        : suggested
-          ? maxNoDelay
-          : 0;
+        ? Math.min(arriveCap, focus === "pris" ? cheapestCap : arriveCap)
+        : focus === "pris"
+          ? Math.max(maxNoDelay, cheapestCap)
+          : suggested
+            ? maxNoDelay
+            : 0;
     const pick = wantCharge
       ? pickCharges({
           kwhNeed: Math.max(kwhNeed, 5),
