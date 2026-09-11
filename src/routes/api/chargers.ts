@@ -234,10 +234,11 @@ async function fetchOcmAt(lat: number, lng: number, radiusKm: number): Promise<R
 }
 
 async function fetchOcm(path: [number, number][], samples: [number, number][], tightKm: number, wideKm: number) {
-  const tight = chargersOnPath(await fetchOcmPolyline(path, tightKm), path, wideKm);
-  if (tight.length >= 8) return tight;
-  const wide = chargersOnPath(await fetchOcmPolyline(path, wideKm), path, wideKm);
-  if (wide.length) return wide.length >= tight.length ? wide : tight;
+  const tightHits = chargersOnPath(await fetchOcmPolyline(path, tightKm), path, wideKm);
+  if (wideKm <= tightKm + 1 && tightHits.length >= 8) return tightHits;
+  const wideHits = chargersOnPath(await fetchOcmPolyline(path, wideKm), path, wideKm);
+  if (wideHits.length) return wideHits.length >= tightHits.length ? wideHits : tightHits;
+  if (tightHits.length) return tightHits;
   const chunks = await Promise.all(samples.slice(0, 4).map(([lat, lng]) => fetchOcmAt(lat, lng, wideKm)));
   const byId = new Map<string, RouteCharger>();
   for (const row of chunks.flat()) byId.set(row.id, row);
@@ -265,8 +266,12 @@ export const Route = createFileRoute("/api/chargers")({
           const path = downsample((body.path ?? []).filter((p) => Number.isFinite(p[0]) && Number.isFinite(p[1])));
           if (path.length < 2) return Response.json({ chargers: [], source: "none" });
           const buf = polylineBufferKm(path);
-          const tightKm = body.radiusKm && body.radiusKm > 0 ? Math.min(buf.tight, body.radiusKm) : buf.tight;
-          const wideKm = Math.max(buf.wide, tightKm);
+          const asked = Number(body.radiusKm);
+          const tightKm = buf.tight;
+          const wideKm = Math.min(
+            40,
+            Math.max(buf.wide, tightKm, Number.isFinite(asked) && asked > 0 ? asked : 0),
+          );
           const radiusM = wideKm * 1000;
           const seed = seedsAlongPath(path, radiusM);
           const samples = samplePath(path, 40_000, 8);

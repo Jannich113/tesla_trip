@@ -1,8 +1,13 @@
 export const LEG_MODES = ["eco", "standard", "fastest", "cheapest"] as const;
 export type LegMode = (typeof LEG_MODES)[number];
 
-export const DETOUR_KM = [0, 5, 10, 20] as const;
+export const DETOUR_KM = [8, 12, 18, 30] as const;
 export type DetourKm = (typeof DETOUR_KM)[number];
+export const DEFAULT_DETOUR_KM = 12;
+
+export const WAIT_MIN = [0, 30, 60, 120, 240] as const;
+export type WaitMin = (typeof WAIT_MIN)[number];
+export const DEFAULT_WAIT_MIN = 120;
 
 export type AutoCosting = {
   shortest: boolean;
@@ -22,7 +27,7 @@ export function modeLabel(mode: LegMode) {
 export function modeHint(mode: LegMode) {
   if (mode === "eco") return "Most efficient path — shorter roads, fewer highways and tolls";
   if (mode === "fastest") return "Highways and tolls for earliest arrival";
-  if (mode === "cheapest") return "Looks farther along the route for cheaper charging";
+  if (mode === "cheapest") return "Looks farther for cheaper charging, up to the detour and max wait";
   return "Recommended route";
 }
 
@@ -33,10 +38,16 @@ export function modeColor(mode: LegMode) {
   return "#c8cdd4";
 }
 
-/** Cheapest searches 3× the detour, at least 30 km, so cheaper sites off-path still count. */
-export function chargeSearchKm(mode: LegMode, detourKm: number) {
-  if (mode === "cheapest") return Math.max(detourKm * 3, 30);
-  return detourKm;
+/** Detour pill is the charge-search radius for every mode, including cheapest. */
+export function chargeSearchKm(_mode: LegMode, detourKm: number) {
+  return Math.max(0, detourKm);
+}
+
+export function formatWaitCap(min: number) {
+  if (min <= 0) return "0";
+  if (min < 60) return `${min}m`;
+  const h = min / 60;
+  return Number.isInteger(h) ? `${h}h` : `${min} min`;
 }
 
 export const SPEED_KMH = [50, 80, 110, 130] as const;

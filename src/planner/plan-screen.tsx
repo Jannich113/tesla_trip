@@ -5,6 +5,9 @@ import { BayMap, type MapMarker, type MapRoute } from "@/components/bay-map";
 import { searchAddress, type AddressHit } from "./search";
 import {
   DETOUR_KM,
+  WAIT_MIN,
+  DEFAULT_DETOUR_KM,
+  DEFAULT_WAIT_MIN,
   LEG_MODES,
   type LegMode,
   type LegWhen,
@@ -23,6 +26,7 @@ import {
   fetchRoute,
   formatDateTime,
   formatDetour,
+  formatWaitCap,
   interpolateWhPerMi,
   avgSpeedKmh,
   minutesToHm,
@@ -98,6 +102,7 @@ export function PlanScreen() {
   const stops = usePlanStore((s) => s.stops);
   const modes = usePlanStore((s) => s.modes);
   const detours = usePlanStore((s) => s.detours);
+  const waits = usePlanStore((s) => s.waits);
   const saved = usePlanStore((s) => s.saved);
   const setName = usePlanStore((s) => s.setName);
   const addStopToStore = usePlanStore((s) => s.addStop);
@@ -106,6 +111,7 @@ export function PlanScreen() {
   const moveStop = usePlanStore((s) => s.moveStop);
   const setLegMode = usePlanStore((s) => s.setLegMode);
   const setLegDetour = usePlanStore((s) => s.setLegDetour);
+  const setLegWait = usePlanStore((s) => s.setLegWait);
   const setAllModes = usePlanStore((s) => s.setAllModes);
   const whenKind = usePlanStore((s) => s.whenKind);
   const when = usePlanStore((s) => s.when);
@@ -258,7 +264,13 @@ export function PlanScreen() {
     return all;
   }, [selectedRoutes, routeMap, stops]);
 
-  const { chargers: routeChargers, loading: chargersLoading } = useRouteChargers(searchRoutes);
+  const { chargers: routeChargers, loading: chargersLoading } = useRouteChargers(
+    searchRoutes,
+    Math.max(
+      DEFAULT_DETOUR_KM,
+      ...stops.slice(1).map((_, i) => chargeSearchKm(activeModes[i] ?? "standard", detours[i] ?? DEFAULT_DETOUR_KM)),
+    ),
+  );
 
   const locations = useMemo(() => {
     const paths = searchRoutes.map((r) => r.path).filter((p) => p.length >= 2);
@@ -280,7 +292,8 @@ export function PlanScreen() {
 
   const planArgs = {
     stops,
-    detours: detours.length ? detours : stops.slice(1).map(() => 10),
+    detours: detours.length ? detours : stops.slice(1).map(() => DEFAULT_DETOUR_KM),
+    waitCapMin: waits.length ? waits : stops.slice(1).map(() => DEFAULT_WAIT_MIN),
     soc,
     usableKwh: profile.usableKwh,
     locations,
@@ -304,7 +317,7 @@ export function PlanScreen() {
       modes: activeModes,
       routes: selectedRoutes,
     });
-  }, [stops, activeModes, detours, selectedRoutes, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc, networkAbo]);
+  }, [stops, activeModes, detours, waits, selectedRoutes, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc, networkAbo]);
 
   const viewLegs = useMemo(() => {
     return legs.map((leg, i) => {
@@ -369,7 +382,7 @@ export function PlanScreen() {
         kwhPerMi: interpolateWhPerMi(speedEff, kmh) / 1000,
       };
     });
-  }, [routeMap, stops, detours, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc, networkAbo]);
+  }, [routeMap, stops, detours, waits, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc, networkAbo]);
 
   function addStop(hit: AddressHit) {
     addStopToStore({ name: hit.label.split(",")[0] || hit.label, lat: hit.lat, lng: hit.lng });
@@ -1088,13 +1101,11 @@ export function PlanScreen() {
                       )}
                     </div>
                     <p className="mt-3 text-[11px] font-medium uppercase tracking-wide text-muted">
-                      {(modes[userI] ?? "standard") === "cheapest"
-                        ? `Charge search · up to ${chargeSearchKm("cheapest", detours[userI] ?? 10)} km`
-                        : "Max charge detour"}
+                      Charge search
                     </p>
                     <div className="mt-1 flex gap-1">
                       {DETOUR_KM.map((km) => {
-                        const on = (detours[userI] ?? 10) === km;
+                        const on = (detours[userI] ?? DEFAULT_DETOUR_KM) === km;
                         return (
                           <button
                             key={km}
@@ -1110,6 +1121,31 @@ export function PlanScreen() {
                         );
                       })}
                     </div>
+                    {(modes[userI] ?? "standard") === "cheapest" ? (
+                      <>
+                        <p className="mt-3 text-[11px] font-medium uppercase tracking-wide text-muted">
+                          Max wait for cheap price
+                        </p>
+                        <div className="mt-1 flex gap-1">
+                          {WAIT_MIN.map((min) => {
+                            const on = (waits[userI] ?? DEFAULT_WAIT_MIN) === min;
+                            return (
+                              <button
+                                key={min}
+                                type="button"
+                                onClick={() => setLegWait(userI, min)}
+                                className={cn(
+                                  "h-8 flex-1 rounded-full text-[11px] font-medium",
+                                  on ? "bg-foreground text-background" : "bg-surface-2 text-muted",
+                                )}
+                              >
+                                {formatWaitCap(min)}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </>
+                    ) : null}
                     {leg?.charge ? (
                       <div className="mt-3 space-y-2">
                         <ChargeChoice

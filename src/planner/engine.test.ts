@@ -7,6 +7,7 @@ import {
   defaultSpeedEff,
   driveKwhAtSpeed,
   epaWhPerMi,
+  formatWaitCap,
   hoursFrom,
   interpolateWhPerMi,
   waitMinUntil,
@@ -50,11 +51,14 @@ describe("leg modes", () => {
     assert.deepEqual(costingFor("cheapest"), costingFor("standard"));
   });
 
-  it("cheapest searches at least 30 km, 3× the detour", () => {
-    assert.equal(chargeSearchKm("cheapest", 5), 30);
-    assert.equal(chargeSearchKm("cheapest", 20), 60);
-    assert.equal(chargeSearchKm("eco", 10), 10);
-    assert.equal(chargeSearchKm("fastest", 10), 10);
+  it("charge search radius equals the detour for every mode", () => {
+    assert.equal(chargeSearchKm("cheapest", 12), 12);
+    assert.equal(chargeSearchKm("cheapest", 30), 30);
+    assert.equal(chargeSearchKm("eco", 8), 8);
+    assert.equal(chargeSearchKm("fastest", 18), 18);
+    assert.equal(formatWaitCap(0), "0");
+    assert.equal(formatWaitCap(30), "30m");
+    assert.equal(formatWaitCap(120), "2h");
   });
 
   it("hoursFrom starts pricing at the planned clock", () => {

@@ -9,6 +9,7 @@ import {
   addMinutesHhmm,
   asDateTime,
   chargeSearchKm,
+  DEFAULT_DETOUR_KM,
   dkNowDateTime,
   dkNowParts,
   driveKwhAtSpeed,
@@ -33,9 +34,12 @@ import { estimateTolls } from "./tolls";
 export { alongFraction, haversineM, minDistToPathM, pathMeters, pickViaOnPath, splitRoutedLeg } from "./insert";
 
 export {
+  DEFAULT_DETOUR_KM,
+  DEFAULT_WAIT_MIN,
   DETOUR_KM,
   LEG_MODES,
   SPEED_KMH,
+  WAIT_MIN,
   addMinutesDateTime,
   addMinutesHhmm,
   asDateTime,
@@ -45,6 +49,7 @@ export {
   driveKwhAtSpeed,
   epaWhPerMi,
   formatDateTime,
+  formatWaitCap,
   hoursFrom,
   interpolateWhPerMi,
   avgSpeedKmh,
@@ -522,6 +527,7 @@ export function pricePlan(opts: {
   chargeToSoc?: Array<number | null | undefined>;
   backupIds?: Array<string | null | undefined>;
   memberships?: Record<string, boolean>;
+  waitCapMin?: number[];
 }): PricedLeg[] {
   const { stops, modes, detours, routes, usableKwh, locations, hours, acKw, acKr, speedEff } =
     opts;
@@ -544,7 +550,7 @@ export function pricePlan(opts: {
     from: stops[i],
     to: stops[i + 1],
     mode: modes[i] ?? "standard",
-    detourKm: detours[i] ?? 10,
+    detourKm: detours[i] ?? DEFAULT_DETOUR_KM,
     route,
     userIndex: i,
     via: false,
@@ -635,13 +641,21 @@ export function pricePlan(opts: {
       route.seconds / 60 + jobs.reduce((n, j) => n + j.route.seconds / 60, 0);
     const slack = minutesBetweenDateTime(readyAt, plannedStart);
     const maxNoDelay = Math.max(0, slack - chargeMinEst);
-    const maxWaitMin = opts.arriveHhmm
-      ? Math.max(0, minutesBetweenDateTime(readyAt, asDateTime(opts.arriveHhmm)) - chargeMinEst - restDriveMin)
-      : mode === "cheapest"
-        ? Math.max(maxNoDelay, 3 * 24 * 60)
-        : suggested
-          ? maxNoDelay
-          : 0;
+    const cheapestCap = Math.max(0, opts.waitCapMin?.[userIndex] ?? 120);
+    const arriveCap = opts.arriveHhmm
+      ? Math.max(
+          0,
+          minutesBetweenDateTime(readyAt, asDateTime(opts.arriveHhmm)) - chargeMinEst - restDriveMin,
+        )
+      : null;
+    const maxWaitMin =
+      arriveCap != null
+        ? Math.min(arriveCap, mode === "cheapest" ? cheapestCap : arriveCap)
+        : mode === "cheapest"
+          ? Math.max(maxNoDelay, cheapestCap)
+          : suggested
+            ? maxNoDelay
+            : 0;
     const pick = wantCharge
       ? pickCharges({
           kwhNeed: Math.max(kwhNeed, 5),

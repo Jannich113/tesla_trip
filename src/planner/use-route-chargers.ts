@@ -29,7 +29,7 @@ function asLocation(c: RouteCharger | ChargeLocation): ChargeLocation {
   };
 }
 
-export function useRouteChargers(routes: RoutedLeg[]) {
+export function useRouteChargers(routes: RoutedLeg[], radiusKm?: number) {
   const path = useMemo(() => {
     const out: [number, number][] = [];
     for (const r of routes) {
@@ -47,8 +47,9 @@ export function useRouteChargers(routes: RoutedLeg[]) {
 
   const local = useMemo(() => {
     if (path.length < 2) return [];
-    return seedsAlongPath(path, polylineBufferKm(path).wide * 1000).map(asLocation);
-  }, [path]);
+    const km = Math.max(polylineBufferKm(path).wide, radiusKm ?? 0);
+    return seedsAlongPath(path, km * 1000).map(asLocation);
+  }, [path, radiusKm]);
   const [live, setLive] = useState<ChargeLocation[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -64,7 +65,7 @@ export function useRouteChargers(routes: RoutedLeg[]) {
       void fetch("/api/chargers", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ path }),
+        body: JSON.stringify({ path, radiusKm }),
       })
         .then(async (res) => {
           const body = (await res.json()) as { chargers?: RouteCharger[]; error?: string };
@@ -84,7 +85,7 @@ export function useRouteChargers(routes: RoutedLeg[]) {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [key, path]);
+  }, [key, path, radiusKm]);
 
   const chargers = live.length ? live : local;
   return { chargers, loading, error, localCount: local.length };
