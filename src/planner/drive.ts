@@ -2,7 +2,7 @@ import { costingFor, type LegMode } from "./modes";
 import { estimateTolls } from "./tolls";
 import { decodePolyline, simplifyPath } from "./polyline";
 import { haversineM } from "./insert";
-import { pickRouted, ECO_EXTRA_SEC } from "./pick-route";
+import { pickRouted } from "./pick-route";
 import { noStore, publicCache } from "@/lib/http-cache";
 
 type Stop = { lat: number; lng: number };
@@ -161,15 +161,13 @@ async function highway(from: Stop, to: Stop): Promise<DriveRouteJson | null> {
   );
 }
 
-function okRoute(route: DriveRouteJson | null, from: Stop, to: Stop, capSec?: number) {
-  if (!route || !anchored(route.path, from, to) || route.seconds <= 0) return false;
-  if (capSec != null && route.seconds > capSec) return false;
-  return true;
+function okRoute(route: DriveRouteJson | null, from: Stop, to: Stop) {
+  return Boolean(route && anchored(route.path, from, to) && route.seconds > 0);
 }
 
 export async function routeDrive(from: Stop, to: Stop, mode: LegMode): Promise<DriveRouteJson | null> {
-  const base = await highway(from, to);
   if (mode === "fastest" || mode === "cheapest") {
+    const base = await highway(from, to);
     return base ? withTolls(base, mode, Boolean(base.hasToll)) : null;
   }
   const [noHwy, noToll, ecoV] = await Promise.all([
@@ -177,11 +175,10 @@ export async function routeDrive(from: Stop, to: Stop, mode: LegMode): Promise<D
     osrm(from, to, "&exclude=toll").catch(() => null),
     valhalla(from, to, "eco").catch(() => null),
   ]);
-  const cap = base ? base.seconds + ECO_EXTRA_SEC : undefined;
-  if (okRoute(noHwy, from, to, cap)) return withTolls(noHwy!, "eco", Boolean(noHwy!.hasToll));
-  if (okRoute(noToll, from, to, cap)) return withTolls(noToll!, "eco", Boolean(noToll!.hasToll));
-  if (okRoute(ecoV, from, to, cap)) return withTolls(ecoV!, "eco", Boolean(ecoV!.hasToll));
-  return base ? withTolls(base, "eco", Boolean(base.hasToll)) : null;
+  if (okRoute(noHwy, from, to)) return withTolls(noHwy!, "eco", Boolean(noHwy!.hasToll));
+  if (okRoute(noToll, from, to)) return withTolls(noToll!, "eco", Boolean(noToll!.hasToll));
+  if (okRoute(ecoV, from, to)) return withTolls(ecoV!, "eco", Boolean(ecoV!.hasToll));
+  return null;
 }
 
 function parsePoint(raw: string | null): Stop | null {
