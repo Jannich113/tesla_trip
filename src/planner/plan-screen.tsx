@@ -323,6 +323,7 @@ export function PlanScreen() {
     acceptCharge: stops.slice(1).map((_, i) => Boolean(acceptCharge[i])),
     chargeToSoc: stops.slice(1).map((_, i) => chargeToSoc[i] ?? null),
     backupIds: stops.slice(1).map((_, i) => backupLoc[i] ?? null),
+    preferIds: stops.slice(1).map((_, i) => prefer[i] ?? null),
     memberships: networkAbo,
     focuses: activeModes.map((m) => (m === "cheapest" ? "pris" : m === "eco" ? "distance" : "time")),
   };
@@ -334,7 +335,7 @@ export function PlanScreen() {
       modes: activeModes,
       routes: selectedRoutes,
     });
-  }, [stops, activeModes, cheapAvoidFees, detours, waits, selectedRoutes, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc, networkAbo]);
+  }, [stops, activeModes, cheapAvoidFees, detours, waits, selectedRoutes, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc, prefer, networkAbo]);
 
   const viewLegs = useMemo(() => {
     return legs.map((leg, i) => {
@@ -401,7 +402,7 @@ export function PlanScreen() {
         legs: priced,
       };
     });
-  }, [routeMap, stops, detours, waits, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc, networkAbo, cheapAvoidFees]);
+  }, [routeMap, stops, detours, waits, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc, prefer, networkAbo, cheapAvoidFees]);
 
   function addStop(hit: AddressHit) {
     addStopToStore({ name: hit.label.split(",")[0] || hit.label, lat: hit.lat, lng: hit.lng });
@@ -924,21 +925,24 @@ export function PlanScreen() {
           {timeline.map(({ stop, inbound, outbound, via, index: i }) => {
             const userI = outbound?.userIndex ?? inbound?.userIndex ?? Math.max(0, i - 1);
             const leg = inbound;
+            const chargedLeg = via ? inbound : inbound?.charge ? inbound : outbound;
             const open = Boolean(openStops[stop.id]);
             const selectedHere =
               selected === stop.id ||
               selected === `leg-${userI}` ||
               Boolean(selected?.startsWith(`chg-${userI}-`));
             const leftPct = inbound ? inbound.arriveSoc : soc;
-            const chargeLeg = outbound;
             const chargeTo =
-              chargeLeg?.charge && (chargeLeg.needed || chargeLeg.suggested || (!via && chargeToSoc[userI] != null))
-                ? chargeLeg.accepted
-                  ? chargeLeg.startSoc
-                  : chargeLeg.autoStartSoc
-                : null;
-            const extraKr = chargeLeg?.accepted ? chargeLeg.extraKr : 0;
-            const chargeRequired = Boolean(chargeLeg?.needed);
+              chargeToSoc[userI] ??
+              (chargedLeg?.charge
+                ? chargedLeg.accepted
+                  ? chargedLeg.startSoc
+                  : chargedLeg.autoStartSoc
+                : inbound || outbound
+                  ? leftPct
+                  : null);
+            const extraKr = chargedLeg?.accepted ? chargedLeg.extraKr : 0;
+            const chargeRequired = Boolean(chargedLeg?.needed);
             const inStore = stops.some((s) => s.id === stop.id);
             return (
               <li
@@ -954,7 +958,7 @@ export function PlanScreen() {
                     className="flex min-w-0 flex-1 items-center gap-3 text-left"
                     onClick={() => {
                       setSelected(inbound ? `leg-${userI}` : stop.id);
-                      if (inbound) setOpenStops((cur) => ({ ...cur, [stop.id]: !cur[stop.id] }));
+                      if (inbound || outbound) setOpenStops((cur) => ({ ...cur, [stop.id]: !cur[stop.id] }));
                     }}
                   >
                     <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-surface-2 text-xs tabular-nums text-muted">
@@ -969,15 +973,15 @@ export function PlanScreen() {
                         <span className="tabular-nums">
                           {formatNumber(leftPct, 0)}%{i === 0 ? " now" : " left"}
                         </span>
-                        {chargeTo != null ? (
+                        {chargedLeg?.charge ? (
                           <span
                             className={cn(
                               "tabular-nums",
                               chargeRequired ? "font-medium text-amber-300" : "font-medium text-emerald-400",
                             )}
                           >
-                            {chargeRequired ? " · required" : chargeLeg?.accepted ? " · accepted" : " · recommended"}
-                            {chargeLeg?.accepted && Math.abs(extraKr) >= 0.5
+                            {chargeRequired ? " · required" : chargedLeg.accepted ? " · accepted" : " · recommended"}
+                            {chargedLeg.accepted && Math.abs(extraKr) >= 0.5
                               ? ` · ${extraKr > 0 ? "+" : ""}${formatKrValue(extraKr, 0)} kr`
                               : ""}
                           </span>
@@ -995,7 +999,7 @@ export function PlanScreen() {
                         )
                       ) : null}
                     </div>
-                    {inbound ? (
+                    {inbound || outbound ? (
                       <ChevronDown className={cn("size-4 shrink-0 text-muted transition", open && "rotate-180")} />
                     ) : null}
                   </button>
@@ -1024,18 +1028,18 @@ export function PlanScreen() {
                       %
                     </label>
                   ) : null}
-                  {chargeTo != null && !chargeRequired ? (
+                  {chargeTo != null && chargedLeg?.charge && !chargeRequired ? (
                     <button
                       type="button"
                       onClick={() => setAcceptCharge((cur) => ({ ...cur, [userI]: !cur[userI] }))}
                       className={cn(
                         "h-8 shrink-0 rounded-full px-3 text-[11px] font-medium",
-                        chargeLeg?.accepted
+                        chargedLeg?.accepted
                           ? "bg-emerald-400 text-background"
                           : "bg-emerald-400/15 text-emerald-300",
                       )}
                     >
-                      {chargeLeg?.accepted ? "Accepted" : "Accept"}
+                      {chargedLeg?.accepted ? "Accepted" : "Accept"}
                     </button>
                   ) : null}
                   {inStore ? (
@@ -1049,8 +1053,9 @@ export function PlanScreen() {
                     </button>
                   ) : null}
                 </div>
-                {inbound && !via ? (
+                {(inbound || outbound) ? (
                   <div className="mt-2 pl-10">
+                    {inbound && !via ? (
                     <div className="flex rounded-full bg-surface-2 p-1">
                       {LEG_MODES.map((mode) => {
                         const on = (modes[userI] ?? "fastest") === mode;
@@ -1069,6 +1074,7 @@ export function PlanScreen() {
                         );
                       })}
                     </div>
+                    ) : null}
                     {open ? (
                       <div className="mt-3">
                     <p className="text-[11px] text-subtle">
@@ -1198,20 +1204,20 @@ export function PlanScreen() {
                         </div>
                       </>
                     ) : null}
-                    {leg?.charge ? (
+                    {chargedLeg?.charge ? (
                       <div className="mt-3 space-y-2">
                         <ChargeChoice
                           title={
-                            leg.advice === "required"
+                            chargedLeg.advice === "required"
                               ? "Charge required"
-                              : leg.advice === "suggested"
+                              : chargedLeg.advice === "suggested"
                                 ? "Suggested · good price"
                                 : "Charge here"
                           }
-                          spot={leg.charge}
+                          spot={chargedLeg.charge}
                           active
-                          required={leg.needed}
-                          suggested={leg.suggested}
+                          required={chargedLeg.needed}
+                          suggested={chargedLeg.suggested}
                         />
                         <label className="flex items-center justify-between gap-3 rounded-xl bg-surface-2 px-3 py-2">
                           <span className="text-xs text-muted">Charge to</span>
@@ -1221,7 +1227,8 @@ export function PlanScreen() {
                               min={1}
                               max={100}
                               value={Math.round(
-                                chargeToSoc[userI] ?? (leg.accepted ? leg.startSoc : leg.autoStartSoc),
+                                chargeToSoc[userI] ??
+                                  (chargedLeg.accepted ? chargedLeg.startSoc : chargedLeg.autoStartSoc),
                               )}
                               onChange={(e) => {
                                 const n = Number(e.target.value);
@@ -1235,34 +1242,34 @@ export function PlanScreen() {
                             %
                           </span>
                         </label>
-                        {leg.accepted && Math.abs(leg.extraKr) >= 0.5 ? (
+                        {chargedLeg.accepted && Math.abs(chargedLeg.extraKr) >= 0.5 ? (
                           <p
                             className={cn(
                               "text-[11px] font-medium",
-                              leg.extraKr > 0 ? "text-amber-300" : "text-emerald-300",
+                              chargedLeg.extraKr > 0 ? "text-amber-300" : "text-emerald-300",
                             )}
                           >
-                            {leg.extraKr > 0 ? "+" : ""}
-                            {formatKrValue(leg.extraKr, 0)} kr vs {formatNumber(leg.autoStartSoc, 0)}% plan
+                            {chargedLeg.extraKr > 0 ? "+" : ""}
+                            {formatKrValue(chargedLeg.extraKr, 0)} kr vs {formatNumber(chargedLeg.autoStartSoc, 0)}% plan
                           </p>
                         ) : null}
                         <button
                           type="button"
-                          onClick={() => insertCharge(userI, leg.charge!)}
+                          onClick={() => insertCharge(userI, chargedLeg.charge!)}
                           className="h-9 w-full rounded-full bg-surface-2 text-xs font-medium text-muted"
                         >
                           Add charger as stop
                         </button>
-                        {leg.needed ? (
+                        {chargedLeg.needed ? (
                           <p className="rounded-lg bg-amber-400/15 px-3 py-1.5 text-[11px] font-medium text-amber-200">
                             Charge required here to finish this leg
                           </p>
-                        ) : leg.suggested ? (
+                        ) : chargedLeg.suggested ? (
                           <p className="rounded-lg bg-emerald-400/15 px-3 py-1.5 text-[11px] font-medium text-emerald-300">
                             Optional · good price, battery low enough
                           </p>
                         ) : null}
-                        {leg.suggested && !leg.needed ? (
+                        {chargedLeg.suggested && !chargedLeg.needed ? (
                           <button
                             type="button"
                             onClick={() =>
@@ -1270,46 +1277,58 @@ export function PlanScreen() {
                             }
                             className={cn(
                               "h-9 w-full rounded-full text-xs font-medium",
-                              leg.accepted
+                              chargedLeg.accepted
                                 ? "bg-emerald-400 text-background"
                                 : "bg-emerald-400/15 text-emerald-300",
                             )}
                           >
-                            {leg.accepted ? "Accepted · SOC includes this charge" : "Accept recommended charge"}
+                            {chargedLeg.accepted ? "Accepted · SOC includes this charge" : "Accept recommended charge"}
                           </button>
                         ) : null}
-                        {leg.backup ? (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setPrefer((cur) => ({ ...cur, [userI]: leg.backup!.locationId }))
-                            }
-                            className="block w-full text-left"
-                          >
-                            <ChargeChoice
-                              title={backupLoc[userI] ? "Backup · manual" : "Backup"}
-                              spot={leg.backup}
-                              active={false}
-                            />
-                          </button>
-                        ) : (
-                          <p className="text-[11px] text-subtle">No backup in this detour</p>
-                        )}
+                      </div>
+                    ) : (
+                      <label className="mt-3 flex items-center justify-between gap-3 rounded-xl bg-surface-2 px-3 py-2">
+                        <span className="text-xs text-muted">Charge to</span>
+                        <span className="flex items-center gap-1 text-sm">
+                          <input
+                            type="number"
+                            min={1}
+                            max={100}
+                            value={Math.round(chargeToSoc[userI] ?? leftPct)}
+                            onChange={(e) => {
+                              const n = Number(e.target.value);
+                              if (!Number.isFinite(n)) return;
+                              const v = Math.max(1, Math.min(100, Math.round(n)));
+                              setChargeToSoc((cur) => ({ ...cur, [userI]: v }));
+                              setAcceptCharge((cur) => ({ ...cur, [userI]: true }));
+                            }}
+                            className="h-8 w-14 rounded-md bg-background text-center text-sm tabular-nums outline-none"
+                          />
+                          %
+                        </span>
+                      </label>
+                    )}
+                    <div className="mt-3">
                         <BackupPicks
-                          options={leg.chargeOptions}
-                          primaryId={leg.charge?.locationId}
-                          selectedId={backupLoc[userI]}
-                          onPick={(id) =>
+                          options={chargedLeg?.chargeOptions ?? []}
+                          primaryId={chargedLeg?.charge?.locationId}
+                          selectedId={prefer[userI] ?? backupLoc[userI]}
+                          onPick={(id) => {
+                            setPrefer((cur) => {
+                              const next = { ...cur };
+                              if (!id) delete next[userI];
+                              else next[userI] = id;
+                              return next;
+                            });
                             setBackupLoc((cur) => {
                               const next = { ...cur };
                               if (!id) delete next[userI];
                               else next[userI] = id;
                               return next;
-                            })
-                          }
+                            });
+                          }}
                         />
-                      </div>
-                    ) : null}
+                    </div>
                       </div>
                     ) : null}
                   </div>
@@ -1588,11 +1607,14 @@ function BackupPicks({
   selectedId?: string;
   onPick: (id: string) => void;
 }) {
-  const list = options.filter((o) => o.locationId !== primaryId).slice(0, 8);
+  const list = [...options]
+    .sort((a, b) => a.distM - b.distM)
+    .filter((o, i, arr) => arr.findIndex((x) => x.locationId === o.locationId) === i)
+    .slice(0, 12);
   if (!list.length) return null;
   return (
     <div>
-      <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Backup · nearest / cheapest</p>
+      <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Nearby chargers</p>
       <ul className="mt-1 divide-y divide-border rounded-xl bg-surface-2">
         <li>
           <button
@@ -1604,7 +1626,7 @@ function BackupPicks({
           </button>
         </li>
         {list.map((o) => {
-          const on = selectedId === o.locationId;
+          const on = selectedId === o.locationId || (!selectedId && o.locationId === primaryId);
           return (
             <li key={o.locationId}>
               <button
@@ -1617,6 +1639,7 @@ function BackupPicks({
                   <span className="block text-[11px] text-subtle">
                     {formatKrPerKwh(o.rateKr, 2)}
                     {Number.isFinite(o.distM) ? ` · ${(o.distM / 1000).toFixed(1)} km` : ""}
+                    {o.locationId === primaryId ? " · current" : ""}
                     {o.cheapest ? " · cheapest" : ""}
                     {o.nearest ? " · nearest" : ""}
                   </span>

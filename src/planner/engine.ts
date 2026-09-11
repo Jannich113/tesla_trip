@@ -440,9 +440,10 @@ export function pickCharges(opts: {
   clockHhmm: string;
   maxWaitMin: number;
   backupId?: string | null;
+  preferId?: string | null;
   memberships?: Record<string, boolean>;
 }): { primary: PricedCharge; backup: PricedCharge | null; options: PricedCharge[] } | null {
-  const { kwhNeed, path, detourKm, mode, locations, acKr, hours, acKw, speedEff, clockHhmm, maxWaitMin, backupId, memberships = {} } = opts;
+  const { kwhNeed, path, detourKm, mode, locations, acKr, hours, acKw, speedEff, clockHhmm, maxWaitMin, backupId, preferId, memberships = {} } = opts;
   const focus = opts.focus ?? defaultFocus(mode);
   if (kwhNeed <= 0.05 || !locations.length) return null;
   const preferCheap = focus === "pris";
@@ -501,7 +502,11 @@ export function pickCharges(opts: {
 
   const inSearch = scored.filter((s) => s.distM <= searchBand).sort(byRank);
   const outside = scored.filter((s) => s.distM > searchBand).sort(byRank);
-  const primarySrc = inSearch[0] ?? (preferCheap ? outside[0] : null);
+  const forced =
+    preferId
+      ? scored.find((s) => s.loc.id === preferId && s.distM <= Math.max(searchBand, 40_000))
+      : null;
+  const primarySrc = forced ?? inSearch[0] ?? (preferCheap ? outside[0] : null);
   if (!primarySrc) return null;
 
   const backupSrc =
@@ -552,6 +557,7 @@ export function pricePlan(opts: {
   memberships?: Record<string, boolean>;
   waitCapMin?: number[];
   focuses?: ModeFocus[];
+  preferIds?: Array<string | null | undefined>;
 }): PricedLeg[] {
   const { stops, modes, detours, routes, usableKwh, locations, hours, acKw, acKr, speedEff } =
     opts;
@@ -701,6 +707,7 @@ export function pricePlan(opts: {
           clockHhmm: readyAt,
           maxWaitMin,
           backupId: via ? job.to.id.replace(/^via-/, "") : opts.backupIds?.[userIndex] ?? null,
+          preferId: opts.preferIds?.[userIndex] ?? null,
           memberships: opts.memberships,
         })
       : null;
