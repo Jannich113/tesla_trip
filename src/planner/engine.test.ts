@@ -147,7 +147,7 @@ describe("leg modes", () => {
 
   it("covers the whole EU plus near-EU road countries", () => {
     const ids = EU_REGIONS.map((r) => r.id);
-    for (const need of ["PL", "IT", "ES", "FI", "IE", "GR", "RO", "NO", "CH"]) {
+    for (const need of ["PL", "IT", "ES", "FI", "IE", "GR", "RO", "NO", "CH", "IS", "RS", "UA", "TR", "AL"]) {
       assert.ok(ids.includes(need as (typeof ids)[number]), need);
     }
     const tesla = EU_NETWORKS.find((n) => n.id === "tesla")!;

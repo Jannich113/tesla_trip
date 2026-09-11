@@ -244,19 +244,48 @@ export type EuRegion =
   | "SI"
   | "UK"
   | "NO"
-  | "CH";
+  | "CH"
+  | "IS"
+  | "FO"
+  | "LI"
+  | "AD"
+  | "MC"
+  | "SM"
+  | "AL"
+  | "BA"
+  | "MK"
+  | "ME"
+  | "RS"
+  | "XK"
+  | "UA"
+  | "MD"
+  | "BY"
+  | "RU"
+  | "TR";
 
-export type EuBloc = "nordic" | "baltics" | "dach" | "benelux" | "west" | "south" | "east" | "near";
+export type EuBloc =
+  | "nordic"
+  | "baltics"
+  | "dach"
+  | "benelux"
+  | "west"
+  | "south"
+  | "east"
+  | "balkans"
+  | "steppe"
+  | "near";
 
 export const EU_BLOCS: { id: EuBloc; label: string; ids: readonly EuRegion[] }[] = [
-  { id: "nordic", label: "Nordics", ids: ["DK", "SE", "FI"] },
+  { id: "nordic", label: "Nordics", ids: ["DK", "SE", "FI", "IS", "FO"] },
   { id: "baltics", label: "Baltics", ids: ["EE", "LV", "LT"] },
-  { id: "dach", label: "DACH", ids: ["DE", "AT"] },
+  { id: "dach", label: "DACH", ids: ["DE", "AT", "LI"] },
   { id: "benelux", label: "Benelux", ids: ["NL", "BE", "LU"] },
-  { id: "west", label: "West", ids: ["FR", "IE"] },
-  { id: "south", label: "South", ids: ["IT", "ES", "PT", "GR", "MT", "CY"] },
-  { id: "east", label: "East", ids: ["PL", "CZ", "SK", "HU", "RO", "BG", "HR", "SI"] },
-  { id: "near", label: "Near EU", ids: ["UK", "NO", "CH"] },
+  { id: "west", label: "West", ids: ["FR", "IE", "AD", "MC"] },
+  { id: "south", label: "South", ids: ["IT", "ES", "PT", "GR", "MT", "CY", "SM"] },
+  { id: "east", label: "East EU", ids: ["PL", "CZ", "SK", "HU", "RO", "BG", "HR", "SI"] },
+  { id: "balkans", label: "Balkans", ids: ["AL", "BA", "MK", "ME", "RS", "XK"] },
+  { id: "steppe", label: "East", ids: ["UA", "MD", "BY", "RU", "TR"] },
+  { id: "near", label: "Near", ids: ["UK", "NO", "CH"] },
 ];
 
 export const EU_REGIONS: { id: EuRegion; label: EuRegion; bloc: EuBloc }[] = EU_BLOCS.flatMap((b) =>
@@ -293,9 +322,22 @@ export const REGION_MARKETS: Record<string, Partial<Record<EuRegion, MarketCell>
       west: cell(dkkFromEur(0.45), null),
       south: cell(dkkFromEur(0.48), null),
       east: cell(dkkFromEur(0.44), null),
+      balkans: cell(dkkFromEur(0.42), null),
+      steppe: cell(dkkFromEur(0.4), null),
       near: cell(dkkFromEur(0.55), null),
     },
-    { DK: cell(dkkFromEur(0.48), null), UK: cell(dkkFromEur(0.62), null), NO: cell(dkkFromEur(0.38), null) },
+    {
+      DK: cell(dkkFromEur(0.48), null),
+      UK: cell(dkkFromEur(0.62), null),
+      NO: cell(dkkFromEur(0.38), null),
+      IS: cell(dkkFromEur(0.45), null),
+      FO: cell(null, null),
+      BY: cell(null, null),
+      LI: cell(null, null),
+      AD: cell(null, null),
+      MC: cell(null, null),
+      SM: cell(null, null),
+    },
   ),
   ionity: spread(
     {
@@ -305,6 +347,8 @@ export const REGION_MARKETS: Record<string, Partial<Record<EuRegion, MarketCell>
       west: cell(dkkFromEur(0.59), null),
       south: cell(dkkFromEur(0.69), null),
       east: cell(dkkFromEur(0.62), null),
+      balkans: cell(null, null),
+      steppe: cell(null, null),
       near: cell(dkkFromEur(0.85), null),
       baltics: cell(null, null),
     },
@@ -317,6 +361,12 @@ export const REGION_MARKETS: Record<string, Partial<Record<EuRegion, MarketCell>
       UK: cell(dkkFromEur(0.93), null),
       CH: cell(dkkFromEur(0.79), null),
       NO: cell(null, null),
+      IS: cell(null, null),
+      FO: cell(null, null),
+      LI: cell(null, null),
+      AD: cell(null, null),
+      MC: cell(null, null),
+      SM: cell(null, null),
       MT: cell(null, null),
       CY: cell(null, null),
     },
@@ -331,8 +381,19 @@ export const REGION_MARKETS: Record<string, Partial<Record<EuRegion, MarketCell>
       baltics: cell(null, null),
       south: cell(null, null),
       east: cell(null, null),
+      balkans: cell(null, null),
+      steppe: cell(null, null),
     },
-    { AT: cell(null, null), IE: cell(null, null), CH: cell(null, null), NO: cell(null, null), LU: cell(dkkFromEur(0.69), null) },
+    {
+      AT: cell(null, null),
+      LI: cell(null, null),
+      IE: cell(null, null),
+      AD: cell(null, null),
+      MC: cell(null, null),
+      CH: cell(null, null),
+      NO: cell(null, null),
+      LU: cell(dkkFromEur(0.69), null),
+    },
   ),
   allego: spread(
     {
@@ -343,9 +404,20 @@ export const REGION_MARKETS: Record<string, Partial<Record<EuRegion, MarketCell>
       baltics: cell(null, dkkFromEur(0.79)),
       south: cell(null, dkkFromEur(0.75)),
       east: cell(null, dkkFromEur(0.72)),
+      balkans: cell(null, dkkFromEur(0.7)),
+      steppe: cell(null, dkkFromEur(0.65)),
       near: cell(null, dkkFromEur(0.85)),
     },
-    { NL: cell(dkkFromEur(0.793), dkkFromEur(0.79)), AT: cell(null, dkkFromEur(0.79)), CH: cell(null, null), NO: cell(null, dkkFromEur(0.75)) },
+    {
+      NL: cell(dkkFromEur(0.793), dkkFromEur(0.79)),
+      AT: cell(null, dkkFromEur(0.79)),
+      CH: cell(null, null),
+      NO: cell(null, dkkFromEur(0.75)),
+      IS: cell(null, null),
+      FO: cell(null, null),
+      BY: cell(null, null),
+      RU: cell(null, null),
+    },
   ),
   electra: spread(
     {
@@ -356,9 +428,18 @@ export const REGION_MARKETS: Record<string, Partial<Record<EuRegion, MarketCell>
       nordic: cell(null, dkkFromEur(0.79)),
       baltics: cell(null, dkkFromEur(0.79)),
       east: cell(null, dkkFromEur(0.75)),
+      balkans: cell(null, dkkFromEur(0.7)),
+      steppe: cell(null, null),
       near: cell(null, null),
     },
-    { BE: cell(dkkFromEur(0.54), dkkFromEur(0.75)), IT: cell(dkkFromEur(0.54), dkkFromEur(0.72)), LU: cell(null, dkkFromEur(0.75)), IE: cell(null, null) },
+    {
+      BE: cell(dkkFromEur(0.54), dkkFromEur(0.75)),
+      IT: cell(dkkFromEur(0.54), dkkFromEur(0.72)),
+      LU: cell(null, dkkFromEur(0.75)),
+      IE: cell(null, null),
+      IS: cell(null, null),
+      FO: cell(null, null),
+    },
   ),
   enbw: spread(
     {
@@ -369,9 +450,19 @@ export const REGION_MARKETS: Record<string, Partial<Record<EuRegion, MarketCell>
       west: cell(null, dkkFromEur(0.73)),
       south: cell(null, dkkFromEur(0.75)),
       east: cell(null, dkkFromEur(0.7)),
+      balkans: cell(null, dkkFromEur(0.7)),
+      steppe: cell(null, null),
       near: cell(null, dkkFromEur(0.8)),
     },
-    { AT: cell(dkkFromEur(0.59), dkkFromEur(0.85)), UK: cell(null, null), NO: cell(null, dkkFromEur(0.7)), CH: cell(dkkFromEur(0.59), dkkFromEur(0.8)) },
+    {
+      AT: cell(dkkFromEur(0.59), dkkFromEur(0.85)),
+      LI: cell(null, dkkFromEur(0.8)),
+      UK: cell(null, null),
+      NO: cell(null, dkkFromEur(0.7)),
+      CH: cell(dkkFromEur(0.59), dkkFromEur(0.8)),
+      IS: cell(null, null),
+      FO: cell(null, null),
+    },
   ),
   clever: spread(
     {
@@ -382,9 +473,17 @@ export const REGION_MARKETS: Record<string, Partial<Record<EuRegion, MarketCell>
       south: cell(null, 5.49),
       east: cell(null, 5.49),
       baltics: cell(null, 5.49),
+      balkans: cell(null, 5.49),
+      steppe: cell(null, null),
       near: cell(null, null),
     },
-    { FI: cell(null, 5.49), NO: cell(null, 5.49), CH: cell(null, 5.49) },
+    {
+      FI: cell(null, 5.49),
+      IS: cell(null, 5.49),
+      FO: cell(null, 5.49),
+      NO: cell(null, 5.49),
+      CH: cell(null, 5.49),
+    },
   ),
   eon: spread(
     {
@@ -395,9 +494,11 @@ export const REGION_MARKETS: Record<string, Partial<Record<EuRegion, MarketCell>
       south: cell(null, dkkFromEur(0.79)),
       east: cell(null, dkkFromEur(0.72)),
       baltics: cell(null, dkkFromEur(0.75)),
+      balkans: cell(null, dkkFromEur(0.72)),
+      steppe: cell(null, dkkFromEur(0.65)),
       near: cell(null, dkkFromEur(0.79)),
     },
-    { FI: cell(null, 5.2), UK: cell(null, null), CH: cell(null, dkkFromEur(0.79)) },
+    { FI: cell(null, 5.2), IS: cell(null, null), FO: cell(null, 5.2), UK: cell(null, null), CH: cell(null, dkkFromEur(0.79)), BY: cell(null, null), RU: cell(null, null) },
   ),
   spirii: spread({
     nordic: cell(null, 3.7),
@@ -407,6 +508,8 @@ export const REGION_MARKETS: Record<string, Partial<Record<EuRegion, MarketCell>
     west: cell(null, dkkFromEur(0.75)),
     south: cell(null, dkkFromEur(0.72)),
     east: cell(null, dkkFromEur(0.68)),
+    balkans: cell(null, dkkFromEur(0.65)),
+    steppe: cell(null, dkkFromEur(0.6)),
     near: cell(null, dkkFromEur(0.85)),
   }),
   shell: spread(
@@ -418,9 +521,20 @@ export const REGION_MARKETS: Record<string, Partial<Record<EuRegion, MarketCell>
       west: cell(dkkFromEur(0.65), dkkFromEur(0.75)),
       south: cell(dkkFromEur(0.62), dkkFromEur(0.72)),
       east: cell(dkkFromEur(0.58), dkkFromEur(0.7)),
+      balkans: cell(null, dkkFromEur(0.65)),
+      steppe: cell(null, dkkFromEur(0.6)),
       near: cell(dkkFromEur(0.7), dkkFromEur(0.82)),
     },
-    { DK: cell(dkkFromEur(0.65), dkkFromEur(0.79)), UK: cell(dkkFromEur(0.72), dkkFromEur(0.85)), MT: cell(null, dkkFromEur(0.72)), CY: cell(null, dkkFromEur(0.72)) },
+    {
+      DK: cell(dkkFromEur(0.65), dkkFromEur(0.79)),
+      UK: cell(dkkFromEur(0.72), dkkFromEur(0.85)),
+      MT: cell(null, dkkFromEur(0.72)),
+      CY: cell(null, dkkFromEur(0.72)),
+      IS: cell(null, dkkFromEur(0.7)),
+      FO: cell(null, dkkFromEur(0.7)),
+      BY: cell(null, null),
+      RU: cell(null, null),
+    },
   ),
   aral: spread(
     {
@@ -431,9 +545,11 @@ export const REGION_MARKETS: Record<string, Partial<Record<EuRegion, MarketCell>
       west: cell(null, dkkFromEur(0.79)),
       south: cell(null, dkkFromEur(0.79)),
       east: cell(null, dkkFromEur(0.72)),
+      balkans: cell(null, dkkFromEur(0.7)),
+      steppe: cell(null, null),
       near: cell(null, null),
     },
-    { DE: cell(dkkFromEur(0.79), dkkFromEur(0.79)), CH: cell(null, dkkFromEur(0.79)) },
+    { DE: cell(dkkFromEur(0.79), dkkFromEur(0.79)), CH: cell(null, dkkFromEur(0.79)), IS: cell(null, null), FO: cell(null, null) },
   ),
   total: spread(
     {
@@ -444,9 +560,11 @@ export const REGION_MARKETS: Record<string, Partial<Record<EuRegion, MarketCell>
       nordic: cell(null, dkkFromEur(0.69)),
       baltics: cell(null, dkkFromEur(0.69)),
       east: cell(null, dkkFromEur(0.65)),
+      balkans: cell(null, dkkFromEur(0.62)),
+      steppe: cell(null, dkkFromEur(0.6)),
       near: cell(null, dkkFromEur(0.75)),
     },
-    { IE: cell(null, dkkFromEur(0.69)), UK: cell(null, null), CH: cell(null, dkkFromEur(0.69)) },
+    { IE: cell(null, dkkFromEur(0.69)), UK: cell(null, null), CH: cell(null, dkkFromEur(0.69)), IS: cell(null, null), FO: cell(null, null), BY: cell(null, null), RU: cell(null, null) },
   ),
 };
 
