@@ -899,70 +899,8 @@ export function PlanScreen() {
 
       <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
         <p className="text-sm font-medium">Stops</p>
-        <div className="mt-3 space-y-4">
-          {optionRows.map((row) => (
-            <div key={`stops-${row.mode}`}>
-              <p className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide">
-                <span className="size-2 rounded-full" style={{ background: modeColor(row.mode) }} />
-                <span style={{ color: modeColor(row.mode) }}>{modeLabel(row.mode)}</span>
-                {row.totals ? (
-                  <span className="font-normal normal-case tracking-normal text-subtle">
-                    {row.totals.charges
-                      ? `${row.totals.charges} ${row.totals.charges === 1 ? "charge" : "charges"}`
-                      : "no charge"}
-                  </span>
-                ) : null}
-              </p>
-              {row.legs.length ? (
-                <ol className="mt-1.5 space-y-1">
-                  {row.legs.map((leg, i) => (
-                    <li key={`${row.mode}-${i}-${leg.to.id}`} className="text-xs">
-                      {i === 0 ? (
-                        <p className="text-muted">
-                          {leg.from.name}
-                          <span className="text-subtle"> → </span>
-                        </p>
-                      ) : null}
-                      {leg.charge ? (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setAllModes(row.mode);
-                            setSelected(`chg-${row.mode}-${i}-${leg.charge!.locationId}`);
-                          }}
-                          className="flex w-full items-baseline justify-between gap-2 text-left"
-                        >
-                          <span className="min-w-0 truncate font-medium" style={{ color: modeColor(row.mode) }}>
-                            {leg.via ? "via " : ""}
-                            {leg.charge.name}
-                            {leg.needed ? " · required" : leg.suggested ? " · suggested" : ""}
-                          </span>
-                          <span className="shrink-0 tabular-nums text-muted">
-                            {formatNumber(leg.charge.kwh, 0)} kWh · {formatKrValue(leg.charge.kr, 0)} kr
-                          </span>
-                        </button>
-                      ) : null}
-                      {!leg.via ? (
-                        <p className={cn(leg.charge ? "text-subtle" : "text-muted")}>
-                          {leg.to.name}
-                          <span className="text-subtle">
-                            {" "}
-                            · {formatDistance(leg.route.miles, units, 0)} · {minutesToHm(leg.route.seconds / 60)}
-                          </span>
-                        </p>
-                      ) : null}
-                    </li>
-                  ))}
-                </ol>
-              ) : (
-                <p className="mt-1 text-xs text-subtle">{routing ? "Routing…" : "Add a destination"}</p>
-              )}
-            </div>
-          ))}
-        </div>
-        <p className="mt-5 text-[11px] font-medium uppercase tracking-wide text-muted">Edit plan</p>
         <ol className="mt-2">
-          {timeline.map(({ stop, inbound, outbound, via, index: i }) => {
+          {timeline.filter((row) => !row.via).map(({ stop, inbound, outbound, via, index: i }) => {
             const userI = outbound?.userIndex ?? inbound?.userIndex ?? Math.max(0, i - 1);
             const leg = inbound;
             const open = Boolean(openStops[stop.id]);
@@ -1024,14 +962,36 @@ export function PlanScreen() {
                           </span>
                         ) : null}
                       </p>
-                      {!open && inbound?.backup ? (
-                        <p className="truncate text-[11px] text-subtle">Backup · {inbound.backup.name}</p>
-                      ) : !open && inbound?.charge ? (
-                        <p className="truncate text-[11px] text-subtle">{inbound.charge.name}</p>
-                      ) : !open && outbound?.backup ? (
-                        <p className="truncate text-[11px] text-subtle">Backup · {outbound.backup.name}</p>
-                      ) : !open && outbound?.charge ? (
-                        <p className="truncate text-[11px] text-subtle">{outbound.charge.name}</p>
+                      {inbound ? (
+                        <div className="mt-1 space-y-0.5">
+                          {LEG_MODES.map((mode) => {
+                            const hits =
+                              optionRows
+                                .find((r) => r.mode === mode)
+                                ?.legs.filter((l) => l.userIndex === userI && l.charge) ?? [];
+                            if (!hits.length) {
+                              return (
+                                <p key={mode} className="truncate text-[11px]" style={{ color: modeColor(mode) }}>
+                                  {modeLabel(mode)} · no charge
+                                </p>
+                              );
+                            }
+                            return hits.map((leg) => (
+                              <p
+                                key={`${mode}-${leg.to.id}-${leg.charge?.locationId}`}
+                                className="truncate text-[11px]"
+                                style={{ color: modeColor(mode) }}
+                              >
+                                {modeLabel(mode)}
+                                {leg.via ? " · via " : " · "}
+                                {leg.charge?.name}
+                                {leg.charge
+                                  ? ` · ${formatNumber(leg.charge.kwh, 0)} kWh · ${formatKrValue(leg.charge.kr, 0)} kr`
+                                  : ""}
+                              </p>
+                            ));
+                          })}
+                        </div>
                       ) : null}
                     </div>
                     {inbound ? (
