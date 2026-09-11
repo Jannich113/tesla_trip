@@ -35,9 +35,9 @@ export function modeLabel(mode: LegMode) {
 }
 
 export function modeHint(mode: LegMode) {
-  if (mode === "eco") return "110 km/t cap, trims tolls when it doesn’t add hours. Still a real road.";
-  if (mode === "cheapest") return "Same motorway as Fastest. Picks the cheapest stalls along it.";
-  return "Motorways and tolls for earliest arrival.";
+  if (mode === "eco") return "Highway if a quiet road would add hours. 110 km/t cap.";
+  if (mode === "cheapest") return "Same road as Fastest. Lowest kWh along it.";
+  return "Earliest arrival. Motorways and tolls.";
 }
 
 export function modeColor(mode: LegMode) {

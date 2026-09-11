@@ -27,30 +27,18 @@ function pickValhallaTrip(
     summary?: { length?: number; time?: number; has_toll?: boolean };
     legs?: Array<{ shape?: { coordinates?: [number, number][] } | string }>;
   }>,
-  mode: LegMode,
 ) {
   if (!trips.length) return null;
-  if (mode === "eco") {
-    return trips.reduce((best, trip) => {
-      const toll = Number(Boolean(trip.summary?.has_toll));
-      const bestToll = Number(Boolean(best.summary?.has_toll));
-      if (toll !== bestToll) return toll < bestToll ? trip : best;
-      return Number(trip.summary?.length ?? Infinity) < Number(best.summary?.length ?? Infinity) ? trip : best;
-    });
-  }
-  if (mode === "fastest" || mode === "cheapest") {
-    return trips.reduce((best, trip) =>
-      Number(trip.summary?.time ?? Infinity) < Number(best.summary?.time ?? Infinity) ? trip : best,
-    );
-  }
-  return trips[0];
+  return trips.reduce((best, trip) =>
+    Number(trip.summary?.time ?? Infinity) < Number(best.summary?.time ?? Infinity) ? trip : best,
+  );
 }
 
 function pathFromShape(shape: { coordinates?: [number, number][] } | string | undefined) {
   if (typeof shape === "string" && shape.length > 4) {
     for (const prec of [6, 5]) {
       const decoded = decodePolyline(shape, prec);
-      if (decoded.length >= 8) return simplifyPath(decoded, 160);
+      if (decoded.length >= 3) return simplifyPath(decoded, 160);
     }
     return [];
   }
@@ -106,10 +94,10 @@ async function valhalla(from: Stop, to: Stop, mode: LegMode): Promise<DriveRoute
   const trips = [body.trip, ...(body.alternates ?? []).map((alt) => alt.trip)].filter(
     (trip): trip is NonNullable<typeof trip> => Boolean(trip),
   );
-  const trip = pickValhallaTrip(trips, mode);
+  const trip = pickValhallaTrip(trips);
   const summary = trip?.summary;
   const path = pathFromShape(trip?.legs?.[0]?.shape);
-  if (!summary || path.length < 2) return null;
+  if (!summary || path.length < 3) return null;
   return withTolls(
     {
       miles: Number(summary.length) || 0,
@@ -128,36 +116,28 @@ type OsrmRoute = {
   geometry?: { coordinates?: [number, number][] };
 };
 
-function pickOsrm(routes: OsrmRoute[], mode: LegMode) {
+function pickOsrm(routes: OsrmRoute[]) {
   if (!routes.length) return null;
-  if (mode === "eco") {
-    return routes.reduce((best, route) =>
-      Number(route.distance ?? Infinity) < Number(best.distance ?? Infinity) ? route : best,
-    );
-  }
-  if (mode === "fastest" || mode === "cheapest") {
-    return routes.reduce((best, route) =>
-      Number(route.duration ?? Infinity) < Number(best.duration ?? Infinity) ? route : best,
-    );
-  }
-  return routes[0];
+  return routes.reduce((best, route) =>
+    Number(route.duration ?? Infinity) < Number(best.duration ?? Infinity) ? route : best,
+  );
 }
 
-async function osrmOnce(from: Stop, to: Stop, mode: LegMode, extra: string): Promise<DriveRouteJson | null> {
+async function osrm(from: Stop, to: Stop): Promise<DriveRouteJson | null> {
   const url =
     `https://router.project-osrm.org/route/v1/driving/` +
     `${from.lng},${from.lat};${to.lng},${to.lat}` +
-    `?overview=simplified&geometries=geojson&alternatives=${mode === "eco" ? "true" : "false"}${extra}`;
+    `?overview=simplified&geometries=geojson&alternatives=false`;
   const res = await fetch(url, { headers: { Accept: "application/json" } });
   if (!res.ok) return null;
   const body = (await res.json()) as { routes?: OsrmRoute[] };
-  const route = pickOsrm(body.routes ?? [], mode);
+  const route = pickOsrm(body.routes ?? []);
   const path: [number, number][] = [];
   for (const pt of route?.geometry?.coordinates ?? []) {
     const [lng, lat] = pt;
     if (Number.isFinite(lat) && Number.isFinite(lng)) path.push([lat, lng]);
   }
-  if (!route || path.length < 2) return null;
+  if (!route || path.length < 3) return null;
   return withTolls(
     {
       miles: (Number(route.distance) || 0) / 1609.344,
@@ -165,24 +145,36 @@ async function osrmOnce(from: Stop, to: Stop, mode: LegMode, extra: string): Pro
       path: simplifyPath(path, 160),
       source: "osrm",
     },
-    mode,
+    "fastest",
     false,
   );
 }
 
-async function osrm(from: Stop, to: Stop, mode: LegMode): Promise<DriveRouteJson | null> {
-  return osrmOnce(from, to, mode, "");
+async function highway(from: Stop, to: Stop): Promise<DriveRouteJson | null> {
+  const [v, o] = await Promise.all([
+    valhalla(from, to, "fastest").catch(() => null),
+    osrm(from, to).catch(() => null),
+  ]);
+  return pickRouted(
+    "fastest",
+    [v, o].filter((r): r is DriveRouteJson => Boolean(r && anchored(r.path, from, to))),
+  );
 }
 
 export async function routeDrive(from: Stop, to: Stop, mode: LegMode): Promise<DriveRouteJson | null> {
-  const [v, o] = await Promise.all([
-    valhalla(from, to, mode).catch(() => null),
-    osrm(from, to, mode).catch(() => null),
-  ]);
-  return pickRouted(
-    mode,
-    [v, o].filter((r): r is DriveRouteJson => Boolean(r && anchored(r.path, from, to))),
-  );
+  const base = await highway(from, to);
+  if (!base) return null;
+  if (mode !== "eco") return withTolls(base, mode, Boolean(base.hasToll));
+  const eco = await valhalla(from, to, "eco").catch(() => null);
+  if (
+    eco &&
+    anchored(eco.path, from, to) &&
+    eco.seconds > 0 &&
+    eco.seconds <= base.seconds * 1.25
+  ) {
+    return withTolls(eco, "eco", Boolean(eco.hasToll));
+  }
+  return withTolls(base, "eco", Boolean(base.hasToll));
 }
 
 function parsePoint(raw: string | null): Stop | null {

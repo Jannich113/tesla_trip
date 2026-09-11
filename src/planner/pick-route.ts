@@ -8,7 +8,7 @@ export type DriveCandidate = {
   tollKr?: number;
 };
 
-const TIME_CAP: Record<string, number> = { eco: 1.45, cheapest: 1.15, fastest: 1.08 };
+const TIME_CAP: Record<string, number> = { eco: 1.25, cheapest: 1.12, fastest: 1.08 };
 
 /** Never pick a 34 h goat path just because it has no tolls. */
 export function pickRouted<T extends DriveCandidate>(mode: LegMode, routes: T[]): T | null {
