@@ -81,17 +81,20 @@ export function pathMode(mode: LegMode, avoidFees = false): LegMode {
 
 /** Extra drive time cheapest may spend vs Fastest to reach a cheaper stall. */
 export const CHEAP_TIME_FRAC = 0.15;
+/** Net save must be at least this many times the extra drive cost. */
+export const SAVE_WEIGHT = 3;
+export const MIN_SAVE_KR = 25;
 
 export function cheapDetourKm(routeSeconds: number) {
   const km = (Math.max(0, routeSeconds) / 3600) * CHEAP_TIME_FRAC * 80;
   return Math.min(80, Math.max(12, Math.round(km)));
 }
 
-/** Leave the motorway only if net save is at least 20 kr and 2× the extra drive. */
+/** Leave the motorway only if net save beats extra drive by SAVE_WEIGHT. */
 export function detourPays(opts: { baseKr: number; stallKr: number; extraKr: number; distM: number }) {
   if (opts.distM <= 4000) return true;
   const net = opts.baseKr - opts.stallKr - opts.extraKr;
-  return net >= 20 && net >= opts.extraKr * 2;
+  return net >= MIN_SAVE_KR && net >= opts.extraKr * SAVE_WEIGHT;
 }
 
 export function detourSavings(base: { kr: number; tollKr: number; driveMin: number; mi: number }, alt: { kr: number; tollKr: number; driveMin: number; mi: number }) {
@@ -100,7 +103,9 @@ export function detourSavings(base: { kr: number; tollKr: number; driveMin: numb
   const chargeSaved = Math.max(0, base.kr - base.tollKr) - Math.max(0, alt.kr - alt.tollKr);
   const tollSaved = base.tollKr - alt.tollKr;
   const net = base.kr - alt.kr;
-  return { extraMin, extraMi, chargeSaved, tollSaved, net };
+  const extraKr = extraMin * 1.2;
+  const significant = extraMin < 8 ? net > 0 : net >= MIN_SAVE_KR && net >= extraKr * SAVE_WEIGHT;
+  return { extraMin, extraMi, chargeSaved, tollSaved, net, significant };
 }
 
 /** Eco is off the motorway — look farther toward services. Cheapest hunts a wider band. */
@@ -127,7 +132,7 @@ export function chargeFitScore(
     const detourMin = (distKm / kmh) * 60;
     return detourMin + (opts.dc ? 0 : 14);
   }
-  if (focus === "pris") return kr * 8 + extra * 2.5 + distKm * 0.8;
+  if (focus === "pris") return kr * 8 + extra * SAVE_WEIGHT + distKm * SAVE_WEIGHT * 0.25;
   return distKm * 14 + (opts.dc ? 1.5 : 0) + kr * 0.04;
 }
 

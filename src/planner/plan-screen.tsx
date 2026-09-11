@@ -840,7 +840,7 @@ export function PlanScreen() {
                             ? `${t.charges} ${t.charges === 1 ? "charge" : "charges"} · ${formatKrValue(Math.max(0, t.kr - t.tollKr), 0)} kr`
                             : "no charge"}
                           {t.tollKr >= 1 ? ` · toll ${formatKrValue(t.tollKr, 0)} kr` : " · no toll"}
-                          {save && save.net >= 1
+                          {save && save.significant
                             ? ` · saves ${formatKrValue(save.net, 0)} kr${save.extraMin >= 1 ? ` for +${minutesToHm(save.extraMin)}` : ""}`
                             : save && save.net <= -1
                               ? ` · ${formatKrValue(-save.net, 0)} kr more`

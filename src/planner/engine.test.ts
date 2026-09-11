@@ -79,12 +79,14 @@ describe("leg modes", () => {
     assert.equal(save.tollSaved, 0);
     assert.equal(save.net, 160);
     assert.equal(save.extraMin, 80);
+    assert.equal(save.significant, false);
   });
 
   it("only detours when savings are significant", () => {
     assert.equal(detourPays({ baseKr: 100, stallKr: 90, extraKr: 8, distM: 2000 }), true);
     assert.equal(detourPays({ baseKr: 100, stallKr: 90, extraKr: 8, distM: 12000 }), false);
     assert.equal(detourPays({ baseKr: 100, stallKr: 40, extraKr: 12, distM: 12000 }), true);
+    assert.equal(detourPays({ baseKr: 100, stallKr: 50, extraKr: 20, distM: 12000 }), false);
   });
 
   it("eco and cheapest search farther for chargers than fastest", () => {
