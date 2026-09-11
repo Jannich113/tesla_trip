@@ -17,13 +17,14 @@ export const TOLL_GATES: TollGate[] = [
   { id: "orebrotunnel", name: "Mælefjelltunnelen", lat: 59.48, lng: 8.2, kr: 86 },
 ];
 
-/** Extra kr/km on tolled motorways when Valhalla marks the trip as toll. */
+/** Extra kr/km on tolled motorways when the route is actually tolled.
+ *  Cars: FR ~€0.10/km, IT ~€0.08/km. Eco only skips this if the path has no toll. */
 const TOLL_KR_PER_KM: { lat0: number; lat1: number; lng0: number; lng1: number; kr: number }[] = [
-  { lat0: 42.3, lat1: 51.2, lng0: -5.2, lng1: 8.3, kr: 0.85 }, // FR
-  { lat0: 36.6, lat1: 47.1, lng0: 6.5, lng1: 18.6, kr: 0.72 }, // IT
-  { lat0: 36.0, lat1: 43.8, lng0: -9.5, lng1: 3.4, kr: 0.52 }, // ES/PT
-  { lat0: 42.3, lat1: 46.6, lng0: 13.3, lng1: 19.5, kr: 0.48 }, // HR
-  { lat0: 57.9, lat1: 71.2, lng0: 4.5, lng1: 31.5, kr: 0.62 }, // NO AutoPASS
+  { lat0: 42.3, lat1: 51.2, lng0: -5.2, lng1: 8.3, kr: 0.75 }, // FR ~€0.10/km
+  { lat0: 36.6, lat1: 47.1, lng0: 6.5, lng1: 18.6, kr: 0.60 }, // IT
+  { lat0: 36.0, lat1: 43.8, lng0: -9.5, lng1: 3.4, kr: 0.45 }, // ES/PT
+  { lat0: 42.3, lat1: 46.6, lng0: 13.3, lng1: 19.5, kr: 0.42 }, // HR
+  { lat0: 57.9, lat1: 71.2, lng0: 4.5, lng1: 31.5, kr: 0.55 }, // NO AutoPASS
 ];
 
 export function gatesOnPath(path: [number, number][], maxM = 4000) {
@@ -36,12 +37,12 @@ function kmRateAt(lat: number, lng: number) {
   return hit?.kr ?? 0;
 }
 
-export function estimateTolls(path: [number, number][], miles: number, hasToll: boolean, mode: LegMode) {
+export function estimateTolls(path: [number, number][], miles: number, hasToll: boolean, _mode: LegMode) {
   const gates = gatesOnPath(path);
   const gateKr = gates.reduce((n, g) => n + g.kr, 0);
   const mid = path[Math.floor(path.length / 2)] ?? path[0];
   const km = miles * 1.609344;
-  const roadKr = hasToll && mode !== "eco" && mid ? km * kmRateAt(mid[0], mid[1]) * 0.45 : 0;
+  const roadKr = hasToll && mid ? km * kmRateAt(mid[0], mid[1]) : 0;
   const kr = Math.round((gateKr + roadKr) * 10) / 10;
   const label = gates.length ? gates.map((g) => g.name).join(" · ") : hasToll ? "Road toll" : "";
   return { kr, label, hasToll: hasToll || gates.length > 0, gates };

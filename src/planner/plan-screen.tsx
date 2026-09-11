@@ -841,8 +841,12 @@ export function PlanScreen() {
                         </span>
                         <span className="mt-0.5 block text-xs text-muted">
                           {t.charges > 0
-                            ? `${t.charges} ${t.charges === 1 ? "charge" : "charges"}`
+                            ? `${t.charges} ${t.charges === 1 ? "charge" : "charges"} · ${formatKrValue(Math.max(0, t.kr - t.tollKr), 0)} kr`
                             : "no charge"}
+                          {t.tollKr >= 1 ? ` · toll ${formatKrValue(t.tollKr, 0)} kr` : " · no toll"}
+                          {row.mode !== "fastest" && fastest && fastest.tollKr - t.tollKr >= 5
+                            ? ` · saves ${formatKrValue(fastest.tollKr - t.tollKr, 0)} kr tolls`
+                            : ""}
                           {row.mode === "cheapest" || t.waitMin > 0
                             ? ` · ${t.waitMin > 0 ? minutesToHm(t.waitMin) : "no"} wait`
                             : ""}
