@@ -35,9 +35,9 @@ export function modeLabel(mode: LegMode) {
 }
 
 export function modeHint(mode: LegMode) {
-  if (mode === "eco") return "Skips tolls and prefers slower roads. Uses a motorway only when it saves a lot of time.";
-  if (mode === "cheapest") return "Lowest charge bill. Motorways and tolls are fine if they reach cheaper stalls.";
-  return "Motorways and tolls for earliest arrival. Road fees don't matter.";
+  if (mode === "eco") return "110 km/t cap, trims tolls when it doesn’t add hours. Still a real road.";
+  if (mode === "cheapest") return "Same motorway as Fastest. Picks the cheapest stalls along it.";
+  return "Motorways and tolls for earliest arrival.";
 }
 
 export function modeColor(mode: LegMode) {
@@ -298,13 +298,13 @@ export function hoursFrom<T extends { hour: string; ymd?: string }>(hours: T[], 
   return next >= 0 ? hours.slice(next) : hours;
 }
 
-/** Eco discourages motorways. Fastest takes them + tolls. Cheapest takes motorways, skips tolls. */
+/** Eco: motorway with a 110 km/t cap. Fastest/cheapest: full highway. */
 export function costingFor(mode: LegMode): AutoCosting {
   if (mode === "eco") {
     return {
       shortest: false,
-      use_highways: 0.35,
-      use_tolls: 0,
+      use_highways: 1,
+      use_tolls: 0.4,
       use_ferry: 0.2,
       top_speed: 110,
     };

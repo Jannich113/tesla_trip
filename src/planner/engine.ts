@@ -191,7 +191,7 @@ export function cachedRoutes(): Record<string, RoutedLeg> {
 export async function fetchRoute(from: PlanStop, to: PlanStop, mode: LegMode): Promise<RoutedLeg> {
   const key = `${from.lat.toFixed(4)},${from.lng.toFixed(4)}|${to.lat.toFixed(4)},${to.lng.toFixed(4)}|${mode}|v6`;
   const hit = routeCache.get(key);
-  if (hit && hit.source !== "air" && hit.path.length >= 8) return hit;
+  if (hit && hit.source !== "air" && hit.path.length >= 3) return hit;
   try {
     const body = await withRetry(async () => {
       const qs = new URLSearchParams({
@@ -216,7 +216,7 @@ export async function fetchRoute(from: PlanStop, to: PlanStop, mode: LegMode): P
       }
       if (!res.ok) throw new Error(`Route ${res.status}`);
       const json = (await res.json()) as RoutedLeg;
-      if (json.source === "air" || (json.path?.length ?? 0) < 8 || !Number.isFinite(json.miles)) {
+      if (json.source === "air" || (json.path?.length ?? 0) < 3 || !Number.isFinite(json.miles)) {
         throw new Error("Empty route");
       }
       return json;

@@ -191,7 +191,7 @@ export function PlanScreen() {
     }
     const missing = jobs.some((job) => {
       const hit = routeMap[job.key];
-      return !hit || hit.source === "air" || hit.path.length < 8;
+      return !hit || hit.source === "air" || hit.path.length < 3;
     });
     if (missing) setRouting(true);
     else setRouting(false);
@@ -238,7 +238,7 @@ export function PlanScreen() {
     const list: RoutedLeg[] = [];
     for (let i = 0; i < stops.length - 1; i++) {
       const hit = routeMap[routeKey(stops[i], stops[i + 1], mode)];
-      if (!hit || hit.source === "air" || hit.path.length < 8) return [];
+      if (!hit || hit.source === "air" || hit.path.length < 3) return [];
       list.push(hit);
     }
     return list;

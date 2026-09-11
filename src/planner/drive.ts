@@ -2,6 +2,7 @@ import { costingFor, type LegMode } from "./modes";
 import { estimateTolls } from "./tolls";
 import { decodePolyline, simplifyPath } from "./polyline";
 import { haversineM } from "./insert";
+import { pickRouted } from "./pick-route";
 import { noStore, publicCache } from "@/lib/http-cache";
 
 type Stop = { lat: number; lng: number };
@@ -63,7 +64,7 @@ function pathFromShape(shape: { coordinates?: [number, number][] } | string | un
 }
 
 function anchored(path: [number, number][], from: Stop, to: Stop) {
-  if (path.length < 8) return false;
+  if (path.length < 3) return false;
   const a = path[0];
   const b = path[path.length - 1];
   return (
@@ -170,33 +171,18 @@ async function osrmOnce(from: Stop, to: Stop, mode: LegMode, extra: string): Pro
 }
 
 async function osrm(from: Stop, to: Stop, mode: LegMode): Promise<DriveRouteJson | null> {
-  const extras = mode === "eco" ? ["&exclude=toll", ""] : [""];
-  for (const extra of extras) {
-    const routed = await osrmOnce(from, to, mode, extra).catch(() => null);
-    if (routed) return routed;
-  }
-  return null;
+  return osrmOnce(from, to, mode, "");
 }
 
-function pickRouted(mode: LegMode, routes: DriveRouteJson[]): DriveRouteJson | null {
-  const list = routes.filter((r) => r.path.length >= 2 && r.miles > 0);
-  if (!list.length) return null;
-  if (mode === "eco") {
-    return list.reduce((best, r) => {
-      const rt = r.tollKr ?? 0;
-      const bt = best.tollKr ?? 0;
-      if (rt !== bt) return rt < bt ? r : best;
-      return r.seconds < best.seconds ? r : best;
-    });
-  }
-  if (mode === "cheapest") {
-    return list.reduce((best, r) => (r.seconds < best.seconds ? r : best));
-  }
-  if (mode === "fastest") {
-    return list.reduce((best, r) => (r.seconds < best.seconds ? r : best));
-  }
-  const valhalla = list.find((r) => r.source === "valhalla");
-  return valhalla ?? list[0];
+export async function routeDrive(from: Stop, to: Stop, mode: LegMode): Promise<DriveRouteJson | null> {
+  const [v, o] = await Promise.all([
+    valhalla(from, to, mode).catch(() => null),
+    osrm(from, to, mode).catch(() => null),
+  ]);
+  return pickRouted(
+    mode,
+    [v, o].filter((r): r is DriveRouteJson => Boolean(r && anchored(r.path, from, to))),
+  );
 }
 
 function parsePoint(raw: string | null): Stop | null {
@@ -241,14 +227,7 @@ export async function handleDriveRequest(request: Request): Promise<Response> {
       return Response.json({ error: input.error }, { status: 400, headers: noStore });
     }
     const { from, to, mode } = input;
-    const [v, o] = await Promise.all([
-      valhalla(from, to, mode).catch(() => null),
-      osrm(from, to, mode).catch(() => null),
-    ]);
-    const routed = pickRouted(
-      mode,
-      [v, o].filter((r): r is DriveRouteJson => Boolean(r && anchored(r.path, from, to))),
-    );
+    const routed = await routeDrive(from, to, mode);
     if (!routed) {
       return Response.json({ error: "No route" }, { status: 502, headers: noStore });
     }

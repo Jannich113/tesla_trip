@@ -42,7 +42,7 @@ function slimRoutes(routes: Record<string, RoutedLeg> | undefined) {
   const keys = Object.keys(routes).slice(-40);
   for (const key of keys) {
     const route = routes[key];
-    if (!route?.path?.length || route.source === "air" || route.path.length < 8) continue;
+    if (!route?.path?.length || route.source === "air" || route.path.length < 3) continue;
     out[key] = { ...route, path: simplifyPath(route.path, 48) };
   }
   return out;
@@ -137,7 +137,7 @@ export const usePlanStore = create<PlanStore>()(
       setRouteCache: (patch) => {
         const clean: Record<string, RoutedLeg> = {};
         for (const [key, route] of Object.entries(patch)) {
-          if (!route || route.source === "air" || (route.path?.length ?? 0) < 8) continue;
+          if (!route || route.source === "air" || (route.path?.length ?? 0) < 3) continue;
           clean[key] = route;
         }
         if (!Object.keys(clean).length) return;

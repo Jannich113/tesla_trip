@@ -21,6 +21,7 @@ import {
   stallKw,
 } from "./modes.ts";
 import { rateForNetwork, networkIdFor, roamExtra, EU_NETWORKS, EU_REGIONS, regionalOwn, regionalRoam } from "./networks.ts";
+import { pickRouted } from "./pick-route.ts";
 import { alongFraction, pickViaOnPath, splitRoutedLeg } from "./insert.ts";
 import { networkFromOsmTags, isDcStation, networkFromOperator } from "./osm-operator.ts";
 import { estimateTolls, gatesOnPath } from "./tolls.ts";
@@ -33,8 +34,9 @@ describe("leg modes", () => {
   it("eco discourages highways and skips tolls", () => {
     const c = costingFor("eco");
     assert.equal(c.shortest, false);
-    assert.ok(c.use_highways < 0.5);
-    assert.equal(c.use_tolls, 0);
+    assert.equal(c.use_highways, 1);
+    assert.ok(c.use_tolls < 1);
+    assert.equal(c.top_speed, 110);
   });
 
   it("fastest prefers highways and tolls", () => {
@@ -349,5 +351,52 @@ describe("leg modes", () => {
     assert.ok(slim.length > 20);
     assert.equal(slim[0][0], path[0][0]);
     assert.equal(slim.at(-1)?.[0], path.at(-1)?.[0]);
+  });
+
+  it("eco does not take a 34 h no-toll crawl when a 15 h road exists", () => {
+    const path = Array.from({ length: 12 }, (_, i) => [48.8 - i * 0.5, 2.3 + i * 0.8] as [number, number]);
+    const highway = { miles: 890, seconds: 15 * 3600, path, source: "valhalla", tollKr: 400 };
+    const crawl = { miles: 1100, seconds: 34 * 3600, path, source: "osrm", tollKr: 0 };
+    const eco = pickRouted("eco", [highway, crawl]);
+    const fast = pickRouted("fastest", [highway, crawl]);
+    assert.equal(fast?.seconds, highway.seconds);
+    assert.ok((eco?.seconds ?? 0) <= highway.seconds * 1.45);
+    assert.equal(eco?.source, "valhalla");
+  });
+
+  it("fastest takes the quicker road, eco keeps the valhalla corridor in-budget", () => {
+    const path = Array.from({ length: 12 }, (_, i) => [48.8 - i * 0.5, 2.3 + i * 0.8] as [number, number]);
+    const osrm = { miles: 890, seconds: 15 * 3600, path, source: "osrm", tollKr: 400 };
+    const ecoV = { miles: 945, seconds: 16.6 * 3600, path, source: "valhalla", tollKr: 350 };
+    assert.equal(pickRouted("fastest", [osrm, ecoV])?.source, "osrm");
+    assert.equal(pickRouted("eco", [osrm, ecoV])?.source, "valhalla");
+    assert.equal(pickRouted("cheapest", [osrm, ecoV])?.source, "osrm");
+  });
+
+  it("finds a via on the Paris–Rome corridor for every mode", () => {
+    const path: [number, number][] = [
+      [48.8566, 2.3522],
+      [47.798, 3.567],
+      [47.025, 4.848],
+      [45.748, 4.846],
+      [45.07, 7.686],
+      [45.464, 9.19],
+      [44.494, 11.342],
+      [43.77, 11.254],
+      [41.9028, 12.4964],
+    ];
+    const locations = seedsAlongPath(path, 40_000);
+    assert.ok(locations.length >= 4, `seeds ${locations.length}`);
+    for (const mode of ["eco", "fastest", "cheapest"] as const) {
+      const via = pickViaOnPath({
+        path,
+        locations,
+        budgetKwh: 60,
+        totalKwh: 200,
+        mode,
+        detourKm: 12,
+      });
+      assert.ok(via, `${mode} via`);
+    }
   });
 });
