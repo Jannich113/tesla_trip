@@ -170,6 +170,28 @@ export function minutesBetweenDateTime(from: string, to: string) {
   return Math.round((ymdToUtc(b.ymd, parseHhmm(b.hhmm)) - ymdToUtc(a.ymd, parseHhmm(a.hhmm))) / 60_000);
 }
 
+export function maxDateTime(a: string, b: string) {
+  return minutesBetweenDateTime(a, b) >= 0 ? b : a;
+}
+
+/** Wait that actually pushes leave later vs charging as soon as the car is ready. */
+export function waitDelayMin(opts: {
+  readyAt: string;
+  plannedStart: string;
+  windowStart: string;
+  chargeMin: number;
+}) {
+  const chargeNowDone = addMinutesDateTime(opts.readyAt, opts.chargeMin);
+  const driveIfNow =
+    minutesBetweenDateTime(opts.plannedStart, chargeNowDone) > 0 ? chargeNowDone : opts.plannedStart;
+  const windowStart =
+    minutesBetweenDateTime(opts.readyAt, opts.windowStart) > 0 ? opts.windowStart : opts.readyAt;
+  const cheapDone = addMinutesDateTime(windowStart, opts.chargeMin);
+  const driveIfCheap =
+    minutesBetweenDateTime(opts.plannedStart, cheapDone) > 0 ? cheapDone : opts.plannedStart;
+  return Math.max(0, minutesBetweenDateTime(driveIfNow, driveIfCheap));
+}
+
 /** Minutes to wait from clock until startHour:00. 0 if that hour is already in progress. */
 export function waitMinUntil(clockHhmm: string, startHour: string) {
   const clock = parseHhmm(clockHhmm);

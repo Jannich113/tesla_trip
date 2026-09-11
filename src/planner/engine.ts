@@ -13,8 +13,10 @@ import {
   dkNowParts,
   driveKwhAtSpeed,
   hoursFrom,
+  maxDateTime,
   minutesBetweenDateTime,
   splitDateTime,
+  waitDelayMin,
   waitMinUntil,
   waitMinUntilDated,
 } from "./modes";
@@ -463,23 +465,25 @@ export function pricePlan(opts: {
   const { stops, modes, detours, routes, usableKwh, locations, hours, acKw, acKr, speedEff } =
     opts;
   const live = hours[0]?.krPerKwh ?? acKr;
+  const now = dkNowDateTime();
   let soc = opts.soc;
-  let clock = asDateTime(opts.departHhmm || dkNowDateTime());
+  let plannedStart = asDateTime(opts.departHhmm || now);
+  let readyAt = minutesBetweenDateTime(now, plannedStart) > 0 ? now : plannedStart;
   const out: PricedLeg[] = [];
   for (let i = 0; i < routes.length; i++) {
     const mode = modes[i] ?? "standard";
     const route = routes[i];
     const when = opts.legWhen?.[i];
     const whenAt = when && when.kind !== "auto" ? asDateTime(when.at || when.hhmm) : "";
-    if (when?.kind === "depart" && whenAt) clock = whenAt;
+    if (when?.kind === "depart" && whenAt) plannedStart = whenAt;
     if (when?.kind === "arrive" && whenAt) {
-      clock = addMinutesDateTime(whenAt, -route.seconds / 60);
+      plannedStart = addMinutesDateTime(whenAt, -route.seconds / 60);
     }
     const kwh = driveKwh(route.miles, route.seconds, speedEff);
     const socAfter = soc - (kwh / usableKwh) * 100;
     const required = socAfter < RESERVE_SOC;
-    const legHours = hoursFrom(hours, clock);
-    const cheap = cheapestHour(legHours);
+    const searchHours = hoursFrom(hours, readyAt);
+    const cheap = cheapestHour(searchHours);
     const goodPrice = Boolean(cheap && cheap.krPerKwh <= live * CHEAP_VS_LIVE);
     const lowEnough = soc < 55 || socAfter < SUGGEST_SOC;
     const suggested = !required && goodPrice && lowEnough;
@@ -490,9 +494,15 @@ export function pricePlan(opts: {
     const kwhNeed = Math.max(needSoc / 100, 0) * usableKwh;
     const chargeMinEst = (Math.max(kwhNeed, 5) / Math.max(acKw, 1)) * 60;
     const restDriveMin = routes.slice(i).reduce((n, r) => n + r.seconds / 60, 0);
+    const slack = minutesBetweenDateTime(readyAt, plannedStart);
+    const maxNoDelay = Math.max(0, slack - chargeMinEst);
     const maxWaitMin = opts.arriveHhmm
-      ? Math.max(0, minutesBetweenDateTime(clock, asDateTime(opts.arriveHhmm)) - chargeMinEst - restDriveMin)
-      : 3 * 24 * 60;
+      ? Math.max(0, minutesBetweenDateTime(readyAt, asDateTime(opts.arriveHhmm)) - chargeMinEst - restDriveMin)
+      : mode === "cheapest"
+        ? Math.max(maxNoDelay, 3 * 24 * 60)
+        : suggested
+          ? maxNoDelay
+          : 0;
     const pick = wantCharge
       ? pickCharges({
           kwhNeed: Math.max(kwhNeed, 5),
@@ -500,11 +510,11 @@ export function pricePlan(opts: {
           detourKm: detours[i] ?? 10,
           mode,
           locations,
-          acKr: legHours[0]?.krPerKwh ?? acKr,
-          hours: legHours,
+          acKr: searchHours[0]?.krPerKwh ?? acKr,
+          hours: searchHours,
           acKw,
           speedEff,
-          clockHhmm: clock,
+          clockHhmm: readyAt,
           maxWaitMin,
         })
       : null;
@@ -516,14 +526,24 @@ export function pricePlan(opts: {
         ? "suggested"
         : null;
     const billed = advice !== null && charge !== null;
-    const waitMin = billed && charge && charge.cheapWindow ? charge.waitMin : 0;
     const chargeMin = billed && charge ? (charge.kwh / Math.max(acKw, 1)) * 60 : 0;
-    const departAt = clock;
-    if (waitMin > 0) clock = addMinutesDateTime(clock, waitMin);
-    if (chargeMin > 0) clock = addMinutesDateTime(clock, chargeMin);
-    clock = addMinutesDateTime(clock, route.seconds / 60);
+    const rawWait = billed && charge && charge.cheapWindow ? charge.waitMin : 0;
+    const windowStart = addMinutesDateTime(readyAt, rawWait);
+    const waitMin =
+      billed && charge && charge.cheapWindow
+        ? waitDelayMin({ readyAt, plannedStart, windowStart, chargeMin })
+        : 0;
+    const chargeDone = billed ? addMinutesDateTime(windowStart, chargeMin) : readyAt;
+    const departAt = maxDateTime(plannedStart, billed ? chargeDone : readyAt);
+    const arriveAt = addMinutesDateTime(departAt, route.seconds / 60);
     const startSoc = billed && charge ? Math.min(100, soc + (charge.kwh / usableKwh) * 100) : soc;
     const arriveSoc = Math.max(1, startSoc - (kwh / usableKwh) * 100);
+    const pricedCharge =
+      charge && waitMin === 0 && charge.waitMin > 0
+        ? { ...charge, waitMin: 0, windowLabel: charge.windowLabel.replace(/ · wait .+$/, "") }
+        : charge
+          ? { ...charge, waitMin }
+          : null;
     out.push({
       from: stops[i],
       to: stops[i + 1],
@@ -536,15 +556,17 @@ export function pricePlan(opts: {
       suggested,
       advice,
       departAt,
-      arriveAt: clock,
+      arriveAt,
       chargeMin,
       waitMin,
       startSoc,
-      charge,
+      charge: pricedCharge,
       backup,
       kr: billed ? (charge?.kr ?? 0) : 0,
     });
     soc = arriveSoc;
+    readyAt = arriveAt;
+    plannedStart = arriveAt;
   }
   return out;
 }

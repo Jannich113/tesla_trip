@@ -14,6 +14,7 @@ import {
   addMinutesDateTime,
   minutesBetweenDateTime,
   asDateTime,
+  waitDelayMin,
 } from "./modes.ts";
 
 describe("leg modes", () => {
@@ -99,5 +100,29 @@ describe("leg modes", () => {
     assert.equal(minutesBetweenDateTime("2026-09-11T18:00", "2026-09-13T02:00"), 32 * 60);
     assert.equal(addMinutesDateTime("2026-09-11T23:30", 90), "2026-09-12T01:00");
     assert.equal(asDateTime("18:40").slice(11), "18:40");
+  });
+
+  it("wait does not count if the cheap slot finishes before leave", () => {
+    assert.equal(
+      waitDelayMin({
+        readyAt: "2026-09-11T18:00",
+        plannedStart: "2026-09-12T08:00",
+        windowStart: "2026-09-12T02:00",
+        chargeMin: 4 * 60,
+      }),
+      0,
+    );
+  });
+
+  it("wait counts when the cheap slot delays leave", () => {
+    assert.equal(
+      waitDelayMin({
+        readyAt: "2026-09-11T18:00",
+        plannedStart: "2026-09-11T18:00",
+        windowStart: "2026-09-12T02:00",
+        chargeMin: 4 * 60,
+      }),
+      8 * 60,
+    );
   });
 });
