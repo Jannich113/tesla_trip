@@ -107,7 +107,7 @@ export function pickViaOnPath(opts: {
   const focus = opts.focus ?? defaultFocus(mode);
   if (totalKwh <= 0 || budgetKwh <= 0 || path.length < 2) return null;
   const exclude = new Set(opts.excludeIds ?? []);
-  const searchBand = Math.max(chargeSearchKm(mode, detourKm, focus) * 1000, 4_000);
+  const searchBand = Math.max(chargeSearchKm(mode, detourKm, focus) * 1000, 12_000);
   let best: ViaLoc | null = null;
   let bestScore = -Infinity;
   for (const loc of locations) {
@@ -115,7 +115,7 @@ export function pickViaOnPath(opts: {
     const distM = minDistToPathM(loc.lat, loc.lng, path);
     if (distM > searchBand) continue;
     const frac = alongFraction(path, loc.lat, loc.lng);
-    if (frac < 0.12 || frac > 0.88) continue;
+    if (frac < 0.08 || frac > 0.92) continue;
     const energyTo = totalKwh * frac;
     if (energyTo > budgetKwh * 0.95) continue;
     const fit = chargeFitScore(focus, {

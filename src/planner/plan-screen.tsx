@@ -47,6 +47,7 @@ import { PLACES } from "@/lib/places";
 import { cn } from "@/lib/utils";
 import { formatDistance, formatEfficiency, formatNumber } from "@/lib/vehicle";
 import { HOME_USD_PER_KWH } from "@/lib/history";
+import { type ChargeLocation } from "@/lib/charge-locations";
 import { useChargeStore } from "@/store/charge-store";
 import { useElprisStore } from "@/store/elpris-store";
 import { NETWORK_NATIVE, scaleCatalogKr, type FxTable } from "./charge-fx";
@@ -297,15 +298,16 @@ export function PlanScreen() {
     const byId = new Map(keep.map((l) => [l.id, l]));
     for (const c of routeChargers) byId.set(c.id, c);
     const all = [...byId.values()];
-    if (all.length <= 48 || !paths.length) return all;
-    return all
-      .map((l) => ({
-        l,
-        d: Math.min(...paths.map((p) => minDistToPathM(l.lat, l.lng, p))),
-      }))
-      .sort((a, b) => a.d - b.d)
-      .slice(0, 48)
-      .map((s) => s.l);
+    if (!paths.length) return all;
+    const picked = new Map<string, ChargeLocation>();
+    for (const p of paths) {
+      const ranked = all
+        .map((l) => ({ l, d: minDistToPathM(l.lat, l.lng, p) }))
+        .sort((a, b) => a.d - b.d)
+        .slice(0, 36);
+      for (const s of ranked) picked.set(s.l.id, s.l);
+    }
+    return [...picked.values()];
   }, [locationsStored, routeChargers, searchRoutes]);
 
   const driveMinGuess = selectedRoutes.reduce((n, r) => n + r.seconds / 60, 0);

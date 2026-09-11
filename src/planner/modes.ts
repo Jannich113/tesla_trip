@@ -74,11 +74,12 @@ export function pathMode(mode: LegMode, avoidFees = false): "eco" | "fastest" {
   return "fastest";
 }
 
-/** Pris may look a bit farther for a cheaper stall. */
-export function chargeSearchKm(_mode: LegMode, detourKm: number, focus?: ModeFocus) {
-  const km = Math.max(0, detourKm);
-  if (focus === "pris") return Math.max(km, Math.round(km * 1.25));
-  return km;
+/** Eco is off the motorway — look farther toward services. Cheapest hunts a wider band. */
+export function chargeSearchKm(mode: LegMode, detourKm: number, focus?: ModeFocus) {
+  const km = Math.max(8, detourKm);
+  if (mode === "eco" || focus === "distance") return Math.max(30, Math.round(km * 2.2));
+  if (mode === "cheapest" || focus === "pris") return Math.max(25, Math.round(km * 1.8));
+  return Math.max(18, km);
 }
 
 /** Lower is a better fit for this focus. */

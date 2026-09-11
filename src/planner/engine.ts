@@ -538,7 +538,7 @@ export function pickCharges(opts: {
     preferId
       ? scored.find((s) => s.loc.id === preferId && s.distM <= Math.max(searchBand, 40_000))
       : null;
-  const primarySrc = forced ?? inSearch[0] ?? (preferCheap ? outside[0] : null);
+  const primarySrc = forced ?? inSearch[0] ?? outside[0];
   if (!primarySrc) return null;
 
   const backupSrc =
@@ -630,7 +630,7 @@ export function pricePlan(opts: {
     const fullArrive = 100 - (kwh / Math.max(usableKwh, 1)) * 100;
     if (fullArrive < RESERVE_SOC && job.depth < 4) {
       const budgetKwh = ((100 - RESERVE_SOC) / 100) * usableKwh * 0.9;
-      const viaLoc = pickViaOnPath({
+      const viaOpts = {
         path: route.path,
         locations,
         budgetKwh,
@@ -639,7 +639,10 @@ export function pricePlan(opts: {
         focus,
         detourKm: job.detourKm,
         excludeIds: usedVias,
-      });
+      };
+      const viaLoc =
+        pickViaOnPath(viaOpts) ??
+        pickViaOnPath({ ...viaOpts, detourKm: Math.max(job.detourKm, 40) });
       const split = viaLoc ? splitRoutedLeg(route, viaLoc.lat, viaLoc.lng) : null;
       if (viaLoc && split) {
         usedVias.add(viaLoc.id);

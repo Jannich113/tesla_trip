@@ -48,13 +48,19 @@ describe("leg modes", () => {
     assert.deepEqual(costingFor("cheapest"), costingFor("fastest"));
   });
 
-  it("charge search radius equals the detour for every mode", () => {
-    assert.equal(chargeSearchKm("cheapest", 12), 12);
-    assert.equal(chargeSearchKm("eco", 8), 8);
-    assert.equal(chargeSearchKm("fastest", 18, "pris"), 23);
+  it("charge search is wider for eco and cheapest", () => {
+    assert.ok(chargeSearchKm("cheapest", 12) >= 25);
+    assert.ok(chargeSearchKm("eco", 8) >= 30);
+    assert.ok(chargeSearchKm("fastest", 18) >= 18);
     assert.equal(formatWaitCap(0), "0");
     assert.equal(formatWaitCap(30), "30m");
     assert.equal(formatWaitCap(120), "2h");
+  });
+
+  it("eco and cheapest search farther for chargers than fastest", () => {
+    assert.ok(chargeSearchKm("eco", 12) > chargeSearchKm("fastest", 12));
+    assert.ok(chargeSearchKm("cheapest", 12) > chargeSearchKm("fastest", 12));
+    assert.ok(chargeSearchKm("eco", 12) >= 30);
   });
 
   it("default focus matches the mode", () => {
