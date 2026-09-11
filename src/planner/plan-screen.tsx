@@ -12,14 +12,16 @@ import {
   type PricedCharge,
   type PricedLeg,
   type RoutedLeg,
-  addMinutesHhmm,
+  addMinutesDateTime,
+  asDateTime,
   chargeSearchKm,
   cheapestHour,
   DKK_PER_USD,
-  dkNowHhmm,
+  dkNowDateTime,
   defaultSpeedEff,
   epaWhPerMi,
   fetchRoute,
+  formatDateTime,
   formatDetour,
   interpolateWhPerMi,
   avgSpeedKmh,
@@ -188,7 +190,7 @@ export function PlanScreen() {
 
   const carWhPerMi = epaWhPerMi(profile.usableKwh, profile.epaRangeMi);
   const speedEff = speedEffOverride ?? defaultSpeedEff(whPerMiOverride && whPerMiOverride > 0 ? whPerMiOverride : carWhPerMi);
-  const clock = when || dkNowHhmm();
+  const clock = asDateTime(when || dkNowDateTime());
 
   const hours = useMemo(() => {
     if (!elpris) return [];
@@ -196,8 +198,9 @@ export function PlanScreen() {
       applyTillægToHours(elpris.today, provider.tillægOre),
       applyTillægToHours(elpris.tomorrow, provider.tillægOre),
       elpris.current?.hour ?? null,
+      addMinutesDateTime(clock, 3 * 24 * 60),
     );
-  }, [elpris, provider.tillægOre]);
+  }, [elpris, provider.tillægOre, clock]);
 
   const acKr = hours[0]?.krPerKwh ?? HOME_USD_PER_KWH * DKK_PER_USD;
 
@@ -221,7 +224,7 @@ export function PlanScreen() {
 
   const driveMinGuess = selectedRoutes.reduce((n, r) => n + r.seconds / 60, 0);
   const departHhmm =
-    whenKind === "arrive" ? addMinutesHhmm(clock, -driveMinGuess) : clock;
+    whenKind === "arrive" ? addMinutesDateTime(clock, -driveMinGuess) : clock;
 
   const planArgs = {
     stops,
@@ -397,15 +400,16 @@ export function PlanScreen() {
       if (!spot) continue;
       const loc = locations.find((x) => x.id === spot.locationId);
       if (!loc) continue;
-      const isBackup = leg.backup?.locationId === spot.locationId && leg.charge?.locationId !== spot.locationId;
-      chargerMarkers.push({
-        id: `chg-${i}-${spot.locationId}`,
-        lat: loc.lat,
-        lng: loc.lng,
-        label: isBackup ? `Backup · ${spot.name}` : spot.name,
-        kind: "charger",
-        badge: isBackup ? "B" : "C",
-      });
+                    const isBackup = leg.backup?.locationId === spot.locationId && leg.charge?.locationId !== spot.locationId;
+                    const required = Boolean(!isBackup && leg.needed);
+                    chargerMarkers.push({
+                      id: `chg-${i}-${spot.locationId}`,
+                      lat: loc.lat,
+                      lng: loc.lng,
+                      label: required ? `Required · ${spot.name}` : isBackup ? `Backup · ${spot.name}` : spot.name,
+                      kind: "charger",
+                      badge: required ? "!" : isBackup ? "B" : "C",
+                    });
     }
   }
   const mapMarkers: MapMarker[] = [
@@ -467,7 +471,7 @@ export function PlanScreen() {
           <label className="text-xs text-muted">
             {whenKind === "arrive" ? "Arrive by" : "Leave at"}
             <input
-              type="time"
+              type="datetime-local"
               value={clock}
               onChange={(e) => setWhen(e.target.value)}
               className="mt-1 h-11 w-full rounded-md bg-surface-2 px-3 text-sm text-foreground outline-none"
@@ -621,8 +625,8 @@ export function PlanScreen() {
           {formatKrValue(totals.kr, 2)} <span className="text-base text-muted">kr</span>
         </p>
         <p className="mt-1 text-xs text-subtle">
-          {whenKind === "arrive" ? `Arrive ${clock}` : `Leave ${departHhmm}`}
-          {viewLegs[0] ? ` · first charge window from ${viewLegs[0].departAt}` : ""}
+          {whenKind === "arrive" ? `Arrive ${formatDateTime(clock)}` : `Leave ${formatDateTime(departHhmm)}`}
+          {viewLegs[0] ? ` · first window ${formatDateTime(viewLegs[0].departAt)}` : ""}
           {totals.requiredKwh > 0 ? ` · ${formatNumber(totals.requiredKwh, 1)} kWh required` : ""}
         </p>
         {hours.length ? (
@@ -736,7 +740,7 @@ export function PlanScreen() {
                     <p className="truncate text-sm">{stop.name}</p>
                     {leg ? (
                       <p className="text-xs text-muted">
-                        {leg.departAt}–{leg.arriveAt}
+                        {formatDateTime(leg.departAt)}–{formatDateTime(leg.arriveAt)}
                         <span className="text-subtle"> · </span>
                         {modeLabel(leg.mode)}
                         <span className="text-subtle"> · </span>
@@ -745,15 +749,17 @@ export function PlanScreen() {
                         {formatNumber(leg.kwh, 1)} kWh
                         <span className="text-subtle"> · </span>
                         {formatNumber(leg.arriveSoc, 0)}% in
-                        {leg.advice && leg.charge ? (
+                        {leg.needed ? (
+                          <span className="font-medium text-amber-300"> · charge required</span>
+                        ) : leg.advice && leg.charge ? (
                           <>
                             <span className="text-subtle"> · </span>
-                            {leg.advice === "required" ? "Required" : "Suggested"} {formatKrValue(leg.charge.kr, 2)} kr
+                            Suggested {formatKrValue(leg.charge.kr, 2)} kr
                           </>
                         ) : null}
                       </p>
                     ) : (
-                      <p className="text-xs text-muted">{formatNumber(soc, 0)}% now · leave {departHhmm}</p>
+                      <p className="text-xs text-muted">{formatNumber(soc, 0)}% now · leave {formatDateTime(departHhmm)}</p>
                     )}
                   </div>
                   {i > 0 ? (
@@ -821,7 +827,8 @@ export function PlanScreen() {
                               onClick={() =>
                                 setLegWhen(i - 1, {
                                   kind,
-                                  hhmm: kind === "auto" ? "" : (legWhen[i - 1]?.hhmm || (leg?.departAt ?? clock)),
+                                  hhmm: kind === "auto" ? "" : asDateTime(legWhen[i - 1]?.at || legWhen[i - 1]?.hhmm || leg?.departAt || clock),
+                                  at: kind === "auto" ? "" : asDateTime(legWhen[i - 1]?.at || legWhen[i - 1]?.hhmm || leg?.departAt || clock),
                                 })
                               }
                               className={cn(
@@ -836,19 +843,20 @@ export function PlanScreen() {
                       </div>
                       {(legWhen[i - 1]?.kind ?? "auto") !== "auto" ? (
                         <input
-                          type="time"
-                          value={legWhen[i - 1]?.hhmm || (leg?.departAt ?? clock)}
+                          type="datetime-local"
+                          value={asDateTime(legWhen[i - 1]?.at || legWhen[i - 1]?.hhmm || leg?.departAt || clock)}
                           onChange={(e) =>
                             setLegWhen(i - 1, {
                               kind: legWhen[i - 1]?.kind === "arrive" ? "arrive" : "depart",
                               hhmm: e.target.value,
+                              at: e.target.value,
                             })
                           }
                           className="h-8 rounded-full bg-surface-2 px-3 text-xs text-foreground outline-none"
                         />
                       ) : (
                         <p className="flex h-8 items-center text-[11px] tabular-nums text-subtle">
-                          {leg ? `${leg.departAt} → ${leg.arriveAt}` : "Follows previous"}
+                          {leg ? `${formatDateTime(leg.departAt)} → ${formatDateTime(leg.arriveAt)}` : "Follows previous"}
                         </p>
                       )}
                     </div>
@@ -887,6 +895,7 @@ export function PlanScreen() {
                           }
                           spot={leg.charge}
                           active
+                          required={leg.needed}
                         />
                         <button
                           type="button"
@@ -895,6 +904,11 @@ export function PlanScreen() {
                         >
                           Add charger as stop
                         </button>
+                        {leg.needed ? (
+                          <p className="rounded-lg bg-amber-400/15 px-3 py-1.5 text-[11px] font-medium text-amber-200">
+                            Charge required here to finish this leg
+                          </p>
+                        ) : null}
                         {leg.backup ? (
                           <button
                             type="button"
@@ -970,20 +984,28 @@ function ChargeChoice({
   title,
   spot,
   active,
+  required = false,
 }: {
   title: string;
   spot: PricedCharge;
   active: boolean;
+  required?: boolean;
 }) {
   return (
     <div
       className={cn(
         "flex items-center gap-3 rounded-xl px-3 py-2",
-        active ? "bg-surface-2 shadow-[var(--shadow-border)]" : "bg-transparent",
+        required
+          ? "bg-amber-400/15 shadow-[inset_0_0_0_1px_rgba(251,191,36,0.55)]"
+          : active
+            ? "bg-surface-2 shadow-[var(--shadow-border)]"
+            : "bg-transparent",
       )}
     >
       <div className="min-w-0 flex-1">
-        <p className="text-[11px] font-medium uppercase tracking-wide text-muted">{title}</p>
+        <p className={cn("text-[11px] font-medium uppercase tracking-wide", required ? "text-amber-200" : "text-muted")}>
+          {title}
+        </p>
         <p className="truncate text-sm">{spot.label}</p>
         <p className="text-xs text-subtle">
           {formatNumber(spot.kwh, 1)} kWh · {spot.windowLabel}

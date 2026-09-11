@@ -4,23 +4,34 @@ import { type Units } from "@/lib/vehicle";
 import {
   type LegMode,
   type SpeedEff,
+  addDaysYmd,
+  addMinutesDateTime,
   addMinutesHhmm,
+  asDateTime,
   chargeSearchKm,
+  dkNowDateTime,
+  dkNowParts,
   driveKwhAtSpeed,
   hoursFrom,
-  minutesAhead,
+  minutesBetweenDateTime,
+  splitDateTime,
   waitMinUntil,
+  waitMinUntilDated,
 } from "./modes";
 
 export {
   DETOUR_KM,
   LEG_MODES,
   SPEED_KMH,
+  addMinutesDateTime,
   addMinutesHhmm,
+  asDateTime,
   chargeSearchKm,
   defaultSpeedEff,
+  dkNowDateTime,
   driveKwhAtSpeed,
   epaWhPerMi,
+  formatDateTime,
   hoursFrom,
   interpolateWhPerMi,
   avgSpeedKmh,
@@ -38,6 +49,7 @@ export type ChargeAdvice = "required" | "suggested" | null;
 export type LegWhen = {
   kind: "auto" | "depart" | "arrive";
   hhmm: string;
+  at?: string;
 };
 
 export type PlanStop = {
@@ -145,17 +157,10 @@ export function driveKwh(miles: number, seconds: number, speedEff: SpeedEff) {
 }
 
 export function dkNowHhmm() {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Europe/Copenhagen",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(new Date());
-  const hourRaw = parts.find((p) => p.type === "hour")?.value ?? "00";
-  const minute = parts.find((p) => p.type === "minute")?.value ?? "00";
-  const hour = hourRaw === "24" ? "00" : hourRaw;
-  return `${hour.padStart(2, "0")}:${minute.padStart(2, "0")}`;
+  return dkNowParts().hhmm;
 }
+
+export type DatedHour = HourPrice & { ymd: string; estimated?: boolean };
 
 export function minDistToPathM(lat: number, lng: number, path: [number, number][]) {
   if (path.length === 0) return Infinity;
@@ -181,6 +186,7 @@ export type ChargeWindow = {
   label: string;
   waitMin: number;
   startHour: string;
+  startYmd?: string;
 };
 
 function hourSpan(h: string, add: number) {
@@ -190,8 +196,11 @@ function hourSpan(h: string, add: number) {
 export function formatChargeWindow(hours: HourPrice[]) {
   if (!hours.length) return "live";
   const start = hours[0].hour;
-  if (hours.length === 1) return `${start}:00`;
-  return `${start}–${hourSpan(hours[hours.length - 1].hour, 1)}`;
+  const time = hours.length === 1 ? `${start}:00` : `${start}–${hourSpan(hours[hours.length - 1].hour, 1)}`;
+  const ymd = (hours[0] as DatedHour).ymd;
+  if (!ymd) return time;
+  const [, m, d] = ymd.split("-");
+  return `${d}/${m} ${time}`;
 }
 
 function windowCost(hours: HourPrice[], start: number, kwh: number, acKw: number) {
@@ -223,6 +232,7 @@ export function nowWindow(hours: HourPrice[], kwh: number, acKw: number): Charge
     label: formatChargeWindow(used),
     waitMin: 0,
     startHour: used[0]?.hour ?? "00",
+    startYmd: (used[0] as DatedHour | undefined)?.ymd,
   };
 }
 
@@ -231,17 +241,18 @@ export function cheapestWindow(
   hours: HourPrice[],
   kwh: number,
   acKw: number,
-  clockHhmm: string,
+  clock: string,
   maxWaitMin = 18 * 60,
 ): ChargeWindow | null {
   if (kwh <= 0 || hours.length === 0) return null;
+  const clockDt = asDateTime(clock);
   const kw = Math.max(acKw, 1);
   const n = Math.max(1, Math.ceil(kwh / kw));
   const last = Math.max(0, hours.length - n);
   let bestI = -1;
   let best = Infinity;
   for (let i = 0; i <= last; i++) {
-    const wait = waitMinUntil(clockHhmm, hours[i].hour);
+    const wait = hourWait(clockDt, hours[i]);
     if (wait > maxWaitMin) continue;
     const cost = windowCost(hours, i, kwh, acKw);
     if (cost < best) {
@@ -252,14 +263,22 @@ export function cheapestWindow(
   if (bestI < 0) return nowWindow(hours, kwh, acKw);
   const used = hours.slice(bestI, bestI + n);
   while (used.length < n) used.push(hours[hours.length - 1]);
+  const start = used[0];
   return {
     hours: used,
     kr: best,
     avgKr: best / kwh,
     label: formatChargeWindow(used),
-    waitMin: waitMinUntil(clockHhmm, used[0].hour),
-    startHour: used[0].hour,
+    waitMin: hourWait(clockDt, start),
+    startHour: start.hour,
+    startYmd: (start as DatedHour).ymd,
   };
+}
+
+function hourWait(clockDt: string, hour: HourPrice) {
+  const dated = hour as DatedHour;
+  if (dated.ymd) return waitMinUntilDated(clockDt, dated.ymd, hour.hour);
+  return waitMinUntil(splitDateTime(clockDt).hhmm, hour.hour);
 }
 
 export function cheapestHour(hours: HourPrice[]): HourPrice | null {
@@ -272,9 +291,28 @@ export function acChargeKr(kwh: number, hours: HourPrice[], acKw: number) {
   return nowWindow(hours, kwh, acKw)?.kr ?? 0;
 }
 
-export function remainingHours(today: HourPrice[], tomorrow: HourPrice[], currentHour: string | null) {
+export function remainingHours(
+  today: HourPrice[],
+  tomorrow: HourPrice[],
+  currentHour: string | null,
+  throughDt?: string,
+): DatedHour[] {
+  const todayYmd = dkNowParts().ymd;
+  const tomorrowYmd = addDaysYmd(todayYmd, 1);
+  const through = throughDt ? splitDateTime(throughDt).ymd : addDaysYmd(todayYmd, 1);
   const rest = currentHour ? today.filter((h) => h.hour >= currentHour) : today;
-  return rest.length ? [...rest, ...tomorrow] : [...today, ...tomorrow];
+  const out: DatedHour[] = [
+    ...(rest.length ? rest : today).map((h) => ({ ...h, ymd: todayYmd })),
+    ...tomorrow.map((h) => ({ ...h, ymd: tomorrowYmd })),
+  ];
+  const template = tomorrow.length ? tomorrow : today;
+  let day = 2;
+  while (addDaysYmd(todayYmd, day) <= through && day <= 14) {
+    const ymd = addDaysYmd(todayYmd, day);
+    for (const h of template) out.push({ ...h, ymd, estimated: true });
+    day += 1;
+  }
+  return out;
 }
 
 function chargerLabel(loc: ChargeLocation) {
@@ -426,15 +464,16 @@ export function pricePlan(opts: {
     opts;
   const live = hours[0]?.krPerKwh ?? acKr;
   let soc = opts.soc;
-  let clock = opts.departHhmm || dkNowHhmm();
+  let clock = asDateTime(opts.departHhmm || dkNowDateTime());
   const out: PricedLeg[] = [];
   for (let i = 0; i < routes.length; i++) {
     const mode = modes[i] ?? "standard";
     const route = routes[i];
     const when = opts.legWhen?.[i];
-    if (when?.kind === "depart" && when.hhmm) clock = when.hhmm;
-    if (when?.kind === "arrive" && when.hhmm) {
-      clock = addMinutesHhmm(when.hhmm, -route.seconds / 60);
+    const whenAt = when && when.kind !== "auto" ? asDateTime(when.at || when.hhmm) : "";
+    if (when?.kind === "depart" && whenAt) clock = whenAt;
+    if (when?.kind === "arrive" && whenAt) {
+      clock = addMinutesDateTime(whenAt, -route.seconds / 60);
     }
     const kwh = driveKwh(route.miles, route.seconds, speedEff);
     const socAfter = soc - (kwh / usableKwh) * 100;
@@ -452,8 +491,8 @@ export function pricePlan(opts: {
     const chargeMinEst = (Math.max(kwhNeed, 5) / Math.max(acKw, 1)) * 60;
     const restDriveMin = routes.slice(i).reduce((n, r) => n + r.seconds / 60, 0);
     const maxWaitMin = opts.arriveHhmm
-      ? Math.max(0, minutesAhead(clock, opts.arriveHhmm) - chargeMinEst - restDriveMin)
-      : 18 * 60;
+      ? Math.max(0, minutesBetweenDateTime(clock, asDateTime(opts.arriveHhmm)) - chargeMinEst - restDriveMin)
+      : 3 * 24 * 60;
     const pick = wantCharge
       ? pickCharges({
           kwhNeed: Math.max(kwhNeed, 5),
@@ -480,9 +519,9 @@ export function pricePlan(opts: {
     const waitMin = billed && charge && charge.cheapWindow ? charge.waitMin : 0;
     const chargeMin = billed && charge ? (charge.kwh / Math.max(acKw, 1)) * 60 : 0;
     const departAt = clock;
-    if (waitMin > 0) clock = addMinutesHhmm(clock, waitMin);
-    if (chargeMin > 0) clock = addMinutesHhmm(clock, chargeMin);
-    clock = addMinutesHhmm(clock, route.seconds / 60);
+    if (waitMin > 0) clock = addMinutesDateTime(clock, waitMin);
+    if (chargeMin > 0) clock = addMinutesDateTime(clock, chargeMin);
+    clock = addMinutesDateTime(clock, route.seconds / 60);
     const startSoc = billed && charge ? Math.min(100, soc + (charge.kwh / usableKwh) * 100) : soc;
     const arriveSoc = Math.max(1, startSoc - (kwh / usableKwh) * 100);
     out.push({

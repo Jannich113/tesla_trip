@@ -102,6 +102,74 @@ export function addMinutesHhmm(hhmm: string, add: number) {
   return formatHhmm(parseHhmm(hhmm) + add);
 }
 
+function pad2(n: number) {
+  return String(n).padStart(2, "0");
+}
+
+export function dkNowParts(at = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Copenhagen",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(at);
+  const g = (t: string) => parts.find((p) => p.type === t)?.value ?? "00";
+  const hourRaw = g("hour");
+  const hour = hourRaw === "24" ? "00" : hourRaw;
+  return {
+    ymd: `${g("year")}-${g("month")}-${g("day")}`,
+    hhmm: `${hour.padStart(2, "0")}:${g("minute").padStart(2, "0")}`,
+  };
+}
+
+export function dkNowDateTime(at = new Date()) {
+  const p = dkNowParts(at);
+  return `${p.ymd}T${p.hhmm}`;
+}
+
+export function asDateTime(value: string, fallback = dkNowDateTime()) {
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value)) return value.slice(0, 16);
+  if (/^\d{2}:\d{2}$/.test(value)) return `${dkNowParts().ymd}T${value}`;
+  return fallback;
+}
+
+export function splitDateTime(value: string) {
+  const dt = asDateTime(value);
+  const [ymd, hhmm] = dt.split("T");
+  return { ymd: ymd || dkNowParts().ymd, hhmm: hhmm || "00:00" };
+}
+
+export function formatDateTime(value: string) {
+  const { ymd, hhmm } = splitDateTime(value);
+  const [, m, d] = ymd.split("-");
+  return `${d}/${m} ${hhmm}`;
+}
+
+function ymdToUtc(ymd: string, min = 0) {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return Date.UTC(y, (m || 1) - 1, d || 1) + min * 60_000;
+}
+
+export function addDaysYmd(ymd: string, days: number) {
+  const t = new Date(ymdToUtc(ymd) + days * 86_400_000);
+  return `${t.getUTCFullYear()}-${pad2(t.getUTCMonth() + 1)}-${pad2(t.getUTCDate())}`;
+}
+
+export function addMinutesDateTime(value: string, add: number) {
+  const { ymd, hhmm } = splitDateTime(value);
+  const t = new Date(ymdToUtc(ymd, parseHhmm(hhmm)) + add * 60_000);
+  return `${t.getUTCFullYear()}-${pad2(t.getUTCMonth() + 1)}-${pad2(t.getUTCDate())}T${pad2(t.getUTCHours())}:${pad2(t.getUTCMinutes())}`;
+}
+
+export function minutesBetweenDateTime(from: string, to: string) {
+  const a = splitDateTime(from);
+  const b = splitDateTime(to);
+  return Math.round((ymdToUtc(b.ymd, parseHhmm(b.hhmm)) - ymdToUtc(a.ymd, parseHhmm(a.hhmm))) / 60_000);
+}
+
 /** Minutes to wait from clock until startHour:00. 0 if that hour is already in progress. */
 export function waitMinUntil(clockHhmm: string, startHour: string) {
   const clock = parseHhmm(clockHhmm);
@@ -109,10 +177,15 @@ export function waitMinUntil(clockHhmm: string, startHour: string) {
   if (!Number.isFinite(startH)) return 0;
   const clockH = Math.floor(clock / 60);
   if (startH === clockH) return 0;
-  const start = ((startH % 24) + 24) % 24 * 60;
+  const start = (((startH % 24) + 24) % 24) * 60;
   let diff = start - clock;
   if (diff < 0) diff += 24 * 60;
   return diff;
+}
+
+export function waitMinUntilDated(clockDt: string, startYmd: string, startHour: string) {
+  const start = `${startYmd}T${String(startHour).padStart(2, "0")}:00`;
+  return Math.max(0, minutesBetweenDateTime(clockDt, start));
 }
 
 export function minutesAhead(fromHhmm: string, toHhmm: string) {
@@ -121,9 +194,15 @@ export function minutesAhead(fromHhmm: string, toHhmm: string) {
   return diff;
 }
 
-export function hoursFrom<T extends { hour: string }>(hours: T[], hhmm: string) {
+export function hoursFrom<T extends { hour: string; ymd?: string }>(hours: T[], clock: string) {
   if (!hours.length) return [];
+  const dt = asDateTime(clock);
+  const { ymd, hhmm } = splitDateTime(dt);
   const hour = hhmm.slice(0, 2).padStart(2, "0");
+  if (hours.some((h) => h.ymd)) {
+    const idx = hours.findIndex((h) => (h.ymd ?? "") > ymd || (h.ymd === ymd && h.hour >= hour));
+    return idx >= 0 ? hours.slice(idx) : hours.slice(-Math.min(24, hours.length));
+  }
   const exact = hours.findIndex((h) => h.hour === hour);
   if (exact >= 0) return hours.slice(exact);
   const next = hours.findIndex((h) => h.hour > hour);

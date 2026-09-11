@@ -10,6 +10,10 @@ import {
   hoursFrom,
   interpolateWhPerMi,
   waitMinUntil,
+  waitMinUntilDated,
+  addMinutesDateTime,
+  minutesBetweenDateTime,
+  asDateTime,
 } from "./modes.ts";
 
 describe("leg modes", () => {
@@ -87,5 +91,13 @@ describe("leg modes", () => {
     assert.equal(waitMinUntil("18:40", "18"), 0);
     assert.equal(waitMinUntil("18:40", "19"), 20);
     assert.equal(waitMinUntil("18:40", "02"), 7 * 60 + 20);
+  });
+
+  it("dated wait uses the calendar, not a 24h wrap", () => {
+    assert.equal(waitMinUntilDated("2026-09-11T18:40", "2026-09-12", "02"), 7 * 60 + 20);
+    assert.equal(waitMinUntilDated("2026-09-13T18:00", "2026-09-14", "02"), 8 * 60);
+    assert.equal(minutesBetweenDateTime("2026-09-11T18:00", "2026-09-13T02:00"), 32 * 60);
+    assert.equal(addMinutesDateTime("2026-09-11T23:30", 90), "2026-09-12T01:00");
+    assert.equal(asDateTime("18:40").slice(11), "18:40");
   });
 });
