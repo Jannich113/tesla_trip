@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronUp, MapPinned, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { BayMap, type MapMarker, type MapRoute } from "@/components/bay-map";
 import { searchAddress, type AddressHit } from "./search";
@@ -18,7 +18,6 @@ import {
   addMinutesDateTime,
   asDateTime,
   chargeSearchKm,
-  cheapestHour,
   DKK_PER_USD,
   dkNowDateTime,
   defaultSpeedEff,
@@ -41,7 +40,7 @@ import {
 } from "./engine";
 import { usePlanStore } from "./store";
 import { formatKrPerKwh, formatKrValue, type HourPrice } from "@/lib/elpris";
-import { applyTillægToHours, providerById, withTillæg } from "@/lib/el-providers";
+import { applyTillægToHours, providerById } from "@/lib/el-providers";
 import { PLACES } from "@/lib/places";
 import { cn } from "@/lib/utils";
 import { formatDistance, formatEfficiency, formatNumber } from "@/lib/vehicle";
@@ -71,12 +70,6 @@ function offsetPath(path: [number, number][], meters: number): [number, number][
     return [p[0] + (-dLng / len) * deg, p[1] + (dLat / len) * deg];
   });
 }
-
-const ROUTE_OFFSET_M: Record<LegMode, number> = {
-  eco: -280,
-  fastest: 0,
-  cheapest: 280,
-};
 
 const CHARGE_OFFSET: Record<LegMode, [number, number]> = {
   eco: [-0.0016, -0.0009],
@@ -147,14 +140,9 @@ export function PlanScreen() {
   const [acceptCharge, setAcceptCharge] = useState<Record<number, boolean>>({});
   const [chargeToSoc, setChargeToSoc] = useState<Record<number, number>>({});
   const [backupLoc, setBackupLoc] = useState<Record<number, string>>({});
-  const [showRoutes, setShowRoutes] = useState<Record<LegMode, boolean>>({
-    eco: true,
-    fastest: true,
-    cheapest: true,
-  });
   const [openStops, setOpenStops] = useState<Record<string, boolean>>({});
   const [pane, setPane] = useState<"plan" | "advanced">("plan");
-  const { data: elpris, error: elprisError, loading: elprisLoading } = useLiveElpris(area);
+  const { data: elpris } = useLiveElpris(area);
 
   useEffect(() => {
     void Promise.all([
@@ -249,6 +237,7 @@ export function PlanScreen() {
     m === "eco" || m === "cheapest" || m === "fastest" ? m : ("fastest" as LegMode),
   );
   const mixed = activeModes.some((m) => m !== activeModes[0]);
+  const mapMode: LegMode = activeModes[0] ?? "fastest";
   const selectedRoutes = mixed
     ? stops
         .slice(0, -1)
@@ -506,35 +495,33 @@ export function PlanScreen() {
   const mapRoutes: MapRoute[] = useMemo(() => {
     const out: MapRoute[] = [];
     if (stops.length < 2) return out;
-    for (const mode of LEG_MODES) {
-      if (!showRoutes[mode]) continue;
-      for (let i = 0; i < stops.length - 1; i++) {
-        const hit =
-          routeMap[routeKey(stops[i], stops[i + 1], pathMode(mode, cheapAvoidFees))] ??
-          routeMap[routeKey(stops[i], stops[i + 1], mode)] ??
-          (mode === "cheapest" ? routeMap[routeKey(stops[i], stops[i + 1], "fastest")] : undefined);
-        if (!hit) continue;
-        const raw =
-          hit.path.length >= 2
-            ? simplifyPath(hit.path, 120)
-            : ([[stops[i].lat, stops[i].lng], [stops[i + 1].lat, stops[i + 1].lng]] as [number, number][]);
-        out.push({
-          id: `opt-${mode}-${i}`,
-          from: [stops[i].lat, stops[i].lng],
-          to: [stops[i + 1].lat, stops[i + 1].lng],
-          weight: 3,
-          path: offsetPath(raw, ROUTE_OFFSET_M[mode]),
-          color: modeColor(mode),
-        });
-      }
+    for (let i = 0; i < stops.length - 1; i++) {
+      const mode = mixed ? (activeModes[i] ?? mapMode) : mapMode;
+      const hit =
+        routeMap[routeKey(stops[i], stops[i + 1], pathMode(mode, cheapAvoidFees))] ??
+        routeMap[routeKey(stops[i], stops[i + 1], mode)] ??
+        (mode === "cheapest" ? routeMap[routeKey(stops[i], stops[i + 1], "fastest")] : undefined);
+      if (!hit) continue;
+      const raw =
+        hit.path.length >= 2
+          ? simplifyPath(hit.path, 120)
+          : ([[stops[i].lat, stops[i].lng], [stops[i + 1].lat, stops[i + 1].lng]] as [number, number][]);
+      out.push({
+        id: `opt-${mode}-${i}`,
+        from: [stops[i].lat, stops[i].lng],
+        to: [stops[i + 1].lat, stops[i + 1].lng],
+        weight: 3,
+        path: offsetPath(raw, 0),
+        color: modeColor(mode),
+      });
     }
     return out;
-  }, [stops, routeMap, showRoutes, cheapAvoidFees]);
+  }, [stops, routeMap, cheapAvoidFees, mapMode, mixed, activeModes]);
 
   const mapMarkers: MapMarker[] = useMemo(() => {
     const chargerMarkers: MapMarker[] = [];
     for (const row of optionRows) {
-      if (!showRoutes[row.mode]) continue;
+      if (row.mode !== mapMode) continue;
       const [dLat, dLng] = CHARGE_OFFSET[row.mode];
       const color = modeColor(row.mode);
       for (const [i, leg] of row.legs.entries()) {
@@ -572,40 +559,10 @@ export function PlanScreen() {
       })),
       ...chargerMarkers,
     ];
-  }, [optionRows, locations, stops, showRoutes]);
-
-  const live = elpris?.current
-    ? withTillæg(elpris.current.krPerKwh, provider.tillægOre)
-    : null;
-  const cheap = cheapestHour(hours);
+  }, [optionRows, locations, stops, mapMode]);
 
   return (
     <div className="space-y-5 px-4 pb-6">
-      <div className="flex items-start justify-between gap-3 px-1">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-muted">Plan</p>
-          <p className="mt-1 text-xs text-subtle">
-            {live != null ? (
-              <>
-                Live {formatKrPerKwh(live, 3)} · {area} · {provider.name}
-              </>
-            ) : elprisLoading ? (
-              "Fetching live spot…"
-            ) : elprisError ? (
-              elprisError
-            ) : (
-              "No live price"
-            )}
-          </p>
-          {cheap && live != null && cheap.krPerKwh < live - 0.001 ? (
-            <p className="mt-0.5 text-xs text-accent">
-              Cheapest {cheap.hour}:00 · {formatKrPerKwh(cheap.krPerKwh, 3)}
-            </p>
-          ) : null}
-        </div>
-        <MapPinned className="mt-1 size-4 text-muted" />
-      </div>
-
       <div className="flex rounded-full bg-surface-2 p-1">
         {(["plan", "advanced"] as const).map((id) => (
           <button
@@ -623,7 +580,46 @@ export function PlanScreen() {
       </div>
 
       {pane === "advanced" ? (
-        <NetworksPanel abo={networkAbo} onToggle={setNetworkAbo} />
+        <div className="space-y-4">
+          <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-muted">
+              kWh/mi at speed
+            </p>
+            <div className="mt-2 grid grid-cols-4 gap-2">
+              {SPEED_KMH.map((kmh) => (
+                <label key={kmh} className="text-[11px] text-muted">
+                  {kmh} km/t
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    min={0.08}
+                    max={0.6}
+                    step={0.005}
+                    value={(speedEff[kmh] / 1000).toFixed(3)}
+                    onChange={(e) => {
+                      const n = Number(e.target.value);
+                      if (!Number.isFinite(n) || n <= 0) return;
+                      setSpeedEff({ ...speedEff, [kmh]: n * 1000 });
+                    }}
+                    className="mt-1 h-11 w-full rounded-md bg-surface-2 px-2 text-center text-sm tabular-nums text-foreground outline-none"
+                  />
+                </label>
+              ))}
+            </div>
+            <p className="mt-1 text-[11px] text-subtle">
+              Interpolated from each leg’s average speed · car EPA {formatEfficiency(carWhPerMi, units)}
+              {speedEffOverride ? (
+                <>
+                  {" · "}
+                  <button type="button" className="text-muted underline" onClick={() => setSpeedEff(null)}>
+                    Reset
+                  </button>
+                </>
+              ) : null}
+            </p>
+          </section>
+          <NetworksPanel abo={networkAbo} onToggle={setNetworkAbo} />
+        </div>
       ) : (
       <>
 
@@ -670,41 +666,6 @@ export function PlanScreen() {
 
         <p className="mt-4 text-xs text-muted">
           {profile.usableKwh} kWh usable · {formatNumber(soc, 0)}% now
-        </p>
-        <p className="mt-3 text-[11px] font-medium uppercase tracking-wide text-muted">
-          kWh/mi at speed
-        </p>
-        <div className="mt-2 grid grid-cols-4 gap-2">
-          {SPEED_KMH.map((kmh) => (
-            <label key={kmh} className="text-[11px] text-muted">
-              {kmh} km/t
-              <input
-                type="number"
-                inputMode="decimal"
-                min={0.08}
-                max={0.6}
-                step={0.005}
-                value={(speedEff[kmh] / 1000).toFixed(3)}
-                onChange={(e) => {
-                  const n = Number(e.target.value);
-                  if (!Number.isFinite(n) || n <= 0) return;
-                  setSpeedEff({ ...speedEff, [kmh]: n * 1000 });
-                }}
-                className="mt-1 h-11 w-full rounded-md bg-surface-2 px-2 text-center text-sm tabular-nums text-foreground outline-none"
-              />
-            </label>
-          ))}
-        </div>
-        <p className="mt-1 text-[11px] text-subtle">
-          Interpolated from each leg’s average speed · car EPA {formatEfficiency(carWhPerMi, units)}
-          {speedEffOverride ? (
-            <>
-              {" · "}
-              <button type="button" className="text-muted underline" onClick={() => setSpeedEff(null)}>
-                Reset
-              </button>
-            </>
-          ) : null}
         </p>
 
         <p className="mt-5 text-[11px] font-medium uppercase tracking-wide text-muted">Route options</p>
@@ -868,32 +829,13 @@ export function PlanScreen() {
       ) : null}
 
       <div className="space-y-2">
-        <div className="flex flex-wrap gap-1">
-          {LEG_MODES.map((mode) => {
-            const on = showRoutes[mode];
-            return (
-              <button
-                key={mode}
-                type="button"
-                onClick={() => setShowRoutes((cur) => ({ ...cur, [mode]: !cur[mode] }))}
-                className={cn(
-                  "h-8 rounded-full px-3 text-[11px] font-medium",
-                  on ? "text-background" : "bg-surface-2 text-muted",
-                )}
-                style={on ? { background: modeColor(mode) } : undefined}
-              >
-                {modeLabel(mode)}
-              </button>
-            );
-          })}
-        </div>
         <BayMap
           markers={mapMarkers}
           routes={mapRoutes}
           selectedId={selected}
           selectedIds={selectedIds}
           onSelect={onMapSelect}
-          caption={routing ? "Routing…" : "Tap a leg or charger"}
+          caption={routing ? "Routing…" : `${modeLabel(mapMode)} · tap a leg or charger`}
           hidden={!shareLocation}
         />
       </div>
