@@ -426,7 +426,7 @@ export function PlanScreen() {
     }
   }
 
-  const selectedIds = (() => {
+  const selectedIds = useMemo(() => {
     const ids = new Set<string>();
     if (!selected) return [] as string[];
     ids.add(selected);
@@ -449,7 +449,7 @@ export function PlanScreen() {
       if (leg?.backup) ids.add(`chg-${stopIdx - 1}-${leg.backup.locationId}`);
     }
     return [...ids];
-  })();
+  }, [selected, viewLegs, stops]);
 
   function onSave() {
     const plan = savePlan();
@@ -513,23 +513,6 @@ export function PlanScreen() {
         });
       }
     }
-    const billedIds = new Set(
-      chargerMarkers.map((m) => m.id.replace(/^chg-\d+-/, "").replace(/^corridor-/, "")),
-    );
-    let extra = 0;
-    for (const loc of routeChargers) {
-      if (extra >= 18) break;
-      if (billedIds.has(loc.id)) continue;
-      extra += 1;
-      chargerMarkers.push({
-        id: `corridor-${loc.id}`,
-        lat: loc.lat,
-        lng: loc.lng,
-        label: loc.short || loc.name,
-        kind: "charger",
-        badge: (loc.networkId || loc.short || "C").slice(0, 1).toUpperCase(),
-      });
-    }
     return [
       ...stops.map((s, i) => ({
         id: s.id,
@@ -551,7 +534,7 @@ export function PlanScreen() {
         })),
       ...chargerMarkers,
     ];
-  }, [viewLegs, locations, routeChargers, stops]);
+  }, [viewLegs, locations, stops]);
 
   const live = elpris?.current
     ? withTillæg(elpris.current.krPerKwh, provider.tillægOre)

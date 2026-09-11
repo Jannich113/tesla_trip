@@ -159,6 +159,21 @@ input[type="range"].charge-range::-moz-range-thumb {
   box-shadow: var(--shadow-border) !important;
 }
 
+.leaflet-tooltip.map-pin-tip {
+  background: var(--color-background);
+  color: var(--color-foreground);
+  border: none;
+  border-radius: 999px;
+  box-shadow: var(--shadow-border);
+  font-size: 10px;
+  font-weight: 500;
+  padding: 2px 7px;
+}
+
+.leaflet-tooltip.map-pin-tip::before {
+  display: none;
+}
+
 .map-pin-wrap {
   background: none !important;
   border: none !important;

@@ -25,7 +25,7 @@ function escapeHtml(s: string) {
   return s.replace(/[<>&"]/g, "");
 }
 
-function arc(a: [number, number], b: [number, number], steps = 18): [number, number][] {
+function arc(a: [number, number], b: [number, number], steps = 12): [number, number][] {
   const mx = (a[0] + b[0]) / 2;
   const my = (a[1] + b[1]) / 2;
   const dx = b[1] - a[1];
@@ -44,6 +44,44 @@ function arc(a: [number, number], b: [number, number], steps = 18): [number, num
     ]);
   }
   return pts;
+}
+
+function thin(path: [number, number][], max = 80): [number, number][] {
+  if (path.length <= max) return path;
+  const step = Math.ceil(path.length / max);
+  const out = path.filter((_, i) => i % step === 0);
+  const last = path[path.length - 1];
+  if (out[out.length - 1] !== last) out.push(last);
+  return out;
+}
+
+function overlayKey(
+  markers: MapMarker[],
+  routes: MapRoute[],
+  selectedId: string | null | undefined,
+  selectedIds: string[] | undefined,
+  dropping: boolean,
+) {
+  const sel = `${selectedId ?? ""}:${(selectedIds ?? []).join(",")}`;
+  const m = markers
+    .map((x) => `${x.id}:${x.lat.toFixed(3)},${x.lng.toFixed(3)}:${x.badge ?? ""}:${x.kind}`)
+    .join("|");
+  const r = routes
+    .map((x) => {
+      const a = x.path?.[0] ?? x.from;
+      const b = x.path?.at(-1) ?? x.to;
+      return `${x.id}:${x.path?.length ?? 0}:${a[0].toFixed(3)},${a[1].toFixed(3)}>${b[0].toFixed(3)},${b[1].toFixed(3)}:${x.color ?? ""}`;
+    })
+    .join("|");
+  return `${sel}#${m}#${r}#${dropping ? 1 : 0}`;
+}
+
+function pinColor(kind: MapMarker["kind"], badge?: string) {
+  if (badge === "!") return "#ff5c5c";
+  if (badge === "+") return "#1ecf8a";
+  if (kind === "home") return "#c8cdd4";
+  if (kind === "charger") return "#e6b84d";
+  return "#6ea8ff";
 }
 
 export function BayMap({
@@ -72,160 +110,175 @@ export function BayMap({
   const hostRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<import("leaflet").Map | null>(null);
   const groupRef = useRef<import("leaflet").LayerGroup | null>(null);
+  const LRef = useRef<typeof import("leaflet") | null>(null);
   const onSelectRef = useRef(onSelect);
   const onDropRef = useRef(onDrop);
   const fitKeyRef = useRef("");
+  const drawKeyRef = useRef("");
   const [ready, setReady] = useState(false);
   onSelectRef.current = onSelect;
   onDropRef.current = onDrop;
 
   useEffect(() => {
+    if (hidden) return;
     const el = hostRef.current;
     if (!el) return;
     let cancelled = false;
 
-    void (async () => {
-      const leaflet = await import("leaflet");
-      const L = leaflet.default;
-      if (cancelled || !hostRef.current) return;
-
-      const map = L.map(hostRef.current, {
-        zoomControl: false,
-        attributionControl: true,
-        scrollWheelZoom: false,
-      });
-      L.control.zoom({ position: "bottomright" }).addTo(map);
-      // No API key: public OSM raster tiles + CSS invert for a dark UI.
-      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19,
-        attribution:
-          '&copy; <a href="https://www.openstreetmap.org/copyright" rel="noreferrer" target="_blank">OpenStreetMap</a>',
-      }).addTo(map);
-      map.attributionControl?.setPosition("bottomleft");
-      map.setView([37.45, -122.15], 10);
-      groupRef.current = L.layerGroup().addTo(map);
-      map.on("click", (e) => {
-        onDropRef.current?.(e.latlng.lat, e.latlng.lng);
-      });
-      mapRef.current = map;
-      map.invalidateSize();
-      if (!cancelled) setReady(true);
-    })();
+    const start = window.setTimeout(() => {
+      void (async () => {
+        const leaflet = await import("leaflet");
+        if (cancelled || !hostRef.current) return;
+        const mod = leaflet as unknown as { default?: typeof leaflet } & typeof leaflet;
+        const L = (mod.default ?? mod) as typeof leaflet;
+        LRef.current = L;
+        const map = L.map(hostRef.current, {
+          zoomControl: false,
+          attributionControl: true,
+          scrollWheelZoom: false,
+          fadeAnimation: false,
+          zoomAnimation: false,
+          markerZoomAnimation: false,
+          renderer: L.canvas({ padding: 0.4 }),
+        });
+        L.control.zoom({ position: "bottomright" }).addTo(map);
+        L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          maxZoom: 18,
+          updateWhenIdle: true,
+          keepBuffer: 1,
+          attribution:
+            '&copy; <a href="https://www.openstreetmap.org/copyright" rel="noreferrer" target="_blank">OpenStreetMap</a>',
+        }).addTo(map);
+        map.attributionControl?.setPosition("bottomleft");
+        map.setView([37.45, -122.15], 10);
+        groupRef.current = L.layerGroup().addTo(map);
+        map.on("click", (e) => {
+          onDropRef.current?.(e.latlng.lat, e.latlng.lng);
+        });
+        mapRef.current = map;
+        map.invalidateSize();
+        if (!cancelled) setReady(true);
+      })();
+    }, 48);
 
     return () => {
       cancelled = true;
+      window.clearTimeout(start);
       setReady(false);
       mapRef.current?.remove();
       mapRef.current = null;
       groupRef.current = null;
+      LRef.current = null;
+      drawKeyRef.current = "";
+      fitKeyRef.current = "";
     };
-  }, []);
+  }, [hidden]);
 
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || hidden) return;
     const map = mapRef.current;
     const group = groupRef.current;
-    if (!map || !group) return;
+    const leaflet = LRef.current;
+    if (!map || !group || !leaflet) return;
+    const key = overlayKey(markers, routes, selectedId, selectedIds, dropping);
+    if (key === drawKeyRef.current) return;
 
-    let disposed = false;
-    void import("leaflet").then((leaflet) => {
-      if (disposed || mapRef.current !== map) return;
-      const L = leaflet.default;
+    const raf = window.requestAnimationFrame(() => {
+      if (mapRef.current !== map) return;
+      drawKeyRef.current = key;
+      const L = leaflet;
       group.clearLayers();
       const bounds: [number, number][] = [];
-
       const selectedSet = new Set(
         [selectedId, ...(selectedIds ?? [])].filter((id): id is string => !!id),
       );
       const selectedRoutes = routes.filter((r) => selectedSet.has(r.id));
+
       for (const route of routes) {
         const selected = selectedSet.has(route.id);
-        const raw = route.path && route.path.length >= 2 ? route.path : arc(route.from, route.to);
-        const pts = raw.length > 180 ? raw.filter((_, i) => i % Math.ceil(raw.length / 140) === 0 || i === raw.length - 1) : raw;
+        const pts = thin(route.path && route.path.length >= 2 ? route.path : arc(route.from, route.to), 72);
         pts.forEach((p) => bounds.push(p));
         L.polyline(pts, {
           color: route.color || "#1ecf8a",
-          opacity: selected ? 1 : selectedSet.size ? 0.55 : 0.9,
-          weight: selected ? 5 : 3.2,
+          opacity: selected ? 1 : selectedSet.size ? 0.45 : 0.85,
+          weight: selected ? 4 : 2.4,
           lineCap: "round",
           lineJoin: "round",
           interactive: true,
+          renderer: map.options.renderer,
         })
-          .on("click", (e) => {
-            L.DomEvent.stopPropagation(e);
+          .on("click", (e: { target?: unknown }) => {
+            L.DomEvent.stopPropagation(e as import("leaflet").LeafletMouseEvent);
             onSelectRef.current?.(route.id);
           })
           .addTo(group);
       }
 
-      for (const marker of markers) {
+      const pins = markers.length > 16 ? markers.filter((m) => m.kind !== "charger").concat(markers.filter((m) => m.kind === "charger").slice(0, 10)) : markers;
+      for (const marker of pins) {
         bounds.push([marker.lat, marker.lng]);
         const selected = selectedSet.has(marker.id);
-        if (marker.radiusM && marker.radiusM > 0 && (selected || dropping || markers.length <= 8)) {
-          const circle = L.circle([marker.lat, marker.lng], {
+        if (marker.radiusM && marker.radiusM > 0 && (selected || dropping)) {
+          L.circle([marker.lat, marker.lng], {
             radius: marker.radiusM,
             color: "#1ecf8a",
-            weight: selected ? 1.6 : 1,
-            opacity: selected ? 0.85 : 0.28,
+            weight: selected ? 1.4 : 1,
+            opacity: selected ? 0.8 : 0.25,
             fillColor: "#1ecf8a",
-            fillOpacity: selected ? 0.16 : 0.05,
+            fillOpacity: selected ? 0.14 : 0.04,
             interactive: false,
+            renderer: map.options.renderer,
           }).addTo(group);
-          if (selected) {
-            const c = circle.getBounds();
-            bounds.push([c.getSouth(), c.getWest()], [c.getNorth(), c.getEast()]);
-          }
         }
-        const html = `<div class="map-pin map-pin-${marker.kind}${selected ? " is-selected" : ""}${
-          marker.badge === "+" ? " map-pin-ok" : marker.badge === "!" ? " map-pin-need" : ""
-        }">${
-          marker.badge ? `<span class="map-pin-badge">${escapeHtml(marker.badge)}</span>` : `<span class="map-pin-dot"></span>`
-        }<span class="map-pin-label">${escapeHtml(marker.label)}</span></div>`;
-        L.marker([marker.lat, marker.lng], {
-          icon: L.divIcon({
-            className: "map-pin-wrap",
-            html,
-            iconSize: [0, 0],
-            iconAnchor: [0, 0],
-          }),
-          zIndexOffset: selected ? 600 : 0,
-        })
-          .on("click", (e) => {
-            L.DomEvent.stopPropagation(e);
-            onSelectRef.current?.(marker.id);
-          })
-          .addTo(group);
+        const color = pinColor(marker.kind, marker.badge);
+        const dot = L.circleMarker([marker.lat, marker.lng], {
+          radius: selected ? 8 : 6,
+          color,
+          weight: selected ? 2 : 1,
+          opacity: 1,
+          fillColor: color,
+          fillOpacity: selected ? 1 : 0.85,
+          renderer: map.options.renderer,
+        }).addTo(group);
+        dot.on("click", (e: { target?: unknown }) => {
+          L.DomEvent.stopPropagation(e as import("leaflet").LeafletMouseEvent);
+          onSelectRef.current?.(marker.id);
+        });
+        if (selected || marker.kind !== "charger") {
+          dot.bindTooltip(escapeHtml(marker.label), {
+            permanent: marker.kind !== "charger",
+            direction: "right",
+            offset: [8, 0],
+            opacity: 0.92,
+            className: "map-pin-tip",
+          });
+          if (marker.kind !== "charger") dot.openTooltip();
+        }
       }
 
-      const focusKey = [
-        selectedId ?? "",
-        ...(selectedIds ?? []),
-        ...routes.map((r) => r.id),
-      ].join("|");
-      const focus =
+      const focusKey = `${routes.map((r) => r.id).join(",")}:${selectedRoutes.map((r) => r.id).join(",")}`;
+      const fitPts =
         selectedRoutes.length > 0
           ? selectedRoutes.flatMap((r) => {
-              const raw = r.path && r.path.length >= 2 ? r.path : arc(r.from, r.to);
-              return raw.length > 80 ? [raw[0], raw[Math.floor(raw.length / 2)], raw[raw.length - 1]] : raw;
+              const raw = r.path && r.path.length >= 2 ? r.path : [r.from, r.to];
+              return [raw[0], raw[Math.floor(raw.length / 2)], raw[raw.length - 1]];
             })
           : bounds;
-      if (focus.length >= 2 && fitKeyRef.current !== focusKey) {
+      if (fitPts.length >= 2 && fitKeyRef.current !== focusKey) {
         fitKeyRef.current = focusKey;
-        map.fitBounds(L.latLngBounds(focus), {
+        map.fitBounds(L.latLngBounds(fitPts), {
           padding: [36, 36],
           maxZoom: selectedRoutes.length === 1 ? 12 : 8,
           animate: false,
         });
-      } else if (focus.length === 1 && fitKeyRef.current !== focusKey) {
+      } else if (fitPts.length === 1 && fitKeyRef.current !== focusKey) {
         fitKeyRef.current = focusKey;
-        map.setView(focus[0], 12, { animate: false });
+        map.setView(fitPts[0], 12, { animate: false });
       }
     });
 
-    return () => {
-      disposed = true;
-    };
-  }, [ready, markers, routes, selectedId, selectedIds, dropping]);
+    return () => window.cancelAnimationFrame(raf);
+  }, [ready, hidden, markers, routes, selectedId, selectedIds, dropping]);
 
   useEffect(() => {
     if (!ready || !focus) return;
@@ -246,6 +299,11 @@ export function BayMap({
   return (
     <div className="relative isolate overflow-hidden rounded-xl bg-surface shadow-[var(--shadow-border)]">
       <div ref={hostRef} className={cn("bay-map h-80 w-full", dropping && "cursor-crosshair")} />
+      {!ready ? (
+        <p className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-muted">
+          Map
+        </p>
+      ) : null}
       {caption ? (
         <p className="pointer-events-none absolute left-3 top-3 rounded-full bg-background/85 px-3 py-1 text-xs text-foreground">
           {caption}
