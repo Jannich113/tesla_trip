@@ -16,6 +16,7 @@ import {
   asDateTime,
   waitDelayMin,
 } from "./modes.ts";
+import { rateForNetwork, networkIdFor } from "./networks.ts";
 
 describe("leg modes", () => {
   it("eco is shortest + avoids highways and tolls", () => {
@@ -124,5 +125,16 @@ describe("leg modes", () => {
       }),
       8 * 60,
     );
+  });
+
+  it("superchargers map to Tesla network", () => {
+    assert.equal(networkIdFor("supercharger"), "tesla");
+    assert.equal(networkIdFor("home"), null);
+  });
+
+  it("abo flag switches spot vs membership kWh", () => {
+    assert.ok(rateForNetwork("ionity", false)! > rateForNetwork("ionity", true)!);
+    assert.equal(rateForNetwork("clever", true), 0);
+    assert.ok(rateForNetwork("clever", false)! > 1);
   });
 });

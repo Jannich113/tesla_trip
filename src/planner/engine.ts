@@ -20,6 +20,7 @@ import {
   waitMinUntil,
   waitMinUntilDated,
 } from "./modes";
+import { networkIdFor, networkLabel, rateForNetwork } from "./networks";
 
 export {
   DETOUR_KM,
@@ -323,7 +324,9 @@ export function remainingHours(
   return out;
 }
 
-function chargerLabel(loc: ChargeLocation) {
+function chargerLabel(loc: ChargeLocation, hasAbo = false) {
+  const netId = networkIdFor(loc.kind, (loc as { networkId?: string }).networkId);
+  if (netId) return networkLabel(netId, hasAbo);
   if (loc.kind === "supercharger") return `${loc.short} Supercharger`;
   if (loc.kind === "home") return "Home · live spot";
   return loc.short || loc.name;
@@ -340,7 +343,27 @@ function toPriced(
   preferCheap: boolean,
   clockHhmm: string,
   maxWaitMin: number,
+  memberships: Record<string, boolean> = {},
 ): PricedCharge {
+  const netId = networkIdFor(loc.kind, (loc as { networkId?: string }).networkId);
+  if (netId) {
+    const hasAbo = Boolean(memberships[netId]);
+    const rate = rateForNetwork(netId, hasAbo) ?? usdToKr(loc.usdPerKwh);
+    return {
+      locationId: loc.id,
+      name: loc.short || loc.name,
+      kind: loc.kind,
+      kwh: kwhNeed,
+      kr: kwhNeed * rate,
+      rateKr: rate,
+      label: chargerLabel(loc, hasAbo),
+      inBand,
+      distM,
+      windowLabel: hasAbo ? networkLabel(netId, true) : "Ad-hoc",
+      cheapWindow: false,
+      waitMin: 0,
+    };
+  }
   if (loc.kind === "supercharger") {
     const rate = usdToKr(loc.usdPerKwh);
     return {
@@ -394,8 +417,9 @@ export function pickCharges(opts: {
   clockHhmm: string;
   maxWaitMin: number;
   backupId?: string | null;
+  memberships?: Record<string, boolean>;
 }): { primary: PricedCharge; backup: PricedCharge | null; options: PricedCharge[] } | null {
-  const { kwhNeed, path, detourKm, mode, locations, acKr, hours, acKw, speedEff, clockHhmm, maxWaitMin, backupId } = opts;
+  const { kwhNeed, path, detourKm, mode, locations, acKr, hours, acKw, speedEff, clockHhmm, maxWaitMin, backupId, memberships = {} } = opts;
   if (kwhNeed <= 0.05 || !locations.length) return null;
   const preferCheap = mode === "cheapest";
   const userBand = Math.max(detourKm * 1000, 80);
@@ -414,6 +438,7 @@ export function pickCharges(opts: {
       preferCheap,
       clockHhmm,
       maxWaitMin,
+      memberships,
     );
     return { loc, distM, priced };
   });
@@ -495,6 +520,7 @@ export function pricePlan(opts: {
   acceptCharge?: boolean[];
   chargeToSoc?: Array<number | null | undefined>;
   backupIds?: Array<string | null | undefined>;
+  memberships?: Record<string, boolean>;
 }): PricedLeg[] {
   const { stops, modes, detours, routes, usableKwh, locations, hours, acKw, acKr, speedEff } =
     opts;
@@ -562,6 +588,7 @@ export function pricePlan(opts: {
           clockHhmm: readyAt,
           maxWaitMin,
           backupId: opts.backupIds?.[i] ?? null,
+          memberships: opts.memberships,
         })
       : null;
     const charge = pick?.primary ?? null;

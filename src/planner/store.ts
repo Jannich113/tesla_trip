@@ -43,6 +43,7 @@ type PlanState = {
   legWhen: LegWhen[];
   whPerMi: number | null;
   speedEff: SpeedEff | null;
+  networkAbo: Record<string, boolean>;
   saved: SavedPlan[];
   seq: number;
 };
@@ -60,6 +61,7 @@ type PlanStore = PlanState & {
   setLegWhen: (index: number, next: LegWhen) => void;
   setWhPerMi: (n: number | null) => void;
   setSpeedEff: (next: SpeedEff | null) => void;
+  setNetworkAbo: (id: string, on: boolean) => void;
   insertStopAt: (index: number, stop: Omit<PlanStop, "id"> & { id?: string }) => void;
   savePlan: () => SavedPlan | null;
   loadPlan: (id: string) => void;
@@ -77,6 +79,7 @@ const empty = (): PlanState => ({
   legWhen: [],
   whPerMi: null,
   speedEff: null,
+  networkAbo: { tesla: true },
   saved: [],
   seq: 0,
 });
@@ -91,6 +94,8 @@ export const usePlanStore = create<PlanStore>()(
       setWhen: (when) => set({ when }),
       setWhPerMi: (whPerMi) => set({ whPerMi }),
       setSpeedEff: (speedEff) => set({ speedEff, whPerMi: speedEff ? speedEff[80] : null }),
+      setNetworkAbo: (id, on) =>
+        set({ networkAbo: { ...get().networkAbo, [id]: on } }),
 
       addStop: (input) => {
         const stop: PlanStop = {

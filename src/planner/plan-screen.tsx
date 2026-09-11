@@ -44,6 +44,7 @@ import { HOME_USD_PER_KWH } from "@/lib/history";
 import { useChargeStore } from "@/store/charge-store";
 import { useElprisStore } from "@/store/elpris-store";
 import { useLiveElpris } from "./use-live-elpris";
+import { EU_NETWORKS } from "./networks";
 import { useVehicleProfile } from "@/hooks/use-vehicle-profile";
 import { useVehicleStore } from "@/store/vehicle-store";
 
@@ -110,6 +111,8 @@ export function PlanScreen() {
   const setWhen = usePlanStore((s) => s.setWhen);
   const setLegWhen = usePlanStore((s) => s.setLegWhen);
   const setSpeedEff = usePlanStore((s) => s.setSpeedEff);
+  const networkAbo = usePlanStore((s) => s.networkAbo);
+  const setNetworkAbo = usePlanStore((s) => s.setNetworkAbo);
   const savePlan = usePlanStore((s) => s.savePlan);
   const loadPlan = usePlanStore((s) => s.loadPlan);
   const deleteSaved = usePlanStore((s) => s.deleteSaved);
@@ -131,6 +134,7 @@ export function PlanScreen() {
     cheapest: true,
   });
   const [openStops, setOpenStops] = useState<Record<string, boolean>>({});
+  const [pane, setPane] = useState<"plan" | "advanced">("plan");
   const { data: elpris, error: elprisError, loading: elprisLoading } = useLiveElpris(area);
 
   useEffect(() => {
@@ -249,6 +253,7 @@ export function PlanScreen() {
     acceptCharge: stops.slice(1).map((_, i) => Boolean(acceptCharge[i])),
     chargeToSoc: stops.slice(1).map((_, i) => chargeToSoc[i] ?? null),
     backupIds: stops.slice(1).map((_, i) => backupLoc[i] ?? null),
+    memberships: networkAbo,
   };
 
   const legs: PricedLeg[] = useMemo(() => {
@@ -258,7 +263,7 @@ export function PlanScreen() {
       modes: activeModes,
       routes: selectedRoutes,
     });
-  }, [stops, activeModes, detours, selectedRoutes, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc]);
+  }, [stops, activeModes, detours, selectedRoutes, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc, networkAbo]);
 
   const viewLegs = useMemo(() => {
     return legs.map((leg, i) => {
@@ -292,7 +297,7 @@ export function PlanScreen() {
         kwhPerMi: interpolateWhPerMi(speedEff, kmh) / 1000,
       };
     });
-  }, [routeMap, stops, detours, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc]);
+  }, [routeMap, stops, detours, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc, networkAbo]);
 
   function addStop(hit: AddressHit) {
     addStopToStore({ name: hit.label.split(",")[0] || hit.label, lat: hit.lat, lng: hit.lng });
@@ -480,6 +485,27 @@ export function PlanScreen() {
         </div>
         <MapPinned className="mt-1 size-4 text-muted" />
       </div>
+
+      <div className="flex rounded-full bg-surface-2 p-1">
+        {(["plan", "advanced"] as const).map((id) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setPane(id)}
+            className={cn(
+              "h-9 flex-1 rounded-full text-xs font-medium",
+              pane === id ? "bg-foreground text-background" : "text-muted",
+            )}
+          >
+            {id === "plan" ? "Plan" : "Advanced"}
+          </button>
+        ))}
+      </div>
+
+      {pane === "advanced" ? (
+        <NetworksPanel abo={networkAbo} onToggle={setNetworkAbo} />
+      ) : (
+      <>
 
       <section className="rounded-xl bg-surface px-5 py-5 shadow-[var(--shadow-border)]">
         <label className="block text-xs text-muted">
@@ -1142,7 +1168,65 @@ export function PlanScreen() {
           )}
         </div>
       </section>
+      </>
+      )}
     </div>
+  );
+}
+
+function NetworksPanel({
+  abo,
+  onToggle,
+}: {
+  abo: Record<string, boolean>;
+  onToggle: (id: string, on: boolean) => void;
+}) {
+  return (
+    <section className="space-y-3">
+      <p className="text-sm text-muted">
+        EU public networks. Spot is pay-as-you-go. Flip <span className="text-foreground">Abo</span> if
+        you have that membership — trip cost uses the cheaper kWh. Monthly fees stay out of the
+        route total.
+      </p>
+      <ul className="space-y-2">
+        {EU_NETWORKS.map((n) => {
+          const on = Boolean(abo[n.id]);
+          const rate = on ? n.aboKr : n.spotKr;
+          return (
+            <li key={n.id} className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">{n.name}</p>
+                  <p className="text-[11px] text-subtle">{n.region}</p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={on}
+                  onClick={() => onToggle(n.id, !on)}
+                  className={cn(
+                    "h-8 shrink-0 rounded-full px-3 text-[11px] font-medium",
+                    on ? "bg-emerald-400 text-background" : "bg-surface-2 text-muted",
+                  )}
+                >
+                  {on ? "Abo on" : "No abo"}
+                </button>
+              </div>
+              <p className="mt-2 text-xs tabular-nums text-muted">
+                Spot {formatKrPerKwh(n.spotKr, 2)}
+                <span className="text-subtle"> · </span>
+                {n.aboName} {n.unlimited ? "unlimited" : formatKrPerKwh(n.aboKr, 2)}
+                {n.aboMonthlyKr > 0 ? ` · ${formatKrValue(n.aboMonthlyKr, 0)} kr/md` : ""}
+              </p>
+              <p className="mt-1 text-sm tabular-nums">
+                Using {n.unlimited && on ? "0 kr/kWh" : formatKrPerKwh(rate, 2)}
+              </p>
+              <p className="mt-1 text-[11px] text-subtle">{n.note}</p>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 
