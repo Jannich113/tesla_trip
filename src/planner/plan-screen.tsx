@@ -704,13 +704,12 @@ export function PlanScreen() {
       {pane === "advanced" ? (
         <div className="space-y-4">
           <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-muted">
-              kWh/mi at speed
-            </p>
-            <div className="mt-2 grid grid-cols-4 gap-2">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-muted">kWh / mi at speed</p>
+            <div className="mt-3 grid grid-cols-4 gap-2">
               {SPEED_KMH.map((kmh) => (
-                <label key={kmh} className="text-[11px] text-muted">
-                  {kmh} km/t
+                <label key={kmh} className="text-center text-[11px] text-muted">
+                  {kmh}
+                  <span className="text-subtle"> km/t</span>
                   <input
                     type="number"
                     inputMode="decimal"
@@ -723,13 +722,13 @@ export function PlanScreen() {
                       if (!Number.isFinite(n) || n <= 0) return;
                       setSpeedEff({ ...speedEff, [kmh]: n * 1000 });
                     }}
-                    className="mt-1 h-11 w-full rounded-md bg-surface-2 px-2 text-center text-sm tabular-nums text-foreground outline-none"
+                    className="mt-1 h-11 w-full rounded-xl bg-surface-2 px-2 text-center text-sm tabular-nums text-foreground outline-none"
                   />
                 </label>
               ))}
             </div>
-            <p className="mt-1 text-[11px] text-subtle">
-              Interpolated from each leg’s average speed · car EPA {formatEfficiency(carWhPerMi, units)}
+            <p className="mt-2 text-[11px] text-subtle">
+              From each leg’s average speed · EPA {formatEfficiency(carWhPerMi, units)}
               {speedEffOverride ? (
                 <>
                   {" · "}
@@ -1565,6 +1564,13 @@ function scaleKr(networkId: string, kr: number | null, fx: FxTable | null) {
   return scaleCatalogKr(kr, native.ccy, fx);
 }
 
+const ABO_GROUPS: { id: string; label: string; hint: string; ids: string[] }[] = [
+  { id: "car", label: "Car", hint: "Owner rate on Superchargers", ids: ["tesla"] },
+  { id: "highway", label: "Highway HPC", hint: "IONITY, Fastned, Electra, Allego", ids: ["ionity", "fastned", "electra", "allego"] },
+  { id: "nordic", label: "Nordics", hint: "DK · NO · SE memberships", ids: ["clever", "eon", "spirii", "mer", "recharge", "kople", "eviny", "circlek", "unox"] },
+  { id: "card", label: "Cards & roam", hint: "eMSP that bills other CPOs", ids: ["shell", "enbw", "aral", "total"] },
+];
+
 function NetworksPanel({
   abo,
   onToggle,
@@ -1573,12 +1579,27 @@ function NetworksPanel({
   onToggle: (id: string, on: boolean) => void;
 }) {
   const [region, setRegion] = useState<EuRegion>("DK");
+  const [openGroup, setOpenGroup] = useState<Record<string, boolean>>({ car: true, highway: true, nordic: true });
+  const [openNet, setOpenNet] = useState<string | null>(null);
+  const [showRoam, setShowRoam] = useState(false);
   const prices = useChargePrices();
   const networks = prices.data?.networks ?? EU_NETWORKS;
   const fx = prices.data?.fx ?? null;
   const profile = countryProfile(region);
   const blocId = EU_REGIONS.find((r) => r.id === region)?.bloc ?? "nordic";
   const bloc = EU_BLOCS.find((b) => b.id === blocId) ?? EU_BLOCS[0];
+  const byId = new Map(networks.map((n) => [n.id, n]));
+  const groupedIds = new Set(ABO_GROUPS.flatMap((g) => g.ids));
+  const groups = [
+    ...ABO_GROUPS,
+    {
+      id: "other",
+      label: "Other",
+      hint: "",
+      ids: networks.map((n) => n.id).filter((id) => !groupedIds.has(id)),
+    },
+  ].filter((g) => g.ids.some((id) => byId.has(id)));
+  const active = networks.filter((n) => abo[n.id]);
   const rows = [...networks]
     .map((n) => {
       const on = Boolean(abo[n.id]);
@@ -1599,158 +1620,202 @@ function NetworksPanel({
       if (be == null) return -1;
       return be - ae;
     });
+
   return (
     <section className="space-y-3">
-      <p className="text-sm text-muted">
-        EU public networks. Spot is pay-as-you-go. Flip <span className="text-foreground">Abo</span> if
-        you have that membership — trip cost uses the cheaper kWh. Monthly fees stay out of the
-        route total.
-      </p>
-      <p className="text-[11px] tabular-nums text-subtle">
-        {prices.loading
-          ? "Fetching FX…"
-          : prices.error
-            ? prices.error
-            : prices.data
-              ? `EUR ${prices.data.fx.EUR.toFixed(3)} · NOK ${prices.data.fx.NOK.toFixed(3)} DKK · ${prices.data.fxSource} · ${prices.data.updatedAt.slice(11, 16)} UTC`
-              : "Catalog rates"}
+      <div className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
+        <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Memberships</p>
+        <p className="mt-1 text-sm text-muted">
+          {active.length
+            ? active.map((n) => n.aboName).join(" · ")
+            : "None on — trip uses ad-hoc kWh"}
+        </p>
+        <p className="mt-1 text-[11px] text-subtle">Monthly fees stay out of the route total.</p>
+      </div>
+
+      {groups.map((group) => {
+        const open = openGroup[group.id] ?? false;
+        const onCount = group.ids.filter((id) => abo[id]).length;
+        return (
+          <div key={group.id} className="overflow-hidden rounded-xl bg-surface shadow-[var(--shadow-border)]">
+            <button
+              type="button"
+              onClick={() => setOpenGroup((s) => ({ ...s, [group.id]: !open }))}
+              className="flex w-full items-center justify-between px-4 py-3 text-left"
+            >
+              <span>
+                <span className="text-sm font-medium">{group.label}</span>
+                {onCount ? (
+                  <span className="ml-2 text-[11px] text-emerald-400">{onCount} on</span>
+                ) : (
+                  <span className="ml-2 text-[11px] text-subtle">{group.hint}</span>
+                )}
+              </span>
+              {open ? <ChevronUp className="size-4 text-muted" /> : <ChevronDown className="size-4 text-muted" />}
+            </button>
+            {open ? (
+              <ul className="border-t border-border">
+                {group.ids.map((id) => {
+                  const n = byId.get(id);
+                  if (!n) return null;
+                  const on = Boolean(abo[n.id]);
+                  const rate = on ? n.aboKr : n.spotKr;
+                  const roam = roamRate(n, on);
+                  const extra = roamExtra(n, on);
+                  const details = openNet === n.id;
+                  return (
+                    <li key={n.id} className="border-t border-border first:border-0">
+                      <div className="flex items-center gap-3 px-4 py-3">
+                        <button
+                          type="button"
+                          onClick={() => setOpenNet(details ? null : n.id)}
+                          className="min-w-0 flex-1 text-left"
+                        >
+                          <p className="text-sm">{n.name}</p>
+                          <p className="text-[11px] tabular-nums text-muted">
+                            {n.unlimited && on ? "0 kr/kWh" : formatKrPerKwh(rate, 2)}
+                            {n.aboMonthlyKr > 0 ? ` · ${formatKrValue(n.aboMonthlyKr, 0)} kr/md` : ""}
+                            {on ? ` · ${n.aboName}` : " · ad-hoc"}
+                          </p>
+                        </button>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={on}
+                          onClick={() => onToggle(n.id, !on)}
+                          className={cn(
+                            "h-8 shrink-0 rounded-full px-3 text-[11px] font-medium",
+                            on ? "bg-emerald-400 text-background" : "bg-surface-2 text-muted",
+                          )}
+                        >
+                          {on ? "Abo on" : "No abo"}
+                        </button>
+                      </div>
+                      {details ? (
+                        <div className="px-4 pb-3 text-[11px] text-subtle">
+                          <p>
+                            Spot {formatKrPerKwh(n.spotKr, 2)}
+                            <span className="text-border"> · </span>
+                            {n.aboName} {n.unlimited ? "unlimited" : formatKrPerKwh(n.aboKr, 2)}
+                            {roam == null
+                              ? " · no roam"
+                              : ` · roam ${formatKrPerKwh(roam, 2)}${extra != null && extra !== 0 ? ` (${extra > 0 ? "+" : ""}${formatKrPerKwh(extra, 2)})` : ""}`}
+                          </p>
+                          <p className="mt-1">{n.region}</p>
+                          <p className="mt-1">{n.roamNote}</p>
+                        </div>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : null}
+          </div>
+        );
+      })}
+
+      <div className="overflow-hidden rounded-xl bg-surface shadow-[var(--shadow-border)]">
         <button
           type="button"
-          onClick={() => prices.refresh()}
-          className="ml-2 text-muted underline"
+          onClick={() => setShowRoam((v) => !v)}
+          className="flex w-full items-center justify-between px-4 py-3 text-left"
         >
-          {prices.refreshing ? "Refreshing…" : "Refresh"}
+          <span>
+            <span className="text-sm font-medium">Roaming</span>
+            <span className="ml-2 text-[11px] text-subtle">
+              {region}
+              {profile ? ` · ${profile.ccy}` : ""}
+            </span>
+          </span>
+          {showRoam ? <ChevronUp className="size-4 text-muted" /> : <ChevronDown className="size-4 text-muted" />}
         </button>
-      </p>
-      {profile ? (
-        <div className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-muted">
-            {profile.name} · {profile.ccy}
-          </p>
-          <p className="mt-1 text-sm">{profile.note}</p>
-          <p className="mt-2 text-[11px] text-subtle">
-            CPOs · {profile.cpos.map((id) => networks.find((n) => n.id === id)?.name ?? id).join(" · ")}
-          </p>
-        </div>
-      ) : null}
-      <div className="overflow-hidden rounded-xl bg-surface shadow-[var(--shadow-border)]">
-        <p className="px-4 pt-4 text-[11px] font-medium uppercase tracking-wide text-muted">
-          Roaming vs own · {region}
-        </p>
-        <div className="mt-2 flex flex-wrap gap-1 px-4">
-          {EU_BLOCS.map((b) => (
-            <button
-              key={b.id}
-              type="button"
-              onClick={() => {
-                if (!b.ids.includes(region)) setRegion(b.ids[0]);
-              }}
-              className={cn(
-                "h-8 rounded-full px-3 text-[11px] font-medium",
-                bloc.id === b.id ? "bg-foreground text-background" : "bg-surface-2 text-muted",
-              )}
-            >
-              {b.label}
-            </button>
-          ))}
-        </div>
-        <div className="mt-2 flex flex-wrap gap-1 px-4">
-          {bloc.ids.map((id) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setRegion(id)}
-              className={cn(
-                "h-8 rounded-full px-3 text-[11px] font-medium",
-                region === id ? "bg-foreground text-background" : "bg-surface-2 text-muted",
-              )}
-            >
-              {id}
-            </button>
-          ))}
-        </div>
-        <table className="mt-2 w-full text-left text-xs">
-          <thead className="text-[11px] uppercase tracking-wide text-subtle">
-            <tr>
-              <th className="px-4 py-2 font-medium">Network</th>
-              <th className="px-2 py-2 font-medium">Own</th>
-              <th className="px-2 py-2 font-medium">Roam</th>
-              <th className="px-4 py-2 text-right font-medium">Extra</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map(({ n, on, own, roam, extra }) => (
-                <tr key={n.id} className="border-t border-border">
-                  <td className="px-4 py-2">{n.name}</td>
-                  <td className="px-2 py-2 tabular-nums text-muted">
-                    {own == null ? "—" : formatKrPerKwh(own, 2)}
-                  </td>
-                  <td className="px-2 py-2 tabular-nums text-muted">
-                    {roam == null ? (own != null ? "own only" : "—") : formatKrPerKwh(roam, 2)}
-                  </td>
-                  <td
-                    className={cn(
-                      "px-4 py-2 text-right tabular-nums",
-                      extra == null
-                        ? "text-subtle"
-                        : extra > 0.15
-                          ? "text-amber-300"
-                          : extra > 0
-                            ? "text-muted"
-                            : "text-emerald-400",
-                    )}
-                  >
-                    {extra == null ? "—" : `${extra > 0 ? "+" : ""}${formatKrPerKwh(extra, 2)}`}
-                  </td>
-                </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <ul className="space-y-2">
-        {networks.map((n) => {
-          const on = Boolean(abo[n.id]);
-          const rate = on ? n.aboKr : n.spotKr;
-          const roam = roamRate(n, on);
-          const extra = roamExtra(n, on);
-          return (
-            <li key={n.id} className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium">{n.name}</p>
-                  <p className="text-[11px] text-subtle">{n.region}</p>
-                </div>
+        {showRoam ? (
+          <div className="border-t border-border pb-2">
+            {profile ? <p className="px-4 pt-3 text-[11px] text-subtle">{profile.note}</p> : null}
+            <p className="px-4 pt-2 text-[11px] tabular-nums text-subtle">
+              {prices.loading
+                ? "Fetching FX…"
+                : prices.error
+                  ? prices.error
+                  : prices.data
+                    ? `EUR ${prices.data.fx.EUR.toFixed(3)} · NOK ${prices.data.fx.NOK.toFixed(3)} · ${prices.data.fxSource}`
+                    : "Catalog rates"}
+              <button type="button" onClick={() => prices.refresh()} className="ml-2 text-muted underline">
+                {prices.refreshing ? "Refreshing…" : "Refresh"}
+              </button>
+            </p>
+            <div className="mt-2 flex flex-wrap gap-1 px-4">
+              {EU_BLOCS.map((b) => (
                 <button
+                  key={b.id}
                   type="button"
-                  role="switch"
-                  aria-checked={on}
-                  onClick={() => onToggle(n.id, !on)}
+                  onClick={() => {
+                    if (!b.ids.includes(region)) setRegion(b.ids[0]);
+                  }}
                   className={cn(
-                    "h-8 shrink-0 rounded-full px-3 text-[11px] font-medium",
-                    on ? "bg-emerald-400 text-background" : "bg-surface-2 text-muted",
+                    "h-8 rounded-full px-3 text-[11px] font-medium",
+                    bloc.id === b.id ? "bg-foreground text-background" : "bg-surface-2 text-muted",
                   )}
                 >
-                  {on ? "Abo on" : "No abo"}
+                  {b.label}
                 </button>
-              </div>
-              <p className="mt-2 text-xs tabular-nums text-muted">
-                Spot {formatKrPerKwh(n.spotKr, 2)}
-                <span className="text-subtle"> · </span>
-                {n.aboName} {n.unlimited ? "unlimited" : formatKrPerKwh(n.aboKr, 2)}
-                {n.aboMonthlyKr > 0 ? ` · ${formatKrValue(n.aboMonthlyKr, 0)} kr/md` : ""}
-              </p>
-              <p className="mt-1 text-sm tabular-nums">
-                Using {n.unlimited && on ? "0 kr/kWh" : formatKrPerKwh(rate, 2)}
-                {roam == null
-                  ? " · no roam"
-                  : ` · roam ${formatKrPerKwh(roam, 2)}${extra != null && extra !== 0 ? ` (${extra > 0 ? "+" : ""}${formatKrPerKwh(extra, 2)})` : ""}`}
-              </p>
-              <p className="mt-1 text-[11px] text-subtle">{n.roamNote}</p>
-              <p className="mt-1 text-[11px] text-subtle">{n.note}</p>
-            </li>
-          );
-        })}
-      </ul>
+              ))}
+            </div>
+            <div className="mt-2 flex flex-wrap gap-1 px-4">
+              {bloc.ids.map((id) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setRegion(id)}
+                  className={cn(
+                    "h-8 rounded-full px-3 text-[11px] font-medium",
+                    region === id ? "bg-foreground text-background" : "bg-surface-2 text-muted",
+                  )}
+                >
+                  {id}
+                </button>
+              ))}
+            </div>
+            <table className="mt-2 w-full text-left text-xs">
+              <thead className="text-[11px] uppercase tracking-wide text-subtle">
+                <tr>
+                  <th className="px-4 py-2 font-medium">Network</th>
+                  <th className="px-2 py-2 font-medium">Own</th>
+                  <th className="px-2 py-2 font-medium">Roam</th>
+                  <th className="px-4 py-2 text-right font-medium">Extra</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(({ n, own, roam, extra }) => (
+                  <tr key={n.id} className="border-t border-border">
+                    <td className="px-4 py-2">{n.name}</td>
+                    <td className="px-2 py-2 tabular-nums text-muted">
+                      {own == null ? "—" : formatKrPerKwh(own, 2)}
+                    </td>
+                    <td className="px-2 py-2 tabular-nums text-muted">
+                      {roam == null ? (own != null ? "own only" : "—") : formatKrPerKwh(roam, 2)}
+                    </td>
+                    <td
+                      className={cn(
+                        "px-4 py-2 text-right tabular-nums",
+                        extra == null
+                          ? "text-subtle"
+                          : extra > 0.15
+                            ? "text-amber-300"
+                            : extra > 0
+                              ? "text-muted"
+                              : "text-emerald-400",
+                      )}
+                    >
+                      {extra == null ? "—" : `${extra > 0 ? "+" : ""}${formatKrPerKwh(extra, 2)}`}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+      </div>
     </section>
   );
 }
