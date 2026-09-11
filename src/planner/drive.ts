@@ -161,31 +161,24 @@ async function highway(from: Stop, to: Stop): Promise<DriveRouteJson | null> {
   );
 }
 
-function usable(route: DriveRouteJson | null, from: Stop, to: Stop, capSec: number) {
-  return Boolean(
-    route &&
-      anchored(route.path, from, to) &&
-      route.seconds > 0 &&
-      route.seconds <= capSec,
-  );
+function okRoute(route: DriveRouteJson | null, from: Stop, to: Stop) {
+  return Boolean(route && anchored(route.path, from, to) && route.seconds > 0);
 }
 
 export async function routeDrive(from: Stop, to: Stop, mode: LegMode): Promise<DriveRouteJson | null> {
-  const base = await highway(from, to);
-  if (!base) return null;
   if (mode === "fastest" || mode === "cheapest") {
-    return withTolls(base, mode, Boolean(base.hasToll));
+    const base = await highway(from, to);
+    return base ? withTolls(base, mode, Boolean(base.hasToll)) : null;
   }
-  const cap = base.seconds * 1.5;
   const [noHwy, noToll, ecoV] = await Promise.all([
     osrm(from, to, "&exclude=motorway,toll").catch(() => null),
     osrm(from, to, "&exclude=toll").catch(() => null),
     valhalla(from, to, "eco").catch(() => null),
   ]);
-  if (usable(noHwy, from, to, cap)) return withTolls(noHwy!, "eco", Boolean(noHwy!.hasToll));
-  if (usable(noToll, from, to, cap)) return withTolls(noToll!, "eco", Boolean(noToll!.hasToll));
-  if (usable(ecoV, from, to, cap)) return withTolls(ecoV!, "eco", Boolean(ecoV!.hasToll));
-  return withTolls(base, "eco", Boolean(base.hasToll));
+  if (okRoute(noHwy, from, to)) return withTolls(noHwy!, "eco", Boolean(noHwy!.hasToll));
+  if (okRoute(noToll, from, to)) return withTolls(noToll!, "eco", Boolean(noToll!.hasToll));
+  if (okRoute(ecoV, from, to)) return withTolls(ecoV!, "eco", Boolean(ecoV!.hasToll));
+  return null;
 }
 
 function parsePoint(raw: string | null): Stop | null {

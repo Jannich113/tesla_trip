@@ -798,14 +798,6 @@ export function PlanScreen() {
             const on = !mixed && activeModes[0] === row.mode;
             const t = row.totals;
             const fastest = optionRows.find((r) => r.mode === "fastest")?.totals;
-            const sameCorridor =
-              Boolean(
-                t &&
-                  fastest &&
-                  row.mode !== "fastest" &&
-                  Math.abs(fastest.mi - t.mi) < 0.8 &&
-                  Math.abs(fastest.driveMin - t.driveMin) < 2,
-              );
             return (
               <li key={row.mode}>
                 <div className={cn("px-3 py-3", on && "bg-background/40")}>
@@ -835,9 +827,7 @@ export function PlanScreen() {
                             ? cheapAvoidFees
                               ? " · no motorways / tolls"
                               : " · cheapest stalls"
-                            : sameCorridor
-                              ? " · same corridor"
-                              : ""}
+                            : ""}
                         </span>
                         <span className="mt-0.5 block text-xs text-muted">
                           {t.charges > 0
