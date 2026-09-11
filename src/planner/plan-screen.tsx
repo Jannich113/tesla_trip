@@ -7,19 +7,24 @@ import {
   DETOUR_KM,
   LEG_MODES,
   type LegMode,
+  type LegWhen,
   type PlanStop,
   type PricedCharge,
   type PricedLeg,
   type RoutedLeg,
+  addMinutesHhmm,
   chargeSearchKm,
   cheapestHour,
   DKK_PER_USD,
+  dkNowHhmm,
+  epaWhPerMi,
   fetchRoute,
   formatDetour,
   minutesToHm,
   modeColor,
   modeHint,
   modeLabel,
+  planTotals,
   pricePlan,
   remainingHours,
 } from "./engine";
@@ -28,13 +33,24 @@ import { formatKrPerKwh, formatKrValue, type HourPrice } from "@/lib/elpris";
 import { applyTillægToHours, providerById, withTillæg } from "@/lib/el-providers";
 import { PLACES } from "@/lib/places";
 import { cn } from "@/lib/utils";
-import { formatDistance, formatNumber } from "@/lib/vehicle";
+import { formatDistance, formatEfficiency, formatNumber } from "@/lib/vehicle";
 import { HOME_USD_PER_KWH } from "@/lib/history";
 import { useChargeStore } from "@/store/charge-store";
 import { useElprisStore } from "@/store/elpris-store";
 import { useLiveElpris } from "./use-live-elpris";
 import { useVehicleProfile } from "@/hooks/use-vehicle-profile";
 import { useVehicleStore } from "@/store/vehicle-store";
+
+function routeKey(
+  from: { lat: number; lng: number },
+  to: { lat: number; lng: number },
+  mode: LegMode,
+) {
+  const path = mode === "cheapest" ? "standard" : mode;
+  return `${from.lat.toFixed(4)},${from.lng.toFixed(4)}|${to.lat.toFixed(4)},${to.lng.toFixed(4)}|${path}`;
+}
+
+const PATH_MODES: LegMode[] = ["eco", "standard", "fastest"];
 
 export function PlanScreen() {
   const units = useVehicleStore((s) => s.units);
@@ -58,12 +74,21 @@ export function PlanScreen() {
   const moveStop = usePlanStore((s) => s.moveStop);
   const setLegMode = usePlanStore((s) => s.setLegMode);
   const setLegDetour = usePlanStore((s) => s.setLegDetour);
+  const setAllModes = usePlanStore((s) => s.setAllModes);
+  const whenKind = usePlanStore((s) => s.whenKind);
+  const when = usePlanStore((s) => s.when);
+  const legWhen = usePlanStore((s) => s.legWhen);
+  const whPerMiOverride = usePlanStore((s) => s.whPerMi);
+  const setWhenKind = usePlanStore((s) => s.setWhenKind);
+  const setWhen = usePlanStore((s) => s.setWhen);
+  const setLegWhen = usePlanStore((s) => s.setLegWhen);
+  const setWhPerMi = usePlanStore((s) => s.setWhPerMi);
   const savePlan = usePlanStore((s) => s.savePlan);
   const loadPlan = usePlanStore((s) => s.loadPlan);
   const deleteSaved = usePlanStore((s) => s.deleteSaved);
   const reset = usePlanStore((s) => s.reset);
 
-  const [routes, setRoutes] = useState<RoutedLeg[]>([]);
+  const [routeMap, setRouteMap] = useState<Record<string, RoutedLeg>>({});
   const [routing, setRouting] = useState(false);
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<AddressHit[]>([]);
@@ -95,30 +120,44 @@ export function PlanScreen() {
 
   useEffect(() => {
     if (stops.length < 2) {
-      setRoutes([]);
+      setRouteMap({});
       return;
     }
     let cancelled = false;
     setRouting(true);
     void (async () => {
-      const next: RoutedLeg[] = [];
+      const next: Record<string, RoutedLeg> = {};
+      const jobs: Promise<void>[] = [];
       for (let i = 0; i < stops.length - 1; i++) {
-        next.push(await fetchRoute(stops[i], stops[i + 1], modes[i] ?? "standard"));
-        if (cancelled) return;
+        for (const mode of PATH_MODES) {
+          const from = stops[i];
+          const to = stops[i + 1];
+          const key = routeKey(from, to, mode);
+          jobs.push(
+            fetchRoute(from, to, mode).then((route) => {
+              next[key] = route;
+            }),
+          );
+        }
       }
+      await Promise.all(jobs);
       if (!cancelled) {
-        setRoutes(next);
+        setRouteMap(next);
         setRouting(false);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [stops, modes]);
+  }, [stops]);
 
   useEffect(() => {
     setPrefer({});
   }, [stops, detours]);
+
+  const carWhPerMi = epaWhPerMi(profile.usableKwh, profile.epaRangeMi);
+  const whPerMi = whPerMiOverride && whPerMiOverride > 0 ? whPerMiOverride : carWhPerMi;
+  const clock = when || dkNowHhmm();
 
   const hours = useMemo(() => {
     if (!elpris) return [];
@@ -131,44 +170,76 @@ export function PlanScreen() {
 
   const acKr = hours[0]?.krPerKwh ?? HOME_USD_PER_KWH * DKK_PER_USD;
 
+  function routesFor(mode: LegMode): RoutedLeg[] {
+    if (stops.length < 2) return [];
+    const list: RoutedLeg[] = [];
+    for (let i = 0; i < stops.length - 1; i++) {
+      const hit = routeMap[routeKey(stops[i], stops[i + 1], mode)];
+      if (!hit) return [];
+      list.push(hit);
+    }
+    return list;
+  }
+
+  const activeModes = modes.length ? modes : stops.slice(1).map(() => "standard" as LegMode);
+  const mixed = activeModes.some((m) => m !== activeModes[0]);
+  const routes = routesFor(mixed ? "standard" : (activeModes[0] ?? "standard"));
+  const selectedRoutes = mixed
+    ? stops.slice(0, -1).map((_, i) => routeMap[routeKey(stops[i], stops[i + 1], activeModes[i] ?? "standard")]).filter((r): r is RoutedLeg => Boolean(r))
+    : routes;
+
+  const driveMinGuess = selectedRoutes.reduce((n, r) => n + r.seconds / 60, 0);
+  const departHhmm =
+    whenKind === "arrive" ? addMinutesHhmm(clock, -driveMinGuess) : clock;
+
+  const planArgs = {
+    stops,
+    detours: detours.length ? detours : stops.slice(1).map(() => 10),
+    soc,
+    usableKwh: profile.usableKwh,
+    locations,
+    hours,
+    acKw: profile.acKw,
+    acKr,
+    whPerMi,
+    departHhmm,
+    legWhen,
+  };
+
   const legs: PricedLeg[] = useMemo(() => {
-    if (stops.length < 2 || routes.length !== stops.length - 1) return [];
+    if (stops.length < 2 || selectedRoutes.length !== stops.length - 1) return [];
     return pricePlan({
-      stops,
-      modes: modes.length ? modes : stops.slice(1).map(() => "standard"),
-      detours: detours.length ? detours : stops.slice(1).map(() => 10),
-      routes,
-      soc,
-      usableKwh: profile.usableKwh,
-      locations,
-      hours,
-      acKw: profile.acKw,
-      acKr,
+      ...planArgs,
+      modes: activeModes,
+      routes: selectedRoutes,
     });
-  }, [stops, modes, detours, routes, soc, profile.usableKwh, profile.acKw, locations, hours, acKr]);
+  }, [stops, activeModes, detours, selectedRoutes, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, whPerMi, departHhmm, legWhen]);
 
   const viewLegs = useMemo(() => {
     return legs.map((leg, i) => {
       const id = prefer[i];
       if (!id || !leg.charge || !leg.backup || id !== leg.backup.locationId) return leg;
-      const billed = leg.needed || leg.mode === "cheapest";
+      const billed = leg.advice !== null;
       return { ...leg, charge: leg.backup, backup: leg.charge, kr: billed ? leg.backup.kr : 0 };
     });
   }, [legs, prefer]);
 
-  const totals = useMemo(() => {
-    return viewLegs.reduce(
-      (acc, leg) => {
-        acc.mi += leg.route.miles;
-        acc.kwh += leg.kwh;
-        acc.kr += leg.kr;
-        acc.min += leg.route.seconds / 60;
-        acc.chargeKwh += leg.needed || leg.mode === "cheapest" ? (leg.charge?.kwh ?? 0) : 0;
-        return acc;
-      },
-      { mi: 0, kwh: 0, kr: 0, min: 0, chargeKwh: 0 },
-    );
-  }, [viewLegs]);
+  const totals = useMemo(() => planTotals(viewLegs), [viewLegs]);
+
+  const optionRows = useMemo(() => {
+    return LEG_MODES.map((mode) => {
+      const optionRoutes = routesFor(mode);
+      if (optionRoutes.length !== Math.max(0, stops.length - 1) || stops.length < 2) {
+        return { mode, totals: null as ReturnType<typeof planTotals> | null };
+      }
+      const priced = pricePlan({
+        ...planArgs,
+        modes: stops.slice(1).map(() => mode),
+        routes: optionRoutes,
+      });
+      return { mode, totals: planTotals(priced) };
+    });
+  }, [routeMap, stops, detours, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, whPerMi, departHhmm, legWhen]);
 
   function addStop(hit: AddressHit) {
     addStopToStore({ name: hit.label.split(",")[0] || hit.label, lat: hit.lat, lng: hit.lng });
@@ -281,8 +352,104 @@ export function PlanScreen() {
             className="mt-1 h-11 w-full rounded-md bg-surface-2 px-3 text-sm text-foreground outline-none"
           />
         </label>
+
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <label className="text-xs text-muted">
+            {whenKind === "arrive" ? "Arrive by" : "Leave at"}
+            <input
+              type="time"
+              value={clock}
+              onChange={(e) => setWhen(e.target.value)}
+              className="mt-1 h-11 w-full rounded-md bg-surface-2 px-3 text-sm text-foreground outline-none"
+            />
+          </label>
+          <div>
+            <p className="text-xs text-muted">Timing</p>
+            <div className="mt-1 flex rounded-full bg-surface-2 p-1">
+              {(["depart", "arrive"] as const).map((kind) => (
+                <button
+                  key={kind}
+                  type="button"
+                  onClick={() => setWhenKind(kind)}
+                  className={cn(
+                    "h-9 flex-1 rounded-full text-[11px] font-medium",
+                    whenKind === kind ? "bg-foreground text-background" : "text-muted",
+                  )}
+                >
+                  {kind === "depart" ? "Leave" : "Arrive"}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <p className="mt-4 text-xs text-muted">
+          {profile.usableKwh} kWh usable · {formatNumber(soc, 0)}% now · {formatEfficiency(whPerMi, units)}
+        </p>
+        <label className="mt-2 block text-xs text-muted">
+          Estimated Wh/{units === "km" ? "km" : "mi"}
+          <input
+            type="number"
+            min={80}
+            max={500}
+            value={Math.round(units === "km" ? whPerMi / 1.609344 : whPerMi)}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              if (!Number.isFinite(n) || n <= 0) return;
+              setWhPerMi(units === "km" ? n * 1.609344 : n);
+            }}
+            className="mt-1 h-11 w-full rounded-md bg-surface-2 px-3 text-sm text-foreground outline-none"
+          />
+        </label>
+        <p className="mt-1 text-[11px] text-subtle">
+          Car default {formatEfficiency(carWhPerMi, units)} from {profile.usableKwh} kWh / {formatNumber(profile.epaRangeMi, 0)} mi EPA
+        </p>
+
+        <p className="mt-5 text-[11px] font-medium uppercase tracking-wide text-muted">Route options</p>
+        <ul className="mt-2 divide-y divide-border rounded-xl bg-surface-2">
+          {optionRows.map((row) => {
+            const on = !mixed && activeModes[0] === row.mode;
+            const t = row.totals;
+            return (
+              <li key={row.mode}>
+                <button
+                  type="button"
+                  onClick={() => setAllModes(row.mode)}
+                  className={cn("flex w-full items-center gap-3 px-3 py-3 text-left", on && "bg-background/40")}
+                >
+                  <span
+                    className="size-2.5 shrink-0 rounded-full"
+                    style={{ background: modeColor(row.mode) }}
+                  />
+                  <span className="w-16 shrink-0 text-sm font-medium">{modeLabel(row.mode)}</span>
+                  {t ? (
+                    <span className="min-w-0 flex-1 text-xs text-muted">
+                      {formatDistance(t.mi, units, t.mi >= 100 ? 0 : 1)}
+                      <span className="text-subtle"> · </span>
+                      {t.chargeKwh > 0 ? `${formatNumber(t.chargeKwh, 1)} kWh` : "no charge"}
+                      <span className="text-subtle"> · </span>
+                      {minutesToHm(t.min)}
+                    </span>
+                  ) : (
+                    <span className="flex-1 text-xs text-subtle">{routing ? "Routing…" : "Add a stop"}</span>
+                  )}
+                  <span className="shrink-0 text-sm tabular-nums">
+                    {t ? `${formatKrValue(t.kr, 0)} kr` : "—"}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+
         <p className="mt-4 text-xs font-medium text-muted">
-          {stops.length < 2 ? "Add a destination" : routing ? "Routing…" : `${viewLegs.length} ${viewLegs.length === 1 ? "leg" : "legs"}`}
+          {stops.length < 2
+            ? "Add a destination"
+            : routing
+              ? "Routing…"
+              : mixed
+                ? "Mixed legs"
+                : `${modeLabel(activeModes[0] ?? "standard")} · ${viewLegs.length} ${viewLegs.length === 1 ? "leg" : "legs"}`}
         </p>
         <p className="mt-2 text-4xl font-medium tracking-tight tabular-nums">
           {formatDistance(totals.mi, units, totals.mi >= 100 ? 0 : 1)}
@@ -298,9 +465,9 @@ export function PlanScreen() {
           {formatKrValue(totals.kr, 2)} <span className="text-base text-muted">kr</span>
         </p>
         <p className="mt-1 text-xs text-subtle">
-          AC priced from live {area} hours + {provider.name} tillæg
-          {totals.kr > 0 ? " · Superchargers at saved rates" : ""}
-          {cheap ? ` · cheapest hour ${cheap.hour}:00` : ""}
+          {whenKind === "arrive" ? `Arrive ${clock}` : `Leave ${departHhmm}`}
+          {viewLegs[0] ? ` · first charge window from ${viewLegs[0].departAt}` : ""}
+          {totals.requiredKwh > 0 ? ` · ${formatNumber(totals.requiredKwh, 1)} kWh required` : ""}
         </p>
         {hours.length ? (
           <HourRibbon hours={hours} currentHour={elpris?.current?.hour ?? null} cheapHour={cheap?.hour ?? null} />
@@ -379,6 +546,8 @@ export function PlanScreen() {
                     <p className="truncate text-sm">{stop.name}</p>
                     {leg ? (
                       <p className="text-xs text-muted">
+                        {leg.departAt}–{leg.arriveAt}
+                        <span className="text-subtle"> · </span>
                         {modeLabel(leg.mode)}
                         <span className="text-subtle"> · </span>
                         {formatDistance(leg.route.miles, units, 1)}
@@ -386,15 +555,15 @@ export function PlanScreen() {
                         {formatNumber(leg.kwh, 1)} kWh
                         <span className="text-subtle"> · </span>
                         {formatNumber(leg.arriveSoc, 0)}% in
-                        {leg.charge ? (
+                        {leg.advice && leg.charge ? (
                           <>
                             <span className="text-subtle"> · </span>
-                            {leg.charge.label} {formatKrValue(leg.charge.kr, 2)} kr
+                            {leg.advice === "required" ? "Required" : "Suggested"} {formatKrValue(leg.charge.kr, 2)} kr
                           </>
                         ) : null}
                       </p>
                     ) : (
-                      <p className="text-xs text-muted">{formatNumber(soc, 0)}% now</p>
+                      <p className="text-xs text-muted">{formatNumber(soc, 0)}% now · leave {departHhmm}</p>
                     )}
                   </div>
                   {i > 0 ? (
@@ -451,6 +620,48 @@ export function PlanScreen() {
                     <p className="mt-2 text-[11px] text-subtle">
                       {modeHint((modes[i - 1] ?? "standard") as LegMode)}
                     </p>
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <div className="flex rounded-full bg-surface-2 p-1">
+                        {(["auto", "depart", "arrive"] as const).map((kind) => {
+                          const on = (legWhen[i - 1]?.kind ?? "auto") === kind;
+                          return (
+                            <button
+                              key={kind}
+                              type="button"
+                              onClick={() =>
+                                setLegWhen(i - 1, {
+                                  kind,
+                                  hhmm: kind === "auto" ? "" : (legWhen[i - 1]?.hhmm || (leg?.departAt ?? clock)),
+                                })
+                              }
+                              className={cn(
+                                "h-8 flex-1 rounded-full text-[10px] font-medium",
+                                on ? "bg-foreground text-background" : "text-muted",
+                              )}
+                            >
+                              {kind === "auto" ? "Auto" : kind === "depart" ? "Leave" : "Arrive"}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {(legWhen[i - 1]?.kind ?? "auto") !== "auto" ? (
+                        <input
+                          type="time"
+                          value={legWhen[i - 1]?.hhmm || (leg?.departAt ?? clock)}
+                          onChange={(e) =>
+                            setLegWhen(i - 1, {
+                              kind: legWhen[i - 1]?.kind === "arrive" ? "arrive" : "depart",
+                              hhmm: e.target.value,
+                            })
+                          }
+                          className="h-8 rounded-full bg-surface-2 px-3 text-xs text-foreground outline-none"
+                        />
+                      ) : (
+                        <p className="flex h-8 items-center text-[11px] tabular-nums text-subtle">
+                          {leg ? `${leg.departAt} → ${leg.arriveAt}` : "Follows previous"}
+                        </p>
+                      )}
+                    </div>
                     <p className="mt-3 text-[11px] font-medium uppercase tracking-wide text-muted">
                       {(modes[i - 1] ?? "standard") === "cheapest"
                         ? `Charge search · up to ${chargeSearchKm("cheapest", detours[i - 1] ?? 10)} km`
@@ -477,7 +688,13 @@ export function PlanScreen() {
                     {leg?.charge ? (
                       <div className="mt-3 space-y-2">
                         <ChargeChoice
-                          title={leg.needed ? "Charge" : "Charge here"}
+                          title={
+                            leg.advice === "required"
+                              ? "Charge required"
+                              : leg.advice === "suggested"
+                                ? "Suggested · good price"
+                                : "Charge here"
+                          }
                           spot={leg.charge}
                           active
                         />

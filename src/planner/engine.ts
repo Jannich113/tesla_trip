@@ -1,18 +1,28 @@
 import { type ChargeLocation } from "@/lib/charge-locations";
 import { type HourPrice } from "@/lib/elpris";
 import { type Units } from "@/lib/vehicle";
-import { type LegMode, chargeSearchKm } from "./modes";
+import { type LegMode, addMinutesHhmm, chargeSearchKm, hoursFrom, modeWhFactor } from "./modes";
 
 export {
   DETOUR_KM,
   LEG_MODES,
+  addMinutesHhmm,
   chargeSearchKm,
+  epaWhPerMi,
+  hoursFrom,
   modeColor,
   modeHint,
   modeLabel,
   type DetourKm,
   type LegMode,
 } from "./modes";
+
+export type ChargeAdvice = "required" | "suggested" | null;
+
+export type LegWhen = {
+  kind: "auto" | "depart" | "arrive";
+  hhmm: string;
+};
 
 export type PlanStop = {
   id: string;
@@ -51,21 +61,22 @@ export type PricedLeg = {
   kwh: number;
   arriveSoc: number;
   needed: boolean;
+  suggested: boolean;
+  advice: ChargeAdvice;
+  departAt: string;
+  arriveAt: string;
+  chargeMin: number;
+  startSoc: number;
   charge: PricedCharge | null;
   backup: PricedCharge | null;
   kr: number;
 };
 
-const WH_PER_MI: Record<LegMode, number> = {
-  eco: 210,
-  standard: 240,
-  fastest: 280,
-  cheapest: 235,
-};
-
 export const DKK_PER_USD = 6.85;
 const RESERVE_SOC = 15;
 const TARGET_SOC = 70;
+const SUGGEST_SOC = 45;
+const CHEAP_VS_LIVE = 0.85;
 
 export function haversineM(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
   const R = 6371000;
@@ -111,8 +122,21 @@ export async function fetchRoute(from: PlanStop, to: PlanStop, mode: LegMode): P
   }
 }
 
-export function driveKwh(miles: number, mode: LegMode) {
-  return (miles * WH_PER_MI[mode]) / 1000;
+export function driveKwh(miles: number, mode: LegMode, baseWhPerMi = 240) {
+  return (miles * baseWhPerMi * modeWhFactor(mode)) / 1000;
+}
+
+export function dkNowHhmm() {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Copenhagen",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+  const hourRaw = parts.find((p) => p.type === "hour")?.value ?? "00";
+  const minute = parts.find((p) => p.type === "minute")?.value ?? "00";
+  const hour = hourRaw === "24" ? "00" : hourRaw;
+  return `${hour.padStart(2, "0")}:${minute.padStart(2, "0")}`;
 }
 
 export function minDistToPathM(lat: number, lng: number, path: [number, number][]) {
@@ -323,36 +347,63 @@ export function pricePlan(opts: {
   hours: HourPrice[];
   acKw: number;
   acKr: number;
+  whPerMi: number;
+  departHhmm: string;
+  legWhen?: LegWhen[];
 }): PricedLeg[] {
-  const { stops, modes, detours, routes, usableKwh, locations, hours, acKw, acKr } = opts;
+  const { stops, modes, detours, routes, usableKwh, locations, hours, acKw, acKr, whPerMi } =
+    opts;
+  const live = hours[0]?.krPerKwh ?? acKr;
   let soc = opts.soc;
+  let clock = opts.departHhmm || dkNowHhmm();
   const out: PricedLeg[] = [];
   for (let i = 0; i < routes.length; i++) {
     const mode = modes[i] ?? "standard";
     const route = routes[i];
-    const kwh = driveKwh(route.miles, mode);
+    const when = opts.legWhen?.[i];
+    if (when?.kind === "depart" && when.hhmm) clock = when.hhmm;
+    if (when?.kind === "arrive" && when.hhmm) {
+      clock = addMinutesHhmm(when.hhmm, -route.seconds / 60);
+    }
+    const kwh = driveKwh(route.miles, mode, whPerMi);
     const socAfter = soc - (kwh / usableKwh) * 100;
-    const needed = socAfter < RESERVE_SOC;
-    const needSoc = needed
+    const required = socAfter < RESERVE_SOC;
+    const legHours = hoursFrom(hours, clock);
+    const cheap = cheapestHour(legHours);
+    const goodPrice = Boolean(cheap && cheap.krPerKwh <= live * CHEAP_VS_LIVE);
+    const lowEnough = soc < 55 || socAfter < SUGGEST_SOC;
+    const suggested = !required && goodPrice && lowEnough;
+    const wantCharge = required || suggested || mode === "cheapest";
+    const needSoc = required
       ? Math.max(TARGET_SOC - soc, RESERVE_SOC + (kwh / usableKwh) * 100 - soc)
-      : Math.min(20, kwh);
-    const kwhNeed = Math.max(needSoc / 100, 0) * usableKwh || kwh;
-    const pick = pickCharges({
-      kwhNeed: needed ? kwhNeed : Math.max(kwh, 5),
-      path: route.path,
-      detourKm: detours[i] ?? 10,
-      mode,
-      locations,
-      acKr,
-      hours,
-      acKw,
-    });
+      : Math.min(TARGET_SOC - soc, Math.max((kwh / usableKwh) * 100, 12));
+    const kwhNeed = Math.max(needSoc / 100, 0) * usableKwh;
+    const pick = wantCharge
+      ? pickCharges({
+          kwhNeed: Math.max(kwhNeed, 5),
+          path: route.path,
+          detourKm: detours[i] ?? 10,
+          mode,
+          locations,
+          acKr: legHours[0]?.krPerKwh ?? acKr,
+          hours: legHours,
+          acKw,
+        })
+      : null;
     const charge = pick?.primary ?? null;
     const backup = pick?.backup ?? null;
-    let startSoc = soc;
-    if (needed && charge) startSoc = soc + (charge.kwh / usableKwh) * 100;
+    const advice: ChargeAdvice = required
+      ? "required"
+      : suggested || (mode === "cheapest" && charge)
+        ? "suggested"
+        : null;
+    const billed = advice !== null && charge !== null;
+    const chargeMin = billed && charge ? (charge.kwh / Math.max(acKw, 1)) * 60 : 0;
+    const departAt = clock;
+    if (chargeMin > 0) clock = addMinutesHhmm(clock, chargeMin);
+    clock = addMinutesHhmm(clock, route.seconds / 60);
+    const startSoc = billed && charge ? Math.min(100, soc + (charge.kwh / usableKwh) * 100) : soc;
     const arriveSoc = Math.max(1, startSoc - (kwh / usableKwh) * 100);
-    const billed = needed || mode === "cheapest" ? charge : null;
     out.push({
       from: stops[i],
       to: stops[i + 1],
@@ -361,14 +412,35 @@ export function pricePlan(opts: {
       route,
       kwh,
       arriveSoc,
-      needed,
+      needed: required,
+      suggested,
+      advice,
+      departAt,
+      arriveAt: clock,
+      chargeMin,
+      startSoc,
       charge,
       backup,
-      kr: billed?.kr ?? 0,
+      kr: billed ? (charge?.kr ?? 0) : 0,
     });
     soc = arriveSoc;
   }
   return out;
+}
+
+export function planTotals(legs: PricedLeg[]) {
+  return legs.reduce(
+    (acc, leg) => {
+      acc.mi += leg.route.miles;
+      acc.kwh += leg.kwh;
+      acc.kr += leg.kr;
+      acc.min += leg.route.seconds / 60 + leg.chargeMin;
+      acc.chargeKwh += leg.advice ? (leg.charge?.kwh ?? 0) : 0;
+      acc.requiredKwh += leg.needed ? (leg.charge?.kwh ?? 0) : 0;
+      return acc;
+    },
+    { mi: 0, kwh: 0, kr: 0, min: 0, chargeKwh: 0, requiredKwh: 0 },
+  );
 }
 
 export function minutesToHm(min: number) {

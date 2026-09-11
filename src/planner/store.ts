@@ -1,7 +1,9 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { geo } from "@/lib/places";
-import { type LegMode, type PlanStop } from "./engine";
+import { type LegMode, type LegWhen, type PlanStop } from "./engine";
+
+export type WhenKind = "depart" | "arrive";
 
 export type SavedPlan = {
   id: string;
@@ -9,6 +11,10 @@ export type SavedPlan = {
   stops: PlanStop[];
   modes: LegMode[];
   detours: number[];
+  whenKind: WhenKind;
+  when: string;
+  legWhen: LegWhen[];
+  whPerMi: number | null;
   savedAt: string;
 };
 
@@ -21,11 +27,19 @@ function uid(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+function autoWhen(): LegWhen {
+  return { kind: "auto", hhmm: "" };
+}
+
 type PlanState = {
   name: string;
   stops: PlanStop[];
   modes: LegMode[];
   detours: number[];
+  whenKind: WhenKind;
+  when: string;
+  legWhen: LegWhen[];
+  whPerMi: number | null;
   saved: SavedPlan[];
   seq: number;
 };
@@ -36,7 +50,12 @@ type PlanStore = PlanState & {
   removeStop: (id: string) => void;
   moveStop: (id: string, dir: -1 | 1) => void;
   setLegMode: (index: number, mode: LegMode) => void;
+  setAllModes: (mode: LegMode) => void;
   setLegDetour: (index: number, km: number) => void;
+  setWhenKind: (kind: WhenKind) => void;
+  setWhen: (hhmm: string) => void;
+  setLegWhen: (index: number, next: LegWhen) => void;
+  setWhPerMi: (n: number | null) => void;
   insertStopAt: (index: number, stop: Omit<PlanStop, "id"> & { id?: string }) => void;
   savePlan: () => SavedPlan | null;
   loadPlan: (id: string) => void;
@@ -49,6 +68,10 @@ const empty = (): PlanState => ({
   stops: [homeStop()],
   modes: [],
   detours: [],
+  whenKind: "depart",
+  when: "",
+  legWhen: [],
+  whPerMi: null,
   saved: [],
   seq: 0,
 });
@@ -59,6 +82,9 @@ export const usePlanStore = create<PlanStore>()(
       ...empty(),
 
       setName: (name) => set({ name }),
+      setWhenKind: (whenKind) => set({ whenKind }),
+      setWhen: (when) => set({ when }),
+      setWhPerMi: (whPerMi) => set({ whPerMi }),
 
       addStop: (input) => {
         const stop: PlanStop = {
@@ -71,6 +97,7 @@ export const usePlanStore = create<PlanStore>()(
           stops: [...get().stops, stop],
           modes: [...get().modes, "standard"],
           detours: [...get().detours, 10],
+          legWhen: [...get().legWhen, autoWhen()],
         });
       },
 
@@ -84,11 +111,13 @@ export const usePlanStore = create<PlanStore>()(
         const stops = [...get().stops];
         const modes = [...get().modes];
         const detours = [...get().detours];
+        const legWhen = [...get().legWhen];
         const at = Math.max(1, Math.min(index, stops.length));
         stops.splice(at, 0, stop);
         modes.splice(at - 1, 0, "standard");
         detours.splice(at - 1, 0, 10);
-        set({ stops, modes, detours });
+        legWhen.splice(at - 1, 0, autoWhen());
+        set({ stops, modes, detours, legWhen });
       },
 
       removeStop: (id) => {
@@ -98,6 +127,7 @@ export const usePlanStore = create<PlanStore>()(
           stops: get().stops.filter((s) => s.id !== id),
           modes: get().modes.filter((_, i) => i !== idx - 1),
           detours: get().detours.filter((_, i) => i !== idx - 1),
+          legWhen: get().legWhen.filter((_, i) => i !== idx - 1),
         });
       },
 
@@ -109,15 +139,21 @@ export const usePlanStore = create<PlanStore>()(
         if (next <= 0 || next >= stops.length) return;
         const [moved] = stops.splice(idx, 1);
         stops.splice(next, 0, moved);
-        const modes = [...get().modes];
-        const detours = [...get().detours];
-        const a = idx - 1;
-        const b = next - 1;
-        if (a >= 0 && b >= 0 && a < modes.length && b < modes.length) {
-          [modes[a], modes[b]] = [modes[b], modes[a]];
-          [detours[a], detours[b]] = [detours[b], detours[a]];
-        }
-        set({ stops, modes, detours });
+        const swap = <T,>(arr: T[]) => {
+          const copy = [...arr];
+          const a = idx - 1;
+          const b = next - 1;
+          if (a >= 0 && b >= 0 && a < copy.length && b < copy.length) {
+            [copy[a], copy[b]] = [copy[b], copy[a]];
+          }
+          return copy;
+        };
+        set({
+          stops,
+          modes: swap(get().modes),
+          detours: swap(get().detours),
+          legWhen: swap(get().legWhen),
+        });
       },
 
       setLegMode: (index, mode) => {
@@ -128,6 +164,10 @@ export const usePlanStore = create<PlanStore>()(
         set({ modes });
       },
 
+      setAllModes: (mode) => {
+        set({ modes: get().stops.slice(1).map(() => mode) });
+      },
+
       setLegDetour: (index, km) => {
         const detours = get().detours.length
           ? [...get().detours]
@@ -136,8 +176,16 @@ export const usePlanStore = create<PlanStore>()(
         set({ detours });
       },
 
+      setLegWhen: (index, next) => {
+        const legWhen = get().legWhen.length
+          ? [...get().legWhen]
+          : get().stops.slice(1).map(() => autoWhen());
+        legWhen[index] = next;
+        set({ legWhen });
+      },
+
       savePlan: () => {
-        const { name, stops, modes, detours, saved, seq } = get();
+        const { name, stops, modes, detours, whenKind, when, legWhen, whPerMi, saved, seq } = get();
         if (stops.length < 2) return null;
         const label = name.trim() || stops.map((s) => s.name).join(" → ");
         const plan: SavedPlan = {
@@ -146,6 +194,10 @@ export const usePlanStore = create<PlanStore>()(
           stops,
           modes,
           detours,
+          whenKind,
+          when,
+          legWhen,
+          whPerMi,
           savedAt: new Date().toISOString(),
         };
         set({
@@ -164,6 +216,10 @@ export const usePlanStore = create<PlanStore>()(
           stops: plan.stops,
           modes: plan.modes,
           detours: plan.detours,
+          whenKind: plan.whenKind ?? "depart",
+          when: plan.when ?? "",
+          legWhen: plan.legWhen ?? plan.stops.slice(1).map(() => autoWhen()),
+          whPerMi: plan.whPerMi ?? null,
         });
       },
 
@@ -184,6 +240,10 @@ export const usePlanStore = create<PlanStore>()(
         stops: s.stops,
         modes: s.modes,
         detours: s.detours,
+        whenKind: s.whenKind,
+        when: s.when,
+        legWhen: s.legWhen,
+        whPerMi: s.whPerMi,
         saved: s.saved,
         seq: s.seq,
       }),

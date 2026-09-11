@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { chargeSearchKm, costingFor } from "./modes.ts";
+import {
+  addMinutesHhmm,
+  chargeSearchKm,
+  costingFor,
+  epaWhPerMi,
+  hoursFrom,
+} from "./modes.ts";
 
 describe("leg modes", () => {
   it("eco is shortest + avoids highways and tolls", () => {
@@ -32,5 +38,26 @@ describe("leg modes", () => {
     assert.equal(chargeSearchKm("cheapest", 20), 60);
     assert.equal(chargeSearchKm("eco", 10), 10);
     assert.equal(chargeSearchKm("fastest", 10), 10);
+  });
+
+  it("hoursFrom starts pricing at the planned clock", () => {
+    const hours = [{ hour: "18" }, { hour: "19" }, { hour: "07" }];
+    assert.deepEqual(
+      hoursFrom(hours, "19:10").map((h) => h.hour),
+      ["19", "07"],
+    );
+    assert.deepEqual(
+      hoursFrom(hours, "07:00").map((h) => h.hour),
+      ["07"],
+    );
+  });
+
+  it("addMinutesHhmm wraps midnight", () => {
+    assert.equal(addMinutesHhmm("23:50", 20), "00:10");
+    assert.equal(addMinutesHhmm("08:00", -90), "06:30");
+  });
+
+  it("epaWhPerMi uses usable pack / rated range", () => {
+    assert.equal(Math.round(epaWhPerMi(75, 327)), 229);
   });
 });

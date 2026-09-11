@@ -39,6 +39,44 @@ export function chargeSearchKm(mode: LegMode, detourKm: number) {
   return detourKm;
 }
 
+export function modeWhFactor(mode: LegMode) {
+  if (mode === "eco") return 0.88;
+  if (mode === "fastest") return 1.17;
+  if (mode === "cheapest") return 0.98;
+  return 1;
+}
+
+export function epaWhPerMi(usableKwh: number, epaRangeMi: number) {
+  if (epaRangeMi <= 0) return 240;
+  return (usableKwh / epaRangeMi) * 1000;
+}
+
+export function parseHhmm(hhmm: string) {
+  const [h, m] = hhmm.split(":").map((n) => Number(n));
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return 0;
+  return ((h % 24) * 60 + (m % 60) + 24 * 60) % (24 * 60);
+}
+
+export function formatHhmm(totalMin: number) {
+  const wrapped = ((Math.round(totalMin) % (24 * 60)) + 24 * 60) % (24 * 60);
+  const h = Math.floor(wrapped / 60);
+  const m = wrapped % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+export function addMinutesHhmm(hhmm: string, add: number) {
+  return formatHhmm(parseHhmm(hhmm) + add);
+}
+
+export function hoursFrom<T extends { hour: string }>(hours: T[], hhmm: string) {
+  if (!hours.length) return [];
+  const hour = hhmm.slice(0, 2).padStart(2, "0");
+  const exact = hours.findIndex((h) => h.hour === hour);
+  if (exact >= 0) return hours.slice(exact);
+  const next = hours.findIndex((h) => h.hour > hour);
+  return next >= 0 ? hours.slice(next) : hours;
+}
+
 /** Eco = efficient distance. Standard/cheapest = recommended time. Fastest = time on highways. */
 export function costingFor(mode: LegMode): AutoCosting {
   if (mode === "eco") {
