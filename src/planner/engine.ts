@@ -103,6 +103,8 @@ export type PricedLeg = {
   backup: PricedCharge | null;
   kr: number;
   accepted: boolean;
+  autoStartSoc: number;
+  extraKr: number;
 };
 
 export const DKK_PER_USD = 6.85;
@@ -463,6 +465,7 @@ export function pricePlan(opts: {
   arriveHhmm?: string;
   legWhen?: LegWhen[];
   acceptCharge?: boolean[];
+  chargeToSoc?: Array<number | null | undefined>;
 }): PricedLeg[] {
   const { stops, modes, detours, routes, usableKwh, locations, hours, acKw, acKr, speedEff } =
     opts;
@@ -489,11 +492,22 @@ export function pricePlan(opts: {
     const goodPrice = Boolean(cheap && cheap.krPerKwh <= live * CHEAP_VS_LIVE);
     const lowEnough = soc < 55 || socAfter < SUGGEST_SOC;
     const suggested = !required && goodPrice && lowEnough;
-    const wantCharge = required || suggested || mode === "cheapest";
-    const needSoc = required
+    const autoNeedSoc = required
       ? Math.max(TARGET_SOC - soc, RESERVE_SOC + (kwh / usableKwh) * 100 - soc)
       : Math.min(TARGET_SOC - soc, Math.max((kwh / usableKwh) * 100, 12));
-    const kwhNeed = Math.max(needSoc / 100, 0) * usableKwh;
+    const autoTarget = Math.min(100, Math.max(soc, soc + autoNeedSoc));
+    const minTarget = required
+      ? Math.min(100, Math.max(soc + 1, RESERVE_SOC + (kwh / usableKwh) * 100))
+      : soc;
+    const rawTarget = opts.chargeToSoc?.[i];
+    const userTarget =
+      rawTarget != null && Number.isFinite(rawTarget)
+        ? Math.min(100, Math.max(minTarget, rawTarget))
+        : null;
+    const target = userTarget ?? autoTarget;
+    const wantCharge = required || suggested || mode === "cheapest" || userTarget != null;
+    const kwhNeed = Math.max((target - soc) / 100, 0) * usableKwh;
+    const autoKwh = Math.max((autoTarget - soc) / 100, 0) * usableKwh;
     const chargeMinEst = (Math.max(kwhNeed, 5) / Math.max(acKw, 1)) * 60;
     const restDriveMin = routes.slice(i).reduce((n, r) => n + r.seconds / 60, 0);
     const slack = minutesBetweenDateTime(readyAt, plannedStart);
@@ -527,7 +541,10 @@ export function pricePlan(opts: {
       : suggested || (mode === "cheapest" && charge)
         ? "suggested"
         : null;
-    const accepted = required || (suggested && Boolean(opts.acceptCharge?.[i]));
+    const accepted =
+      required ||
+      Boolean(userTarget != null) ||
+      (suggested && Boolean(opts.acceptCharge?.[i]));
     const billed = accepted && charge !== null;
     const chargeMin = billed && charge ? (charge.kwh / Math.max(acKw, 1)) * 60 : 0;
     const rawWait = billed && charge && charge.cheapWindow ? charge.waitMin : 0;
@@ -541,6 +558,12 @@ export function pricePlan(opts: {
     const arriveAt = addMinutesDateTime(departAt, route.seconds / 60);
     const startSoc = billed && charge ? Math.min(100, soc + (charge.kwh / usableKwh) * 100) : soc;
     const arriveSoc = Math.max(1, startSoc - (kwh / usableKwh) * 100);
+    const extraKr =
+      billed && charge && autoKwh > 0
+        ? (charge.kwh - autoKwh) * charge.rateKr
+        : billed && charge
+          ? charge.kr
+          : 0;
     const pricedCharge =
       charge && waitMin === 0 && charge.waitMin > 0
         ? { ...charge, waitMin: 0, windowLabel: charge.windowLabel.replace(/ · wait .+$/, "") }
@@ -567,6 +590,8 @@ export function pricePlan(opts: {
       backup,
       kr: billed ? (charge?.kr ?? 0) : 0,
       accepted,
+      autoStartSoc: autoTarget,
+      extraKr,
     });
     soc = arriveSoc;
     readyAt = arriveAt;

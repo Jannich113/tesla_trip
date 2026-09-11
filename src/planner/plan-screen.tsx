@@ -122,6 +122,7 @@ export function PlanScreen() {
   const [selected, setSelected] = useState<string | null>(null);
   const [prefer, setPrefer] = useState<Record<number, string>>({});
   const [acceptCharge, setAcceptCharge] = useState<Record<number, boolean>>({});
+  const [chargeToSoc, setChargeToSoc] = useState<Record<number, number>>({});
   const [showRoutes, setShowRoutes] = useState<Record<LegMode, boolean>>({
     eco: true,
     standard: true,
@@ -189,6 +190,7 @@ export function PlanScreen() {
   useEffect(() => {
     setPrefer({});
     setAcceptCharge({});
+    setChargeToSoc({});
   }, [stops, detours]);
 
   const carWhPerMi = epaWhPerMi(profile.usableKwh, profile.epaRangeMi);
@@ -243,6 +245,7 @@ export function PlanScreen() {
     arriveHhmm: whenKind === "arrive" ? clock : undefined,
     legWhen,
     acceptCharge: stops.slice(1).map((_, i) => Boolean(acceptCharge[i])),
+    chargeToSoc: stops.slice(1).map((_, i) => chargeToSoc[i] ?? null),
   };
 
   const legs: PricedLeg[] = useMemo(() => {
@@ -252,7 +255,7 @@ export function PlanScreen() {
       modes: activeModes,
       routes: selectedRoutes,
     });
-  }, [stops, activeModes, detours, selectedRoutes, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge]);
+  }, [stops, activeModes, detours, selectedRoutes, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc]);
 
   const viewLegs = useMemo(() => {
     return legs.map((leg, i) => {
@@ -286,7 +289,7 @@ export function PlanScreen() {
         kwhPerMi: interpolateWhPerMi(speedEff, kmh) / 1000,
       };
     });
-  }, [routeMap, stops, detours, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge]);
+  }, [routeMap, stops, detours, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc]);
 
   function addStop(hit: AddressHit) {
     addStopToStore({ name: hit.label.split(",")[0] || hit.label, lat: hit.lat, lng: hit.lng });
@@ -747,7 +750,12 @@ export function PlanScreen() {
             const leftPct = inbound ? inbound.arriveSoc : soc;
             const chargeLeg = outbound;
             const chargeTo =
-              chargeLeg?.charge && (chargeLeg.needed || chargeLeg.suggested) ? chargeLeg.startSoc : null;
+              chargeLeg?.charge && (chargeLeg.needed || chargeLeg.suggested || chargeToSoc[i] != null)
+                ? chargeLeg.accepted
+                  ? chargeLeg.startSoc
+                  : chargeLeg.autoStartSoc
+                : null;
+            const extraKr = chargeLeg?.accepted ? chargeLeg.extraKr : 0;
             const chargeRequired = Boolean(chargeLeg?.needed);
             return (
               <li
@@ -782,9 +790,10 @@ export function PlanScreen() {
                               chargeRequired ? "font-medium text-amber-300" : "font-medium text-emerald-400",
                             )}
                           >
-                            {" · "}
-                            charge to {formatNumber(chargeTo, 0)}%
-                            {chargeRequired ? " required" : chargeLeg?.accepted ? " accepted" : " recommended"}
+                            {chargeRequired ? " · required" : chargeLeg?.accepted ? " · accepted" : " · recommended"}
+                            {chargeLeg?.accepted && Math.abs(extraKr) >= 0.5
+                              ? ` · ${extraKr > 0 ? "+" : ""}${formatKrValue(extraKr, 0)} kr`
+                              : ""}
                           </span>
                         ) : null}
                       </p>
@@ -802,6 +811,31 @@ export function PlanScreen() {
                       <ChevronDown className={cn("size-4 shrink-0 text-muted transition", open && "rotate-180")} />
                     ) : null}
                   </button>
+                  {chargeTo != null ? (
+                    <label
+                      className={cn(
+                        "flex h-8 shrink-0 items-center gap-0.5 rounded-full px-2 text-[11px] font-medium",
+                        chargeRequired ? "bg-amber-400/15 text-amber-200" : "bg-emerald-400/15 text-emerald-300",
+                      )}
+                    >
+                      to
+                      <input
+                        type="number"
+                        min={1}
+                        max={100}
+                        value={Math.round(chargeTo)}
+                        onChange={(e) => {
+                          const n = Number(e.target.value);
+                          if (!Number.isFinite(n)) return;
+                          const v = Math.max(1, Math.min(100, Math.round(n)));
+                          setChargeToSoc((cur) => ({ ...cur, [i]: v }));
+                          setAcceptCharge((cur) => ({ ...cur, [i]: true }));
+                        }}
+                        className="h-6 w-10 bg-transparent text-center text-xs tabular-nums text-foreground outline-none"
+                      />
+                      %
+                    </label>
+                  ) : null}
                   {chargeTo != null && !chargeRequired ? (
                     <button
                       type="button"
@@ -954,6 +988,39 @@ export function PlanScreen() {
                           required={leg.needed}
                           suggested={leg.suggested}
                         />
+                        <label className="flex items-center justify-between gap-3 rounded-xl bg-surface-2 px-3 py-2">
+                          <span className="text-xs text-muted">Charge to</span>
+                          <span className="flex items-center gap-1 text-sm">
+                            <input
+                              type="number"
+                              min={1}
+                              max={100}
+                              value={Math.round(
+                                chargeToSoc[i - 1] ?? (leg.accepted ? leg.startSoc : leg.autoStartSoc),
+                              )}
+                              onChange={(e) => {
+                                const n = Number(e.target.value);
+                                if (!Number.isFinite(n)) return;
+                                const v = Math.max(1, Math.min(100, Math.round(n)));
+                                setChargeToSoc((cur) => ({ ...cur, [i - 1]: v }));
+                                setAcceptCharge((cur) => ({ ...cur, [i - 1]: true }));
+                              }}
+                              className="h-8 w-14 rounded-md bg-background text-center text-sm tabular-nums outline-none"
+                            />
+                            %
+                          </span>
+                        </label>
+                        {leg.accepted && Math.abs(leg.extraKr) >= 0.5 ? (
+                          <p
+                            className={cn(
+                              "text-[11px] font-medium",
+                              leg.extraKr > 0 ? "text-amber-300" : "text-emerald-300",
+                            )}
+                          >
+                            {leg.extraKr > 0 ? "+" : ""}
+                            {formatKrValue(leg.extraKr, 0)} kr vs {formatNumber(leg.autoStartSoc, 0)}% plan
+                          </p>
+                        ) : null}
                         <button
                           type="button"
                           onClick={() => insertCharge(i - 1, leg.charge!)}
