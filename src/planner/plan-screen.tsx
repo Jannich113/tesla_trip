@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Navigation, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { BayMap, type MapMarker, type MapRoute } from "@/components/bay-map";
 import { searchAddress, type AddressHit } from "./search";
@@ -148,6 +148,8 @@ export function PlanScreen() {
   const [backupLoc, setBackupLoc] = useState<Record<number, string>>({});
   const [openStops, setOpenStops] = useState<Record<string, boolean>>({});
   const [showAllRoutes, setShowAllRoutes] = useState(false);
+  const [naming, setNaming] = useState(false);
+  const [saveLabel, setSaveLabel] = useState("");
   const [pane, setPane] = useState<"plan" | "advanced">("plan");
   const { data: elpris } = useLiveElpris(area);
 
@@ -490,13 +492,61 @@ export function PlanScreen() {
     return [...ids];
   }, [selected, viewLegs, stops, optionRows]);
 
+  function routePoints() {
+    if (viewLegs.length) {
+      const pts = [viewLegs[0].from, ...viewLegs.map((leg) => leg.to)];
+      return pts.filter((p, i) => i === 0 || p.lat !== pts[i - 1].lat || p.lng !== pts[i - 1].lng);
+    }
+    return stops;
+  }
+
   function onSave() {
-    const plan = savePlan();
+    if (stops.length < 2) {
+      toast("Add a destination first");
+      return;
+    }
+    const fallback = name.trim() || stops.map((s) => s.name).join(" → ");
+    setSaveLabel(fallback);
+    setNaming(true);
+  }
+
+  function commitSave() {
+    const label = saveLabel.trim();
+    if (!label) {
+      toast("Name this trip");
+      return;
+    }
+    setName(label);
+    const plan = savePlan(label);
     if (!plan) {
       toast("Add a destination first");
       return;
     }
+    setNaming(false);
     toast(`Saved ${plan.name}`);
+  }
+
+  async function exportToTesla(planStops: { name: string; lat: number; lng: number }[], title: string) {
+    const pts = planStops.filter((s) => Number.isFinite(s.lat) && Number.isFinite(s.lng));
+    if (pts.length < 1) {
+      toast("Nothing to send");
+      return;
+    }
+    const url =
+      pts.length === 1
+        ? teslaDestUrl(pts[0])
+        : mapsDirUrl(pts);
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: title || "Tesla trip", text: title, url });
+        return;
+      }
+    } catch {
+      /* user cancelled */
+      return;
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
+    toast("Open in Tesla app, or share the map to the car");
   }
 
   const mapRoutes: MapRoute[] = useMemo(() => {
@@ -785,38 +835,93 @@ export function PlanScreen() {
           {totals.requiredKwh > 0 ? ` · ${formatNumber(totals.requiredKwh, 1)} kWh required` : ""}
         </p>
         <div className="mt-4 flex gap-2">
-          <button
-            type="button"
-            onClick={onSave}
-            className="h-11 flex-1 rounded-full bg-foreground text-sm font-medium text-background"
-          >
-            Save plan
-          </button>
-          <button
-            type="button"
-            onClick={() => reset()}
-            className="h-11 rounded-full bg-surface-2 px-4 text-sm font-medium text-muted"
-          >
-            Clear
-          </button>
+          {naming ? (
+            <div className="flex min-w-0 flex-1 flex-col gap-2">
+              <input
+                autoFocus
+                value={saveLabel}
+                onChange={(e) => setSaveLabel(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") commitSave();
+                  if (e.key === "Escape") setNaming(false);
+                }}
+                placeholder="Name this trip"
+                className="h-11 w-full rounded-xl bg-surface-2 px-3 text-sm outline-none"
+              />
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={commitSave}
+                  className="h-11 flex-1 rounded-full bg-foreground text-sm font-medium text-background"
+                >
+                  Save trip
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setNaming(false)}
+                  className="h-11 rounded-full bg-surface-2 px-4 text-sm font-medium text-muted"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={onSave}
+                className="h-11 flex-1 rounded-full bg-foreground text-sm font-medium text-background"
+              >
+                Save plan
+              </button>
+              <button
+                type="button"
+                onClick={() => void exportToTesla(routePoints(), name.trim() || "Tesla trip")}
+                className="flex h-11 items-center gap-1.5 rounded-full bg-surface-2 px-4 text-sm font-medium text-muted"
+              >
+                <Navigation className="size-4" />
+                Tesla
+              </button>
+              <button
+                type="button"
+                onClick={() => reset()}
+                className="h-11 rounded-full bg-surface-2 px-4 text-sm font-medium text-muted"
+              >
+                Clear
+              </button>
+            </>
+          )}
         </div>
       </section>
 
       {saved.length ? (
         <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
           <p className="text-sm font-medium">Saved</p>
+          <p className="mt-0.5 text-xs text-subtle">Tap to load · Tesla sends the route to nav</p>
           <ul className="mt-2">
             {saved.map((plan) => (
-              <li key={plan.id} className="flex items-center gap-3 border-b border-border py-3 last:border-0">
+              <li key={plan.id} className="flex items-center gap-2 border-b border-border py-3 last:border-0">
                 <button
                   type="button"
-                  onClick={() => loadPlan(plan.id)}
+                  onClick={() => {
+                    loadPlan(plan.id);
+                    toast(`Loaded ${plan.name}`);
+                  }}
                   className="min-w-0 flex-1 text-left"
                 >
                   <p className="truncate text-sm">{plan.name}</p>
                   <p className="text-xs text-muted">
                     {plan.stops.length} stops · {plan.stops.map((s) => s.name).join(" → ")}
                   </p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void exportToTesla(plan.stops, plan.name)}
+                  className="flex h-9 items-center gap-1 rounded-full bg-surface-2 px-3 text-[11px] font-medium text-muted"
+                  aria-label={`Send ${plan.name} to Tesla nav`}
+                >
+                  <Navigation className="size-3.5" />
+                  Tesla
                 </button>
                 <button
                   type="button"
@@ -1677,4 +1782,13 @@ function ChargeChoice({
       </div>
     </div>
   );
+}
+
+function mapsDirUrl(stops: { lat: number; lng: number }[]) {
+  if (stops.length === 1) return teslaDestUrl(stops[0]);
+  return `https://www.google.com/maps/dir/${stops.map((s) => `${s.lat},${s.lng}`).join("/")}`;
+}
+
+function teslaDestUrl(stop: { lat: number; lng: number }) {
+  return `https://www.tesla.com/navigation?lat=${stop.lat}&lng=${stop.lng}`;
 }

@@ -69,7 +69,7 @@ type PlanStore = PlanState & {
   setSpeedEff: (next: SpeedEff | null) => void;
   setNetworkAbo: (id: string, on: boolean) => void;
   insertStopAt: (index: number, stop: Omit<PlanStop, "id"> & { id?: string }) => void;
-  savePlan: () => SavedPlan | null;
+  savePlan: (label?: string) => SavedPlan | null;
   loadPlan: (id: string) => void;
   deleteSaved: (id: string) => void;
   reset: () => void;
@@ -220,10 +220,11 @@ export const usePlanStore = create<PlanStore>()(
         set({ legWhen });
       },
 
-      savePlan: () => {
+      savePlan: (given) => {
         const { name, stops, modes, cheapAvoidFees, detours, waits, whenKind, when, legWhen, whPerMi, speedEff, saved, seq } = get();
         if (stops.length < 2) return null;
-        const label = name.trim() || stops.map((s) => s.name).join(" → ");
+        const label = (given ?? name).trim();
+        if (!label) return null;
         const plan: SavedPlan = {
           id: `plan-${seq + 1}`,
           name: label,
