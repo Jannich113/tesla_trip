@@ -71,7 +71,7 @@ export function modeLabel(mode: LegMode) {
 export function modeColor(mode: LegMode) {
   if (mode === "eco") return "#1ecf8a";
   if (mode === "fastest") return "#6ea8ff";
-  if (mode === "cheapest") return "#e4c15a";
+  if (mode === "cheapest") return "#a8b4c0";
   return "#c8cdd4";
 }
 

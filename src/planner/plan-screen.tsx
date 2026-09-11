@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { MapPinned, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, MapPinned, Plus, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { BayMap, type MapMarker, type MapRoute } from "@/components/bay-map";
 import { searchAddress, type AddressHit } from "./search";
 import {
@@ -20,9 +21,10 @@ import {
   pricePlan,
   remainingHours,
 } from "./engine";
+import { usePlanStore } from "./store";
 import { formatKrPerKwh, formatKrValue, type HourPrice } from "@/lib/elpris";
 import { applyTillægToHours, providerById, withTillæg } from "@/lib/el-providers";
-import { geo, PLACES } from "@/lib/places";
+import { PLACES } from "@/lib/places";
 import { cn } from "@/lib/utils";
 import { formatDistance, formatNumber } from "@/lib/vehicle";
 import { HOME_USD_PER_KWH } from "@/lib/history";
@@ -31,15 +33,6 @@ import { useElprisStore } from "@/store/elpris-store";
 import { useLiveElpris } from "./use-live-elpris";
 import { useVehicleProfile } from "@/hooks/use-vehicle-profile";
 import { useVehicleStore } from "@/store/vehicle-store";
-
-function uid() {
-  return `s-${Math.random().toString(36).slice(2, 9)}`;
-}
-
-function homeStop(): PlanStop {
-  const g = geo("Home") ?? { lat: 37.3852, lng: -122.1141, short: "Home" };
-  return { id: "home", name: "Home", lat: g.lat, lng: g.lng };
-}
 
 export function PlanScreen() {
   const units = useVehicleStore((s) => s.units);
@@ -51,9 +44,23 @@ export function PlanScreen() {
   const providerId = useElprisStore((s) => s.providerId);
   const provider = useMemo(() => providerById(providerId), [providerId]);
 
-  const [stops, setStops] = useState<PlanStop[]>([homeStop()]);
-  const [modes, setModes] = useState<LegMode[]>([]);
-  const [detours, setDetours] = useState<number[]>([]);
+  const name = usePlanStore((s) => s.name);
+  const stops = usePlanStore((s) => s.stops);
+  const modes = usePlanStore((s) => s.modes);
+  const detours = usePlanStore((s) => s.detours);
+  const saved = usePlanStore((s) => s.saved);
+  const setName = usePlanStore((s) => s.setName);
+  const addStopToStore = usePlanStore((s) => s.addStop);
+  const insertStopAt = usePlanStore((s) => s.insertStopAt);
+  const removeStop = usePlanStore((s) => s.removeStop);
+  const moveStop = usePlanStore((s) => s.moveStop);
+  const setLegMode = usePlanStore((s) => s.setLegMode);
+  const setLegDetour = usePlanStore((s) => s.setLegDetour);
+  const savePlan = usePlanStore((s) => s.savePlan);
+  const loadPlan = usePlanStore((s) => s.loadPlan);
+  const deleteSaved = usePlanStore((s) => s.deleteSaved);
+  const reset = usePlanStore((s) => s.reset);
+
   const [routes, setRoutes] = useState<RoutedLeg[]>([]);
   const [routing, setRouting] = useState(false);
   const [query, setQuery] = useState("");
@@ -66,6 +73,7 @@ export function PlanScreen() {
     void Promise.all([
       useVehicleStore.persist.rehydrate(),
       useChargeStore.persist.rehydrate(),
+      usePlanStore.persist.rehydrate(),
     ]).catch(() => {
       /* localStorage may be unavailable */
     });
@@ -161,10 +169,7 @@ export function PlanScreen() {
   }, [viewLegs]);
 
   function addStop(hit: AddressHit) {
-    const stop: PlanStop = { id: uid(), name: hit.label.split(",")[0] || hit.label, lat: hit.lat, lng: hit.lng };
-    setStops((cur) => [...cur, stop]);
-    setModes((cur) => [...cur, "standard"]);
-    setDetours((cur) => [...cur, 10]);
+    addStopToStore({ name: hit.label.split(",")[0] || hit.label, lat: hit.lat, lng: hit.lng });
     setQuery("");
     setHits([]);
     setSelected(`leg-${stops.length - 1}`);
@@ -174,28 +179,24 @@ export function PlanScreen() {
     addStop({ label: "Pinned stop", lat, lng });
   }
 
-  function removeStop(id: string) {
-    const idx = stops.findIndex((s) => s.id === id);
-    if (idx <= 0) return;
-    setStops((cur) => cur.filter((s) => s.id !== id));
-    setModes((cur) => cur.filter((_, i) => i !== idx - 1));
-    setDetours((cur) => cur.filter((_, i) => i !== idx - 1));
+  function insertCharge(legIndex: number, spot: PricedCharge) {
+    const loc = locations.find((x) => x.id === spot.locationId);
+    if (!loc) return;
+    insertStopAt(legIndex + 1, {
+      name: loc.short || loc.name,
+      lat: loc.lat,
+      lng: loc.lng,
+    });
+    toast(`Added ${loc.short || loc.name} as a stop`);
   }
 
-  function setLegMode(i: number, mode: LegMode) {
-    setModes((cur) => {
-      const next = cur.length ? [...cur] : stops.slice(1).map(() => "standard" as LegMode);
-      next[i] = mode;
-      return next;
-    });
-  }
-
-  function setLegDetour(i: number, km: number) {
-    setDetours((cur) => {
-      const next = cur.length ? [...cur] : stops.slice(1).map(() => 10);
-      next[i] = km;
-      return next;
-    });
+  function onSave() {
+    const plan = savePlan();
+    if (!plan) {
+      toast("Add a destination first");
+      return;
+    }
+    toast(`Saved ${plan.name}`);
   }
 
   const mapRoutes: MapRoute[] = viewLegs.map((leg, i) => ({
@@ -269,7 +270,16 @@ export function PlanScreen() {
       </div>
 
       <section className="rounded-xl bg-surface px-5 py-5 shadow-[var(--shadow-border)]">
-        <p className="text-xs font-medium text-muted">
+        <label className="block text-xs text-muted">
+          Name
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Weekend coast / work run"
+            className="mt-1 h-11 w-full rounded-md bg-surface-2 px-3 text-sm text-foreground outline-none"
+          />
+        </label>
+        <p className="mt-4 text-xs font-medium text-muted">
           {stops.length < 2 ? "Add a destination" : routing ? "Routing…" : `${viewLegs.length} ${viewLegs.length === 1 ? "leg" : "legs"}`}
         </p>
         <p className="mt-2 text-4xl font-medium tracking-tight tabular-nums">
@@ -293,7 +303,53 @@ export function PlanScreen() {
         {hours.length ? (
           <HourRibbon hours={hours} currentHour={elpris?.current?.hour ?? null} cheapHour={cheap?.hour ?? null} />
         ) : null}
+        <div className="mt-4 flex gap-2">
+          <button
+            type="button"
+            onClick={onSave}
+            className="h-11 flex-1 rounded-full bg-foreground text-sm font-medium text-background"
+          >
+            Save plan
+          </button>
+          <button
+            type="button"
+            onClick={() => reset()}
+            className="h-11 rounded-full bg-surface-2 px-4 text-sm font-medium text-muted"
+          >
+            Clear
+          </button>
+        </div>
       </section>
+
+      {saved.length ? (
+        <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
+          <p className="text-sm font-medium">Saved</p>
+          <ul className="mt-2">
+            {saved.map((plan) => (
+              <li key={plan.id} className="flex items-center gap-3 border-b border-border py-3 last:border-0">
+                <button
+                  type="button"
+                  onClick={() => loadPlan(plan.id)}
+                  className="min-w-0 flex-1 text-left"
+                >
+                  <p className="truncate text-sm">{plan.name}</p>
+                  <p className="text-xs text-muted">
+                    {plan.stops.length} stops · {plan.stops.map((s) => s.name).join(" → ")}
+                  </p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => deleteSaved(plan.id)}
+                  className="flex size-9 items-center justify-center rounded-full text-muted"
+                  aria-label={`Delete ${plan.name}`}
+                >
+                  <Trash2 className="size-4" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       <BayMap
         markers={mapMarkers}
@@ -321,6 +377,8 @@ export function PlanScreen() {
                     <p className="truncate text-sm">{stop.name}</p>
                     {leg ? (
                       <p className="text-xs text-muted">
+                        {modeLabel(leg.mode)}
+                        <span className="text-subtle"> · </span>
                         {formatDistance(leg.route.miles, units, 1)}
                         <span className="text-subtle"> · </span>
                         {formatNumber(leg.kwh, 1)} kWh
@@ -338,14 +396,34 @@ export function PlanScreen() {
                     )}
                   </div>
                   {i > 0 ? (
-                    <button
-                      type="button"
-                      onClick={() => removeStop(stop.id)}
-                      className="flex size-9 items-center justify-center rounded-full text-muted"
-                      aria-label={`Remove ${stop.name}`}
-                    >
-                      <Trash2 className="size-4" />
-                    </button>
+                    <div className="flex shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => moveStop(stop.id, -1)}
+                        disabled={i <= 1}
+                        className="flex size-9 items-center justify-center rounded-full text-muted disabled:opacity-30"
+                        aria-label={`Move ${stop.name} up`}
+                      >
+                        <ChevronUp className="size-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => moveStop(stop.id, 1)}
+                        disabled={i >= stops.length - 1}
+                        className="flex size-9 items-center justify-center rounded-full text-muted disabled:opacity-30"
+                        aria-label={`Move ${stop.name} down`}
+                      >
+                        <ChevronDown className="size-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeStop(stop.id)}
+                        className="flex size-9 items-center justify-center rounded-full text-muted"
+                        aria-label={`Remove ${stop.name}`}
+                      >
+                        <Trash2 className="size-4" />
+                      </button>
+                    </div>
                   ) : null}
                 </div>
                 {i > 0 ? (
@@ -396,6 +474,13 @@ export function PlanScreen() {
                           spot={leg.charge}
                           active
                         />
+                        <button
+                          type="button"
+                          onClick={() => insertCharge(i - 1, leg.charge!)}
+                          className="h-9 w-full rounded-full bg-surface-2 text-xs font-medium text-muted"
+                        >
+                          Add charger as stop
+                        </button>
                         {leg.backup ? (
                           <button
                             type="button"
@@ -525,7 +610,7 @@ function HourRibbon({
         {shown.map((h) => {
           const t = (h.krPerKwh - min) / span;
           const current = h.hour === currentHour;
-          const cheap = h.hour === cheapHour && h.hour !== currentHour;
+          const cheapMark = h.hour === cheapHour && h.hour !== currentHour;
           return (
             <div
               key={h.timeDk}
@@ -533,10 +618,10 @@ function HourRibbon({
               className={cn(
                 "min-w-0 flex-1 rounded-sm",
                 current && "bg-foreground",
-                cheap && "bg-accent",
-                !current && !cheap && t >= 0.75 && "bg-danger/70",
-                !current && !cheap && t < 0.75 && t > 0.33 && "bg-muted",
-                !current && !cheap && t <= 0.33 && "bg-accent/50",
+                cheapMark && "bg-accent",
+                !current && !cheapMark && t >= 0.75 && "bg-danger/70",
+                !current && !cheapMark && t < 0.75 && t > 0.33 && "bg-muted",
+                !current && !cheapMark && t <= 0.33 && "bg-accent/50",
               )}
               style={{ height: `${18 + Math.round(t * 22)}px` }}
             />
