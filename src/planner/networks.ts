@@ -214,18 +214,54 @@ export function networkLabel(id: string, hasAbo: boolean) {
   return hasAbo ? n.aboName : `${n.name} ad-hoc`;
 }
 
-export const EU_REGIONS = [
-  { id: "DK", label: "DK" },
-  { id: "DE", label: "DE" },
-  { id: "NL", label: "NL" },
-  { id: "BE", label: "BE" },
-  { id: "FR", label: "FR" },
-  { id: "AT", label: "AT" },
-  { id: "SE", label: "SE" },
-  { id: "UK", label: "UK" },
-] as const;
+export type EuRegion =
+  | "DK"
+  | "SE"
+  | "FI"
+  | "EE"
+  | "LV"
+  | "LT"
+  | "DE"
+  | "AT"
+  | "NL"
+  | "BE"
+  | "LU"
+  | "FR"
+  | "IE"
+  | "IT"
+  | "ES"
+  | "PT"
+  | "GR"
+  | "MT"
+  | "CY"
+  | "PL"
+  | "CZ"
+  | "SK"
+  | "HU"
+  | "RO"
+  | "BG"
+  | "HR"
+  | "SI"
+  | "UK"
+  | "NO"
+  | "CH";
 
-export type EuRegion = (typeof EU_REGIONS)[number]["id"];
+export type EuBloc = "nordic" | "baltics" | "dach" | "benelux" | "west" | "south" | "east" | "near";
+
+export const EU_BLOCS: { id: EuBloc; label: string; ids: readonly EuRegion[] }[] = [
+  { id: "nordic", label: "Nordics", ids: ["DK", "SE", "FI"] },
+  { id: "baltics", label: "Baltics", ids: ["EE", "LV", "LT"] },
+  { id: "dach", label: "DACH", ids: ["DE", "AT"] },
+  { id: "benelux", label: "Benelux", ids: ["NL", "BE", "LU"] },
+  { id: "west", label: "West", ids: ["FR", "IE"] },
+  { id: "south", label: "South", ids: ["IT", "ES", "PT", "GR", "MT", "CY"] },
+  { id: "east", label: "East", ids: ["PL", "CZ", "SK", "HU", "RO", "BG", "HR", "SI"] },
+  { id: "near", label: "Near EU", ids: ["UK", "NO", "CH"] },
+];
+
+export const EU_REGIONS: { id: EuRegion; label: EuRegion; bloc: EuBloc }[] = EU_BLOCS.flatMap((b) =>
+  b.ids.map((id) => ({ id, label: id, bloc: b.id })),
+);
 
 type MarketCell = { own: number | null; roam: number | null };
 
@@ -233,128 +269,185 @@ function cell(own: number | null, roam: number | null): MarketCell {
   return { own, roam };
 }
 
+function spread(
+  byBloc: Partial<Record<EuBloc, MarketCell>>,
+  extra: Partial<Record<EuRegion, MarketCell>> = {},
+): Partial<Record<EuRegion, MarketCell>> {
+  const out: Partial<Record<EuRegion, MarketCell>> = {};
+  for (const bloc of EU_BLOCS) {
+    const g = byBloc[bloc.id];
+    if (!g) continue;
+    for (const id of bloc.ids) out[id] = g;
+  }
+  return { ...out, ...extra };
+}
+
 /** Typical DC kr/kWh by country. own = CPO stalls, roam = this contract at other CPOs. */
 export const REGION_MARKETS: Record<string, Partial<Record<EuRegion, MarketCell>>> = {
-  tesla: {
-    DK: cell(dkkFromEur(0.48), null),
-    DE: cell(dkkFromEur(0.52), null),
-    NL: cell(dkkFromEur(0.5), null),
-    BE: cell(dkkFromEur(0.5), null),
-    FR: cell(dkkFromEur(0.45), null),
-    AT: cell(dkkFromEur(0.5), null),
-    SE: cell(dkkFromEur(0.4), null),
-    UK: cell(dkkFromEur(0.62), null),
-  },
-  ionity: {
-    DK: cell(dkkFromEur(0.79), null),
-    DE: cell(dkkFromEur(0.79), null),
-    NL: cell(dkkFromEur(0.76), null),
-    BE: cell(dkkFromEur(0.76), null),
-    FR: cell(dkkFromEur(0.59), null),
-    AT: cell(dkkFromEur(0.78), null),
-    SE: cell(dkkFromEur(0.5), null),
-    UK: cell(dkkFromEur(0.93), null),
-  },
-  fastned: {
-    DE: cell(dkkFromEur(0.69), null),
-    NL: cell(dkkFromEur(0.69), null),
-    BE: cell(dkkFromEur(0.69), null),
-    FR: cell(dkkFromEur(0.69), null),
-    UK: cell(dkkFromEur(0.69), null),
-    DK: cell(null, null),
-    AT: cell(null, null),
-    SE: cell(null, null),
-  },
-  allego: {
-    NL: cell(dkkFromEur(0.793), dkkFromEur(0.79)),
-    DE: cell(dkkFromEur(0.762), dkkFromEur(0.79)),
-    BE: cell(dkkFromEur(0.75), dkkFromEur(0.79)),
-    FR: cell(dkkFromEur(0.59), dkkFromEur(0.69)),
-    AT: cell(null, dkkFromEur(0.79)),
-    DK: cell(null, dkkFromEur(0.79)),
-    SE: cell(null, dkkFromEur(0.79)),
-    UK: cell(null, dkkFromEur(0.85)),
-  },
-  electra: {
-    FR: cell(dkkFromEur(0.54), dkkFromEur(0.69)),
-    BE: cell(dkkFromEur(0.54), dkkFromEur(0.75)),
-    DE: cell(dkkFromEur(0.54), dkkFromEur(0.79)),
-    AT: cell(null, dkkFromEur(0.79)),
-    NL: cell(null, dkkFromEur(0.79)),
-    DK: cell(null, dkkFromEur(0.79)),
-    SE: cell(null, dkkFromEur(0.79)),
-    UK: cell(null, null),
-  },
-  enbw: {
-    DE: cell(dkkFromEur(0.59), dkkFromEur(0.73)),
-    AT: cell(dkkFromEur(0.59), dkkFromEur(0.85)),
-    DK: cell(null, dkkFromEur(0.73)),
-    NL: cell(null, dkkFromEur(0.73)),
-    BE: cell(null, dkkFromEur(0.73)),
-    FR: cell(null, dkkFromEur(0.73)),
-    SE: cell(null, dkkFromEur(0.73)),
-    UK: cell(null, null),
-  },
-  clever: {
-    DK: cell(4.99, 0),
-    SE: cell(4.99, 0),
-    DE: cell(null, 5.49),
-    NL: cell(null, 5.49),
-    BE: cell(null, 5.49),
-    FR: cell(null, 5.49),
-    AT: cell(null, 5.49),
-    UK: cell(null, null),
-  },
-  eon: {
-    DK: cell(3.95, 5.2),
-    DE: cell(dkkFromEur(0.61), dkkFromEur(0.79)),
-    SE: cell(3.95, 5.2),
-    NL: cell(null, dkkFromEur(0.79)),
-    BE: cell(null, dkkFromEur(0.79)),
-    FR: cell(null, dkkFromEur(0.79)),
-    AT: cell(null, dkkFromEur(0.79)),
-    UK: cell(null, null),
-  },
-  spirii: {
-    DK: cell(null, 3.7),
-    SE: cell(null, 3.9),
-    DE: cell(null, dkkFromEur(0.79)),
-    NL: cell(null, dkkFromEur(0.79)),
-    BE: cell(null, dkkFromEur(0.79)),
-    FR: cell(null, dkkFromEur(0.75)),
-    AT: cell(null, dkkFromEur(0.79)),
-    UK: cell(null, dkkFromEur(0.85)),
-  },
-  shell: {
-    DK: cell(dkkFromEur(0.65), dkkFromEur(0.79)),
-    DE: cell(dkkFromEur(0.69), dkkFromEur(0.79)),
-    NL: cell(dkkFromEur(0.69), dkkFromEur(0.79)),
-    BE: cell(dkkFromEur(0.69), dkkFromEur(0.79)),
-    FR: cell(dkkFromEur(0.65), dkkFromEur(0.75)),
-    AT: cell(dkkFromEur(0.69), dkkFromEur(0.79)),
-    SE: cell(dkkFromEur(0.6), dkkFromEur(0.75)),
-    UK: cell(dkkFromEur(0.72), dkkFromEur(0.85)),
-  },
-  aral: {
-    DE: cell(dkkFromEur(0.79), dkkFromEur(0.79)),
-    AT: cell(null, dkkFromEur(0.79)),
-    DK: cell(null, dkkFromEur(0.79)),
-    NL: cell(null, dkkFromEur(0.79)),
-    BE: cell(null, dkkFromEur(0.79)),
-    FR: cell(null, dkkFromEur(0.79)),
-    SE: cell(null, null),
-    UK: cell(null, null),
-  },
-  total: {
-    FR: cell(dkkFromEur(0.59), dkkFromEur(0.69)),
-    BE: cell(dkkFromEur(0.59), dkkFromEur(0.69)),
-    NL: cell(dkkFromEur(0.59), dkkFromEur(0.69)),
-    DE: cell(dkkFromEur(0.59), dkkFromEur(0.69)),
-    DK: cell(null, dkkFromEur(0.69)),
-    AT: cell(null, dkkFromEur(0.69)),
-    SE: cell(null, dkkFromEur(0.69)),
-    UK: cell(null, null),
-  },
+  tesla: spread(
+    {
+      nordic: cell(dkkFromEur(0.42), null),
+      baltics: cell(dkkFromEur(0.45), null),
+      dach: cell(dkkFromEur(0.52), null),
+      benelux: cell(dkkFromEur(0.5), null),
+      west: cell(dkkFromEur(0.45), null),
+      south: cell(dkkFromEur(0.48), null),
+      east: cell(dkkFromEur(0.44), null),
+      near: cell(dkkFromEur(0.55), null),
+    },
+    { DK: cell(dkkFromEur(0.48), null), UK: cell(dkkFromEur(0.62), null), NO: cell(dkkFromEur(0.38), null) },
+  ),
+  ionity: spread(
+    {
+      nordic: cell(dkkFromEur(0.55), null),
+      dach: cell(dkkFromEur(0.79), null),
+      benelux: cell(dkkFromEur(0.76), null),
+      west: cell(dkkFromEur(0.59), null),
+      south: cell(dkkFromEur(0.69), null),
+      east: cell(dkkFromEur(0.62), null),
+      near: cell(dkkFromEur(0.85), null),
+      baltics: cell(null, null),
+    },
+    {
+      DK: cell(dkkFromEur(0.79), null),
+      SE: cell(dkkFromEur(0.5), null),
+      FI: cell(dkkFromEur(0.42), null),
+      FR: cell(dkkFromEur(0.59), null),
+      IE: cell(dkkFromEur(0.72), null),
+      UK: cell(dkkFromEur(0.93), null),
+      CH: cell(dkkFromEur(0.79), null),
+      NO: cell(null, null),
+      MT: cell(null, null),
+      CY: cell(null, null),
+    },
+  ),
+  fastned: spread(
+    {
+      dach: cell(dkkFromEur(0.69), null),
+      benelux: cell(dkkFromEur(0.69), null),
+      west: cell(dkkFromEur(0.69), null),
+      near: cell(dkkFromEur(0.69), null),
+      nordic: cell(null, null),
+      baltics: cell(null, null),
+      south: cell(null, null),
+      east: cell(null, null),
+    },
+    { AT: cell(null, null), IE: cell(null, null), CH: cell(null, null), NO: cell(null, null), LU: cell(dkkFromEur(0.69), null) },
+  ),
+  allego: spread(
+    {
+      dach: cell(dkkFromEur(0.762), dkkFromEur(0.79)),
+      benelux: cell(dkkFromEur(0.79), dkkFromEur(0.79)),
+      west: cell(dkkFromEur(0.59), dkkFromEur(0.69)),
+      nordic: cell(null, dkkFromEur(0.79)),
+      baltics: cell(null, dkkFromEur(0.79)),
+      south: cell(null, dkkFromEur(0.75)),
+      east: cell(null, dkkFromEur(0.72)),
+      near: cell(null, dkkFromEur(0.85)),
+    },
+    { NL: cell(dkkFromEur(0.793), dkkFromEur(0.79)), AT: cell(null, dkkFromEur(0.79)), CH: cell(null, null), NO: cell(null, dkkFromEur(0.75)) },
+  ),
+  electra: spread(
+    {
+      west: cell(dkkFromEur(0.54), dkkFromEur(0.69)),
+      dach: cell(dkkFromEur(0.54), dkkFromEur(0.79)),
+      benelux: cell(null, dkkFromEur(0.75)),
+      south: cell(null, dkkFromEur(0.72)),
+      nordic: cell(null, dkkFromEur(0.79)),
+      baltics: cell(null, dkkFromEur(0.79)),
+      east: cell(null, dkkFromEur(0.75)),
+      near: cell(null, null),
+    },
+    { BE: cell(dkkFromEur(0.54), dkkFromEur(0.75)), IT: cell(dkkFromEur(0.54), dkkFromEur(0.72)), LU: cell(null, dkkFromEur(0.75)), IE: cell(null, null) },
+  ),
+  enbw: spread(
+    {
+      dach: cell(dkkFromEur(0.59), dkkFromEur(0.73)),
+      nordic: cell(null, dkkFromEur(0.73)),
+      baltics: cell(null, dkkFromEur(0.73)),
+      benelux: cell(null, dkkFromEur(0.73)),
+      west: cell(null, dkkFromEur(0.73)),
+      south: cell(null, dkkFromEur(0.75)),
+      east: cell(null, dkkFromEur(0.7)),
+      near: cell(null, dkkFromEur(0.8)),
+    },
+    { AT: cell(dkkFromEur(0.59), dkkFromEur(0.85)), UK: cell(null, null), NO: cell(null, dkkFromEur(0.7)), CH: cell(dkkFromEur(0.59), dkkFromEur(0.8)) },
+  ),
+  clever: spread(
+    {
+      nordic: cell(4.99, 0),
+      dach: cell(null, 5.49),
+      benelux: cell(null, 5.49),
+      west: cell(null, 5.49),
+      south: cell(null, 5.49),
+      east: cell(null, 5.49),
+      baltics: cell(null, 5.49),
+      near: cell(null, null),
+    },
+    { FI: cell(null, 5.49), NO: cell(null, 5.49), CH: cell(null, 5.49) },
+  ),
+  eon: spread(
+    {
+      nordic: cell(3.95, 5.2),
+      dach: cell(dkkFromEur(0.61), dkkFromEur(0.79)),
+      benelux: cell(null, dkkFromEur(0.79)),
+      west: cell(null, dkkFromEur(0.79)),
+      south: cell(null, dkkFromEur(0.79)),
+      east: cell(null, dkkFromEur(0.72)),
+      baltics: cell(null, dkkFromEur(0.75)),
+      near: cell(null, dkkFromEur(0.79)),
+    },
+    { FI: cell(null, 5.2), UK: cell(null, null), CH: cell(null, dkkFromEur(0.79)) },
+  ),
+  spirii: spread({
+    nordic: cell(null, 3.7),
+    baltics: cell(null, dkkFromEur(0.72)),
+    dach: cell(null, dkkFromEur(0.79)),
+    benelux: cell(null, dkkFromEur(0.79)),
+    west: cell(null, dkkFromEur(0.75)),
+    south: cell(null, dkkFromEur(0.72)),
+    east: cell(null, dkkFromEur(0.68)),
+    near: cell(null, dkkFromEur(0.85)),
+  }),
+  shell: spread(
+    {
+      nordic: cell(dkkFromEur(0.62), dkkFromEur(0.75)),
+      baltics: cell(dkkFromEur(0.6), dkkFromEur(0.75)),
+      dach: cell(dkkFromEur(0.69), dkkFromEur(0.79)),
+      benelux: cell(dkkFromEur(0.69), dkkFromEur(0.79)),
+      west: cell(dkkFromEur(0.65), dkkFromEur(0.75)),
+      south: cell(dkkFromEur(0.62), dkkFromEur(0.72)),
+      east: cell(dkkFromEur(0.58), dkkFromEur(0.7)),
+      near: cell(dkkFromEur(0.7), dkkFromEur(0.82)),
+    },
+    { DK: cell(dkkFromEur(0.65), dkkFromEur(0.79)), UK: cell(dkkFromEur(0.72), dkkFromEur(0.85)), MT: cell(null, dkkFromEur(0.72)), CY: cell(null, dkkFromEur(0.72)) },
+  ),
+  aral: spread(
+    {
+      dach: cell(null, dkkFromEur(0.79)),
+      nordic: cell(null, dkkFromEur(0.79)),
+      baltics: cell(null, dkkFromEur(0.79)),
+      benelux: cell(null, dkkFromEur(0.79)),
+      west: cell(null, dkkFromEur(0.79)),
+      south: cell(null, dkkFromEur(0.79)),
+      east: cell(null, dkkFromEur(0.72)),
+      near: cell(null, null),
+    },
+    { DE: cell(dkkFromEur(0.79), dkkFromEur(0.79)), CH: cell(null, dkkFromEur(0.79)) },
+  ),
+  total: spread(
+    {
+      west: cell(dkkFromEur(0.59), dkkFromEur(0.69)),
+      benelux: cell(dkkFromEur(0.59), dkkFromEur(0.69)),
+      dach: cell(dkkFromEur(0.59), dkkFromEur(0.69)),
+      south: cell(dkkFromEur(0.55), dkkFromEur(0.65)),
+      nordic: cell(null, dkkFromEur(0.69)),
+      baltics: cell(null, dkkFromEur(0.69)),
+      east: cell(null, dkkFromEur(0.65)),
+      near: cell(null, dkkFromEur(0.75)),
+    },
+    { IE: cell(null, dkkFromEur(0.69)), UK: cell(null, null), CH: cell(null, dkkFromEur(0.69)) },
+  ),
 };
 
 export function regionalCell(n: ChargeNetwork, region: EuRegion): MarketCell | null {

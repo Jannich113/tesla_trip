@@ -16,7 +16,7 @@ import {
   asDateTime,
   waitDelayMin,
 } from "./modes.ts";
-import { rateForNetwork, networkIdFor, roamExtra, EU_NETWORKS, regionalOwn, regionalRoam } from "./networks.ts";
+import { rateForNetwork, networkIdFor, roamExtra, EU_NETWORKS, EU_REGIONS, regionalOwn, regionalRoam } from "./networks.ts";
 
 describe("leg modes", () => {
   it("eco is shortest + avoids highways and tolls", () => {
@@ -143,6 +143,16 @@ describe("leg modes", () => {
     const enbw = EU_NETWORKS.find((n) => n.id === "enbw")!;
     assert.equal(roamExtra(tesla, true), null);
     assert.ok(roamExtra(enbw, true)! > 1);
+  });
+
+  it("covers the whole EU plus near-EU road countries", () => {
+    const ids = EU_REGIONS.map((r) => r.id);
+    for (const need of ["PL", "IT", "ES", "FI", "IE", "GR", "RO", "NO", "CH"]) {
+      assert.ok(ids.includes(need as (typeof ids)[number]), need);
+    }
+    const tesla = EU_NETWORKS.find((n) => n.id === "tesla")!;
+    assert.ok(regionalOwn(tesla, "PL", false)! > 0);
+    assert.ok(regionalOwn(tesla, "ES", false)! > 0);
   });
 
   it("regional roam is cheaper in DK partners than DE IONITY", () => {

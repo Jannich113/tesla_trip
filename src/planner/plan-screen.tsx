@@ -44,7 +44,7 @@ import { HOME_USD_PER_KWH } from "@/lib/history";
 import { useChargeStore } from "@/store/charge-store";
 import { useElprisStore } from "@/store/elpris-store";
 import { useLiveElpris } from "./use-live-elpris";
-import { EU_NETWORKS, EU_REGIONS, type EuRegion, regionalExtra, regionalOwn, regionalRoam, roamExtra, roamRate } from "./networks";
+import { EU_BLOCS, EU_NETWORKS, EU_REGIONS, type EuRegion, regionalExtra, regionalOwn, regionalRoam, roamExtra, roamRate } from "./networks";
 import { useVehicleProfile } from "@/hooks/use-vehicle-profile";
 import { useVehicleStore } from "@/store/vehicle-store";
 
@@ -1182,6 +1182,8 @@ function NetworksPanel({
   onToggle: (id: string, on: boolean) => void;
 }) {
   const [region, setRegion] = useState<EuRegion>("DK");
+  const blocId = EU_REGIONS.find((r) => r.id === region)?.bloc ?? "nordic";
+  const bloc = EU_BLOCS.find((b) => b.id === blocId) ?? EU_BLOCS[0];
   const rows = [...EU_NETWORKS]
     .map((n) => {
       const on = Boolean(abo[n.id]);
@@ -1214,17 +1216,34 @@ function NetworksPanel({
           Roaming vs own · {region}
         </p>
         <div className="mt-2 flex flex-wrap gap-1 px-4">
-          {EU_REGIONS.map((r) => (
+          {EU_BLOCS.map((b) => (
             <button
-              key={r.id}
+              key={b.id}
               type="button"
-              onClick={() => setRegion(r.id)}
+              onClick={() => {
+                if (!b.ids.includes(region)) setRegion(b.ids[0]);
+              }}
               className={cn(
                 "h-8 rounded-full px-3 text-[11px] font-medium",
-                region === r.id ? "bg-foreground text-background" : "bg-surface-2 text-muted",
+                bloc.id === b.id ? "bg-foreground text-background" : "bg-surface-2 text-muted",
               )}
             >
-              {r.label}
+              {b.label}
+            </button>
+          ))}
+        </div>
+        <div className="mt-2 flex flex-wrap gap-1 px-4">
+          {bloc.ids.map((id) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setRegion(id)}
+              className={cn(
+                "h-8 rounded-full px-3 text-[11px] font-medium",
+                region === id ? "bg-foreground text-background" : "bg-surface-2 text-muted",
+              )}
+            >
+              {id}
             </button>
           ))}
         </div>
