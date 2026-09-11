@@ -6,6 +6,12 @@ export function normalizeMode(mode: string | null | undefined): LegMode {
   return "fastest";
 }
 
+export function stallKw(kind: "home" | "supercharger" | "custom", acKw: number) {
+  if (kind === "home") return Math.max(1, acKw);
+  if (kind === "supercharger") return 150;
+  return 75;
+}
+
 export const DETOUR_KM = [8, 12, 18, 30] as const;
 export type DetourKm = (typeof DETOUR_KM)[number];
 export const DEFAULT_DETOUR_KM = 12;

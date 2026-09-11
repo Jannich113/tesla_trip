@@ -886,7 +886,13 @@ export function PlanScreen() {
           <span className="text-subtle"> · </span>
           {totals.chargeKwh > 0 ? `${formatNumber(totals.chargeKwh, 1)} kWh charge` : `${formatNumber(soc, 0)}% start`}
           <span className="text-subtle"> · </span>
-          {minutesToHm(totals.min)}
+          {minutesToHm(totals.driveMin)} drive
+          {totals.min - totals.driveMin >= 5 ? (
+            <>
+              <span className="text-subtle"> · </span>
+              {minutesToHm(totals.min)} total
+            </>
+          ) : null}
         </p>
         <p className="mt-3 text-2xl font-medium tabular-nums">
           {formatKrValue(totals.kr, 2)} <span className="text-base text-muted">kr</span>

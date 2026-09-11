@@ -20,6 +20,7 @@ import {
   maxDateTime,
   minutesBetweenDateTime,
   splitDateTime,
+  stallKw,
   waitDelayMin,
   waitMinUntil,
   waitMinUntilDated,
@@ -67,6 +68,7 @@ export {
   MODE_FOCUSES,
   DEFAULT_MODE_FOCUS,
   pathMode,
+  stallKw,
   type DetourKm,
   type LegMode,
   type ModeFocus,
@@ -688,7 +690,7 @@ export function pricePlan(opts: {
     const wantCharge = required || suggested || focus === "pris" || userTarget != null;
     const kwhNeed = Math.max((target - soc) / 100, 0) * usableKwh;
     const autoKwh = Math.max((autoTarget - soc) / 100, 0) * usableKwh;
-    const chargeMinEst = (Math.max(kwhNeed, 5) / Math.max(acKw, 1)) * 60;
+    const chargeMinEst = (Math.max(kwhNeed, 5) / 150) * 60;
     const restDriveMin =
       route.seconds / 60 + jobs.reduce((n, j) => n + j.route.seconds / 60, 0);
     const slack = minutesBetweenDateTime(readyAt, plannedStart);
@@ -739,7 +741,7 @@ export function pricePlan(opts: {
       Boolean(userTarget != null) ||
       (suggested && Boolean(opts.acceptCharge?.[userIndex]));
     const billed = accepted && charge !== null;
-    const chargeMin = billed && charge ? (charge.kwh / Math.max(acKw, 1)) * 60 : 0;
+    const chargeMin = billed && charge ? (charge.kwh / stallKw(charge.kind, acKw)) * 60 : 0;
     const rawWait = billed && charge && charge.cheapWindow ? charge.waitMin : 0;
     const windowStart = addMinutesDateTime(readyAt, rawWait);
     const waitMin =

@@ -18,6 +18,7 @@ import {
   asDateTime,
   waitDelayMin,
   pathMode,
+  stallKw,
 } from "./modes.ts";
 import { rateForNetwork, networkIdFor, roamExtra, EU_NETWORKS, EU_REGIONS, regionalOwn, regionalRoam } from "./networks.ts";
 import { alongFraction, pickViaOnPath, splitRoutedLeg } from "./insert.ts";
@@ -156,6 +157,16 @@ describe("leg modes", () => {
       }),
       8 * 60,
     );
+  });
+
+  it("DC stalls are not timed at home AC kW", () => {
+    assert.equal(stallKw("supercharger", 11), 150);
+    assert.equal(stallKw("home", 11), 11);
+    const kwh = 177;
+    const dcMin = (kwh / stallKw("supercharger", 11)) * 60;
+    const acMin = (kwh / 11) * 60;
+    assert.ok(dcMin < 90);
+    assert.ok(acMin > 14 * 60);
   });
 
   it("superchargers map to Tesla network", () => {
