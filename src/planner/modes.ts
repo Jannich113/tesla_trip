@@ -34,10 +34,15 @@ export function modeLabel(mode: LegMode) {
   return "Fastest";
 }
 
+/** Do not redefine these.
+ *  eco = avoid motorways, tolls, road fees as much as possible
+ *  fastest = earliest arrival; motorways and tolls are fine
+ *  cheapest = lowest charging cost; optional avoid-fees uses eco roads
+ */
 export function modeHint(mode: LegMode) {
-  if (mode === "eco") return "Highway if a quiet road would add hours. 110 km/t cap.";
-  if (mode === "cheapest") return "Same road as Fastest. Lowest kWh along it.";
-  return "Earliest arrival. Motorways and tolls.";
+  if (mode === "eco") return "Avoids motorways, toll gates and road fees as much as possible.";
+  if (mode === "cheapest") return "Lowest charging cost. Optional: also skip motorways and tolls.";
+  return "Motorways and tolls for earliest arrival.";
 }
 
 export function modeColor(mode: LegMode) {
@@ -298,15 +303,14 @@ export function hoursFrom<T extends { hour: string; ymd?: string }>(hours: T[], 
   return next >= 0 ? hours.slice(next) : hours;
 }
 
-/** Eco: motorway with a 110 km/t cap. Fastest/cheapest: full highway. */
+/** Eco tries to skip motorways and tolls. Fastest/cheapest take the highway. */
 export function costingFor(mode: LegMode): AutoCosting {
   if (mode === "eco") {
     return {
       shortest: false,
-      use_highways: 1,
-      use_tolls: 0.4,
+      use_highways: 0,
+      use_tolls: 0,
       use_ferry: 0.2,
-      top_speed: 110,
     };
   }
   return {
@@ -314,6 +318,6 @@ export function costingFor(mode: LegMode): AutoCosting {
     use_highways: 1,
     use_tolls: 1,
     use_ferry: 0.2,
-    top_speed: mode === "cheapest" ? 130 : 140,
+    top_speed: 140,
   };
 }

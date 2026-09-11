@@ -123,11 +123,11 @@ function pickOsrm(routes: OsrmRoute[]) {
   );
 }
 
-async function osrm(from: Stop, to: Stop): Promise<DriveRouteJson | null> {
+async function osrm(from: Stop, to: Stop, extra = ""): Promise<DriveRouteJson | null> {
   const url =
     `https://router.project-osrm.org/route/v1/driving/` +
     `${from.lng},${from.lat};${to.lng},${to.lat}` +
-    `?overview=simplified&geometries=geojson&alternatives=false`;
+    `?overview=simplified&geometries=geojson&alternatives=false${extra}`;
   const res = await fetch(url, { headers: { Accept: "application/json" } });
   if (!res.ok) return null;
   const body = (await res.json()) as { routes?: OsrmRoute[] };
@@ -145,7 +145,7 @@ async function osrm(from: Stop, to: Stop): Promise<DriveRouteJson | null> {
       path: simplifyPath(path, 160),
       source: "osrm",
     },
-    "fastest",
+    extra.includes("motorway") ? "eco" : extra.includes("toll") ? "eco" : "fastest",
     false,
   );
 }
@@ -161,19 +161,30 @@ async function highway(from: Stop, to: Stop): Promise<DriveRouteJson | null> {
   );
 }
 
+function usable(route: DriveRouteJson | null, from: Stop, to: Stop, capSec: number) {
+  return Boolean(
+    route &&
+      anchored(route.path, from, to) &&
+      route.seconds > 0 &&
+      route.seconds <= capSec,
+  );
+}
+
 export async function routeDrive(from: Stop, to: Stop, mode: LegMode): Promise<DriveRouteJson | null> {
   const base = await highway(from, to);
   if (!base) return null;
-  if (mode !== "eco") return withTolls(base, mode, Boolean(base.hasToll));
-  const eco = await valhalla(from, to, "eco").catch(() => null);
-  if (
-    eco &&
-    anchored(eco.path, from, to) &&
-    eco.seconds > 0 &&
-    eco.seconds <= base.seconds * 1.25
-  ) {
-    return withTolls(eco, "eco", Boolean(eco.hasToll));
+  if (mode === "fastest" || mode === "cheapest") {
+    return withTolls(base, mode, Boolean(base.hasToll));
   }
+  const cap = base.seconds * 1.5;
+  const [noHwy, noToll, ecoV] = await Promise.all([
+    osrm(from, to, "&exclude=motorway,toll").catch(() => null),
+    osrm(from, to, "&exclude=toll").catch(() => null),
+    valhalla(from, to, "eco").catch(() => null),
+  ]);
+  if (usable(noHwy, from, to, cap)) return withTolls(noHwy!, "eco", Boolean(noHwy!.hasToll));
+  if (usable(noToll, from, to, cap)) return withTolls(noToll!, "eco", Boolean(noToll!.hasToll));
+  if (usable(ecoV, from, to, cap)) return withTolls(ecoV!, "eco", Boolean(ecoV!.hasToll));
   return withTolls(base, "eco", Boolean(base.hasToll));
 }
 

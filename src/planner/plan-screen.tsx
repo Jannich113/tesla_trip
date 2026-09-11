@@ -861,7 +861,7 @@ export function PlanScreen() {
                       onChange={(e) => setCheapAvoidFees(e.target.checked)}
                       className="size-4 accent-foreground"
                     />
-                    Also skip motorways
+                    Avoid motorways, toll gates and road fees
                   </label>
                 ) : null}
                 </div>
@@ -1251,7 +1251,7 @@ export function PlanScreen() {
                           onChange={(e) => setCheapAvoidFees(e.target.checked)}
                           className="size-4 accent-foreground"
                         />
-                        Also skip motorways
+                        Avoid motorways, toll gates and road fees
                       </label>
                     ) : null}
                     <div className="mt-3 flex gap-1">

@@ -31,12 +31,11 @@ import { encodePolyline, decodePolyline, polylineBufferKm, chargersOnPath, simpl
 import { countryProfile } from "./country-profiles.ts";
 
 describe("leg modes", () => {
-  it("eco discourages highways and skips tolls", () => {
+  it("eco avoids highways and tolls", () => {
     const c = costingFor("eco");
     assert.equal(c.shortest, false);
-    assert.equal(c.use_highways, 1);
-    assert.ok(c.use_tolls < 1);
-    assert.equal(c.top_speed, 110);
+    assert.equal(c.use_highways, 0);
+    assert.equal(c.use_tolls, 0);
   });
 
   it("fastest prefers highways and tolls", () => {
