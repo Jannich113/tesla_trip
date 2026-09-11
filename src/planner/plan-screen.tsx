@@ -821,9 +821,6 @@ export function PlanScreen() {
                           {formatDistance(t.mi, units, t.mi >= 100 ? 0 : 1)}
                           <span className="text-subtle"> · </span>
                           {minutesToHm(t.driveMin)} drive
-                          {row.mode === "eco" && fastest && t.driveMin - fastest.driveMin >= 30
-                            ? ` · +${minutesToHm(t.driveMin - fastest.driveMin)} vs Fastest`
-                            : ""}
                           <span className="text-subtle"> · </span>
                           avg {formatNumber(row.kmh, 0)} km/t
                           {row.mode === "cheapest"

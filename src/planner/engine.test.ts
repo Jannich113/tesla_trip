@@ -281,18 +281,18 @@ describe("leg modes", () => {
     assert.equal(estimateTolls(path, 12, false, "eco").kr, 268);
   });
 
-  it("does not zero motorway tolls just because the mode is eco", () => {
+  it("motorway km tolls apply to fastest and cheapest, not eco", () => {
     const path: [number, number][] = [
       [48.85, 2.35],
       [45.75, 4.85],
       [43.3, 5.4],
     ];
-    const fast = estimateTolls(path, 480, true, "fastest");
-    const ecoHwy = estimateTolls(path, 480, true, "eco");
-    const ecoFree = estimateTolls(path, 520, false, "eco");
+    const fast = estimateTolls(path, 480, false, "fastest");
+    const cheap = estimateTolls(path, 480, false, "cheapest");
+    const eco = estimateTolls(path, 480, true, "eco");
     assert.ok(fast.kr > 200);
-    assert.equal(ecoHwy.kr, fast.kr);
-    assert.equal(ecoFree.kr, 0);
+    assert.equal(cheap.kr, fast.kr);
+    assert.equal(eco.kr, 0);
   });
 
   it("seeds IONITY and Tesla on a Kolding–Padborg corridor", () => {

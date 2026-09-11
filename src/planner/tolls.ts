@@ -37,13 +37,16 @@ function kmRateAt(lat: number, lng: number) {
   return hit?.kr ?? 0;
 }
 
-export function estimateTolls(path: [number, number][], miles: number, hasToll: boolean, _mode: LegMode) {
+export function estimateTolls(path: [number, number][], miles: number, hasToll: boolean, mode: LegMode) {
   const gates = gatesOnPath(path);
   const gateKr = gates.reduce((n, g) => n + g.kr, 0);
-  const mid = path[Math.floor(path.length / 2)] ?? path[0];
+  const rate =
+    path.length > 0
+      ? path.reduce((n, [lat, lng]) => n + kmRateAt(lat, lng), 0) / path.length
+      : 0;
   const km = miles * 1.609344;
-  const roadKr = hasToll && mid ? km * kmRateAt(mid[0], mid[1]) : 0;
+  const roadKr = mode !== "eco" && (hasToll || rate > 0) ? km * rate : 0;
   const kr = Math.round((gateKr + roadKr) * 10) / 10;
-  const label = gates.length ? gates.map((g) => g.name).join(" · ") : hasToll ? "Road toll" : "";
-  return { kr, label, hasToll: hasToll || gates.length > 0, gates };
+  const label = gates.length ? gates.map((g) => g.name).join(" · ") : roadKr > 1 ? "Road toll" : "";
+  return { kr, label, hasToll: hasToll || gates.length > 0 || roadKr > 1, gates };
 }
