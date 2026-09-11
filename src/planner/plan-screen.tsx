@@ -127,6 +127,7 @@ export function PlanScreen() {
     fastest: true,
     cheapest: true,
   });
+  const [openStops, setOpenStops] = useState<Record<string, boolean>>({});
   const { data: elpris, error: elprisError, loading: elprisLoading } = useLiveElpris(area);
 
   useEffect(() => {
@@ -306,6 +307,11 @@ export function PlanScreen() {
     toast(`Added ${loc.short || loc.name} as a stop`);
   }
 
+  function openLegStop(legIndex: number) {
+    const dest = stops[legIndex + 1];
+    if (dest) setOpenStops((cur) => ({ ...cur, [dest.id]: true }));
+  }
+
   function onMapSelect(id: string) {
     setSelected(id);
     const chg = /^chg-(\d+)-(.+)$/.exec(id);
@@ -317,6 +323,7 @@ export function PlanScreen() {
       if (leg.backup?.locationId === locId) {
         setPrefer((cur) => ({ ...cur, [i]: locId }));
         toast("Backup charger selected");
+        openLegStop(i);
       } else if (leg.charge?.locationId === locId) {
         setPrefer((cur) => {
           const next = { ...cur };
@@ -324,6 +331,7 @@ export function PlanScreen() {
           return next;
         });
       }
+      openLegStop(i);
       return;
     }
     const opt = /^opt-(eco|standard|fastest|cheapest)-(\d+)$/.exec(id);
@@ -332,6 +340,7 @@ export function PlanScreen() {
       const i = Number(opt[2]);
       setLegMode(i, mode);
       setSelected(`leg-${i}`);
+      openLegStop(i);
     }
   }
 
@@ -725,80 +734,63 @@ export function PlanScreen() {
         <ol className="mt-2">
           {stops.map((stop, i) => {
             const leg = i > 0 ? viewLegs[i - 1] : null;
+            const open = Boolean(openStops[stop.id]);
+            const selectedHere =
+              selected === stop.id ||
+              selected === `leg-${i - 1}` ||
+              Boolean(selected?.startsWith(`chg-${i - 1}-`));
             return (
               <li
                 key={stop.id}
                 className={cn(
                   "border-b border-border py-3 last:border-0",
-                  (selected === stop.id ||
-                    selected === `leg-${i - 1}` ||
-                    selected?.startsWith(`chg-${i - 1}-`)) &&
-                    "rounded-xl bg-surface-2/80 px-2",
+                  selectedHere && "rounded-xl bg-surface-2/80 px-2",
                 )}
               >
-                <div
-                  className="flex items-center gap-3"
-                  onClick={() => setSelected(i > 0 ? `leg-${i - 1}` : stop.id)}
-                >
-                  <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-surface-2 text-xs tabular-nums text-muted">
-                    {i + 1}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm">{stop.name}</p>
-                    {leg ? (
-                      <p className="text-xs text-muted">
-                        {formatDateTime(leg.departAt)}–{formatDateTime(leg.arriveAt)}
-                        <span className="text-subtle"> · </span>
-                        {modeLabel(leg.mode)}
-                        <span className="text-subtle"> · </span>
-                        {formatDistance(leg.route.miles, units, 1)}
-                        <span className="text-subtle"> · </span>
-                        {formatNumber(leg.kwh, 1)} kWh
-                        <span className="text-subtle"> · </span>
-                        {formatNumber(leg.arriveSoc, 0)}% in
-                        {leg.needed ? (
-                          <span className="font-medium text-amber-300"> · charge required</span>
-                        ) : leg.suggested && leg.charge ? (
-                          <span className="font-medium text-emerald-400"> · suggested</span>
-                        ) : null}
-                      </p>
-                    ) : (
-                      <p className="text-xs text-muted">{formatNumber(soc, 0)}% now · leave {formatDateTime(departHhmm)}</p>
-                    )}
-                  </div>
-                  {i > 0 ? (
-                    <div className="flex shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => moveStop(stop.id, -1)}
-                        disabled={i <= 1}
-                        className="flex size-9 items-center justify-center rounded-full text-muted disabled:opacity-30"
-                        aria-label={`Move ${stop.name} up`}
-                      >
-                        <ChevronUp className="size-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => moveStop(stop.id, 1)}
-                        disabled={i >= stops.length - 1}
-                        className="flex size-9 items-center justify-center rounded-full text-muted disabled:opacity-30"
-                        aria-label={`Move ${stop.name} down`}
-                      >
-                        <ChevronDown className="size-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => removeStop(stop.id)}
-                        className="flex size-9 items-center justify-center rounded-full text-muted"
-                        aria-label={`Remove ${stop.name}`}
-                      >
-                        <Trash2 className="size-4" />
-                      </button>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                    onClick={() => {
+                      setSelected(i > 0 ? `leg-${i - 1}` : stop.id);
+                      if (i > 0) setOpenStops((cur) => ({ ...cur, [stop.id]: !cur[stop.id] }));
+                    }}
+                  >
+                    <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-surface-2 text-xs tabular-nums text-muted">
+                      {i + 1}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm">{stop.name}</p>
+                      {leg ? (
+                        <p className="text-xs text-muted">
+                          {modeLabel(leg.mode)}
+                          {leg.needed ? (
+                            <span className="font-medium text-amber-300"> · required</span>
+                          ) : leg.suggested ? (
+                            <span className="font-medium text-emerald-400"> · suggested</span>
+                          ) : null}
+                        </p>
+                      ) : (
+                        <p className="text-xs text-muted">{formatNumber(soc, 0)}% now</p>
+                      )}
                     </div>
+                    {i > 0 ? (
+                      <ChevronDown className={cn("size-4 shrink-0 text-muted transition", open && "rotate-180")} />
+                    ) : null}
+                  </button>
+                  {i > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => removeStop(stop.id)}
+                      className="flex size-9 shrink-0 items-center justify-center rounded-full text-muted"
+                      aria-label={`Remove ${stop.name}`}
+                    >
+                      <Trash2 className="size-4" />
+                    </button>
                   ) : null}
                 </div>
                 {i > 0 ? (
-                  <div className="mt-3 pl-10">
+                  <div className="mt-2 pl-10">
                     <div className="flex rounded-full bg-surface-2 p-1">
                       {LEG_MODES.map((mode) => {
                         const on = (modes[i - 1] ?? "standard") === mode;
@@ -817,9 +809,31 @@ export function PlanScreen() {
                         );
                       })}
                     </div>
-                    <p className="mt-2 text-[11px] text-subtle">
+                    {open ? (
+                      <div className="mt-3">
+                    <p className="text-[11px] text-subtle">
                       {modeHint((modes[i - 1] ?? "standard") as LegMode)}
                     </p>
+                    <div className="mt-3 flex gap-1">
+                      <button
+                        type="button"
+                        onClick={() => moveStop(stop.id, -1)}
+                        disabled={i <= 1}
+                        className="flex h-8 flex-1 items-center justify-center rounded-full bg-surface-2 text-muted disabled:opacity-30"
+                        aria-label={`Move ${stop.name} up`}
+                      >
+                        <ChevronUp className="size-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => moveStop(stop.id, 1)}
+                        disabled={i >= stops.length - 1}
+                        className="flex h-8 flex-1 items-center justify-center rounded-full bg-surface-2 text-muted disabled:opacity-30"
+                        aria-label={`Move ${stop.name} down`}
+                      >
+                        <ChevronDown className="size-4" />
+                      </button>
+                    </div>
                     <div className="mt-3 grid grid-cols-2 gap-2">
                       <div className="flex rounded-full bg-surface-2 p-1">
                         {(["auto", "depart", "arrive"] as const).map((kind) => {
@@ -931,6 +945,8 @@ export function PlanScreen() {
                         ) : (
                           <p className="text-[11px] text-subtle">No backup in this detour</p>
                         )}
+                      </div>
+                    ) : null}
                       </div>
                     ) : null}
                   </div>
