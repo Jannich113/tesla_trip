@@ -20,6 +20,17 @@ export type SavedPlan = {
   whPerMi: number | null;
   speedEff: SpeedEff | null;
   savedAt: string;
+  startAt?: string;
+  min?: number;
+  kr?: number;
+  mi?: number;
+};
+
+export type PlanSummary = {
+  startAt?: string;
+  min?: number;
+  kr?: number;
+  mi?: number;
 };
 
 function homeStop(): PlanStop {
@@ -69,7 +80,7 @@ type PlanStore = PlanState & {
   setSpeedEff: (next: SpeedEff | null) => void;
   setNetworkAbo: (id: string, on: boolean) => void;
   insertStopAt: (index: number, stop: Omit<PlanStop, "id"> & { id?: string }) => void;
-  savePlan: (label?: string) => SavedPlan | null;
+  savePlan: (label?: string, summary?: PlanSummary) => SavedPlan | null;
   loadPlan: (id: string) => void;
   deleteSaved: (id: string) => void;
   reset: () => void;
@@ -220,7 +231,7 @@ export const usePlanStore = create<PlanStore>()(
         set({ legWhen });
       },
 
-      savePlan: (given) => {
+      savePlan: (given, summary) => {
         const { name, stops, modes, cheapAvoidFees, detours, waits, whenKind, when, legWhen, whPerMi, speedEff, saved, seq } = get();
         if (stops.length < 2) return null;
         const label = (given ?? name).trim();
@@ -239,6 +250,10 @@ export const usePlanStore = create<PlanStore>()(
           whPerMi,
           speedEff,
           savedAt: new Date().toISOString(),
+          startAt: summary?.startAt || when || undefined,
+          min: summary?.min,
+          kr: summary?.kr,
+          mi: summary?.mi,
         };
         set({
           seq: seq + 1,

@@ -527,7 +527,12 @@ export function PlanScreen() {
       return;
     }
     setName(label);
-    const plan = savePlan(label);
+    const plan = savePlan(label, {
+      startAt: viewLegs[0]?.departAt || departHhmm || clock,
+      min: totals.min,
+      kr: totals.kr,
+      mi: totals.mi,
+    });
     if (!plan) {
       toast("Add a destination first");
       return;
@@ -971,7 +976,14 @@ export function PlanScreen() {
                 >
                   <p className="truncate text-sm">{plan.name}</p>
                   <p className="text-xs text-muted">
-                    {plan.stops.length} stops · {plan.stops.map((s) => s.name).join(" → ")}
+                    {plan.startAt || plan.when
+                      ? formatDateTime(plan.startAt || plan.when)
+                      : `${plan.stops.length} stops`}
+                    {plan.min != null && Number.isFinite(plan.min) ? ` · ${minutesToHm(plan.min)}` : ""}
+                    {plan.kr != null && Number.isFinite(plan.kr) ? ` · ${formatKrValue(plan.kr, 0)} kr` : ""}
+                  </p>
+                  <p className="truncate text-[11px] text-subtle">
+                    {plan.stops.map((s) => s.name).join(" → ")}
                   </p>
                 </button>
                 <button
