@@ -7,7 +7,8 @@ const SESSION_COOKIE = "juniper_owner";
 const STATE_COOKIE = "juniper_owner_state";
 const AUTH = "https://auth.tesla.com/oauth2/v3/authorize";
 const TOKEN = "https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/token";
-const DEFAULT_AUDIENCE = "https://fleet-api.prd.na.vn.cloud.tesla.com";
+/** EU Fleet API (Denmark). Override with TESLA_AUDIENCE if needed. */
+const DEFAULT_AUDIENCE = "https://fleet-api.prd.eu.vn.cloud.tesla.com";
 
 type OwnerSession = {
   sub: string;
