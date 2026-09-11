@@ -1,4 +1,5 @@
 import { costingFor, type LegMode } from "./modes";
+import { estimateTolls } from "./tolls";
 
 type Stop = { lat: number; lng: number };
 
@@ -7,11 +8,19 @@ export type DriveRouteJson = {
   seconds: number;
   path: [number, number][];
   source: "valhalla" | "osrm";
+  hasToll?: boolean;
+  tollKr?: number;
+  tollLabel?: string;
 };
+
+function withTolls(route: DriveRouteJson, mode: LegMode, hasToll = false): DriveRouteJson {
+  const toll = estimateTolls(route.path, route.miles, hasToll, mode);
+  return { ...route, hasToll: toll.hasToll, tollKr: toll.kr, tollLabel: toll.label };
+}
 
 function pickValhallaTrip(
   trips: Array<{
-    summary?: { length?: number; time?: number };
+    summary?: { length?: number; time?: number; has_toll?: boolean };
     legs?: Array<{ shape?: { coordinates?: [number, number][] } | string }>;
   }>,
   mode: LegMode,
@@ -60,12 +69,12 @@ async function valhalla(from: Stop, to: Stop, mode: LegMode): Promise<DriveRoute
   if (!res.ok) return null;
   const body = (await res.json()) as {
     trip?: {
-      summary?: { length?: number; time?: number };
+      summary?: { length?: number; time?: number; has_toll?: boolean };
       legs?: Array<{ shape?: { coordinates?: [number, number][] } | string }>;
     };
     alternates?: Array<{
       trip?: {
-        summary?: { length?: number; time?: number };
+        summary?: { length?: number; time?: number; has_toll?: boolean };
         legs?: Array<{ shape?: { coordinates?: [number, number][] } | string }>;
       };
     }>;
@@ -77,12 +86,16 @@ async function valhalla(from: Stop, to: Stop, mode: LegMode): Promise<DriveRoute
   const summary = trip?.summary;
   const path = pathFromShape(trip?.legs?.[0]?.shape);
   if (!summary || path.length < 2) return null;
-  return {
-    miles: Number(summary.length) || 0,
-    seconds: Number(summary.time) || 0,
-    path,
-    source: "valhalla",
-  };
+  return withTolls(
+    {
+      miles: Number(summary.length) || 0,
+      seconds: Number(summary.time) || 0,
+      path,
+      source: "valhalla",
+    },
+    mode,
+    Boolean(summary.has_toll),
+  );
 }
 
 type OsrmRoute = {
@@ -121,12 +134,16 @@ async function osrmOnce(from: Stop, to: Stop, mode: LegMode, extra: string): Pro
     if (Number.isFinite(lat) && Number.isFinite(lng)) path.push([lat, lng]);
   }
   if (!route || path.length < 2) return null;
-  return {
-    miles: (Number(route.distance) || 0) / 1609.344,
-    seconds: Number(route.duration) || 0,
-    path,
-    source: "osrm",
-  };
+  return withTolls(
+    {
+      miles: (Number(route.distance) || 0) / 1609.344,
+      seconds: Number(route.duration) || 0,
+      path,
+      source: "osrm",
+    },
+    mode,
+    false,
+  );
 }
 
 async function osrm(from: Stop, to: Stop, mode: LegMode): Promise<DriveRouteJson | null> {

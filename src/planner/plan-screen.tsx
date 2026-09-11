@@ -45,6 +45,8 @@ import { useChargeStore } from "@/store/charge-store";
 import { useElprisStore } from "@/store/elpris-store";
 import { NETWORK_NATIVE, scaleCatalogKr, type FxTable } from "./charge-fx";
 import { countryProfile } from "./country-profiles";
+import { minDistToPathM } from "./insert";
+import { useRouteChargers } from "./use-route-chargers";
 import { useChargePrices } from "./use-charge-prices";
 import { useLiveElpris } from "./use-live-elpris";
 import { EU_BLOCS, EU_NETWORKS, EU_REGIONS, type EuRegion, regionalExtra, regionalOwn, regionalRoam, roamExtra, roamRate } from "./networks";
@@ -87,7 +89,7 @@ export function PlanScreen() {
   const soc = useVehicleStore((s) => s.soc);
   const shareLocation = useVehicleStore((s) => s.shareLocation);
   const { profile } = useVehicleProfile();
-  const locations = useChargeStore((s) => s.locations);
+  const locationsStored = useChargeStore((s) => s.locations);
   const area = useElprisStore((s) => s.area);
   const providerId = useElprisStore((s) => s.providerId);
   const provider = useMemo(() => providerById(providerId), [providerId]);
@@ -235,6 +237,42 @@ export function PlanScreen() {
   const selectedRoutes = mixed
     ? stops.slice(0, -1).map((_, i) => routeMap[routeKey(stops[i], stops[i + 1], activeModes[i] ?? "standard")]).filter((r): r is RoutedLeg => Boolean(r))
     : routes;
+
+  const searchRoutes = useMemo(() => {
+    const all: RoutedLeg[] = [];
+    const seen = new Set<string>();
+    for (const r of selectedRoutes) {
+      const k = `${r.path[0]?.join()}-${r.path.at(-1)?.join()}-${r.miles.toFixed(1)}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      all.push(r);
+    }
+    for (const mode of LEG_MODES) {
+      for (const r of routesFor(mode)) {
+        const k = `${r.path[0]?.join()}-${r.path.at(-1)?.join()}-${mode}`;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        all.push(r);
+      }
+    }
+    return all;
+  }, [selectedRoutes, routeMap, stops]);
+
+  const { chargers: routeChargers, loading: chargersLoading } = useRouteChargers(searchRoutes);
+
+  const locations = useMemo(() => {
+    const paths = searchRoutes.map((r) => r.path).filter((p) => p.length >= 2);
+    const europe = paths.some((p) => p.some(([lat, lng]) => lat > 34 && lng > -12 && lng < 42));
+    const keep = locationsStored.filter((l) => {
+      if (l.id.startsWith("osm-")) return false;
+      if (europe && l.preset && l.lng < -20) return false;
+      if (l.kind === "home" || !l.preset) return true;
+      return paths.some((p) => minDistToPathM(l.lat, l.lng, p) < 80_000);
+    });
+    const byId = new Map(keep.map((l) => [l.id, l]));
+    for (const c of routeChargers) byId.set(c.id, c);
+    return [...byId.values()];
+  }, [locationsStored, routeChargers, searchRoutes]);
 
   const driveMinGuess = selectedRoutes.reduce((n, r) => n + r.seconds / 60, 0);
   const departHhmm =
@@ -720,6 +758,10 @@ export function PlanScreen() {
           {formatKrValue(totals.kr, 2)} <span className="text-base text-muted">kr</span>
         </p>
         <p className="mt-1 text-xs text-subtle">
+          {totals.tollKr > 0
+            ? `Toll ${formatKrValue(totals.tollKr, 0)} kr${viewLegs.find((l) => l.tollLabel)?.tollLabel ? ` · ${[...new Set(viewLegs.map((l) => l.tollLabel).filter(Boolean))].join(" · ")}` : ""} · `
+            : ""}
+          {chargersLoading ? "Finding chargers along route · " : routeChargers.length ? `${routeChargers.length} chargers on corridor · ` : ""}
           {whenKind === "arrive" ? `Arrive ${formatDateTime(clock)}` : `Leave ${formatDateTime(departHhmm)}`}
           {viewLegs[0] ? ` · first window ${formatDateTime(viewLegs[0].departAt)}` : ""}
           {totals.requiredKwh > 0 ? ` · ${formatNumber(totals.requiredKwh, 1)} kWh required` : ""}

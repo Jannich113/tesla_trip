@@ -28,6 +28,7 @@ import {
   pickViaOnPath,
   splitRoutedLeg,
 } from "./insert";
+import { estimateTolls } from "./tolls";
 
 export { alongFraction, haversineM, minDistToPathM, pathMeters, pickViaOnPath, splitRoutedLeg } from "./insert";
 
@@ -76,6 +77,9 @@ export type RoutedLeg = {
   seconds: number;
   path: [number, number][];
   source: "valhalla" | "osrm" | "air";
+  hasToll?: boolean;
+  tollKr?: number;
+  tollLabel?: string;
 };
 
 export type PricedCharge = {
@@ -122,6 +126,8 @@ export type PricedLeg = {
   userIndex: number;
   /** `to` was auto-inserted because the user leg was longer than range. */
   via: boolean;
+  tollKr: number;
+  tollLabel: string;
 };
 
 export const DKK_PER_USD = 6.85;
@@ -133,14 +139,19 @@ const CHEAP_VS_LIVE = 0.85;
 export function airRoute(from: PlanStop, to: PlanStop): RoutedLeg {
   const m = haversineM(from, to) * 1.22;
   const miles = m / 1609.344;
+  const path: [number, number][] = [
+    [from.lat, from.lng],
+    [to.lat, to.lng],
+  ];
+  const toll = estimateTolls(path, miles, false, "standard");
   return {
     miles,
     seconds: (miles / 42) * 3600,
-    path: [
-      [from.lat, from.lng],
-      [to.lat, to.lng],
-    ],
+    path,
     source: "air",
+    hasToll: toll.hasToll,
+    tollKr: toll.kr,
+    tollLabel: toll.label,
   };
 }
 
@@ -683,6 +694,7 @@ export function pricePlan(opts: {
         : charge
           ? { ...charge, waitMin }
           : null;
+    const toll = estimateTolls(route.path, route.miles, Boolean(route.hasToll), mode);
     out.push({
       from: job.from,
       to: job.to,
@@ -701,13 +713,15 @@ export function pricePlan(opts: {
       startSoc,
       charge: pricedCharge,
       backup,
-      kr: billed ? (charge?.kr ?? 0) : 0,
+      kr: (billed ? (charge?.kr ?? 0) : 0) + toll.kr,
       accepted,
       autoStartSoc: autoTarget,
       extraKr,
       chargeOptions: pick?.options ?? [],
       userIndex,
       via,
+      tollKr: toll.kr,
+      tollLabel: toll.label,
     });
     soc = arriveSoc;
     readyAt = arriveAt;
@@ -722,6 +736,7 @@ export function planTotals(legs: PricedLeg[]) {
       acc.mi += leg.route.miles;
       acc.kwh += leg.kwh;
       acc.kr += leg.kr;
+      acc.tollKr += leg.tollKr;
       acc.driveMin += leg.route.seconds / 60;
       acc.chargeMin += leg.chargeMin;
       acc.waitMin += leg.waitMin;
@@ -735,6 +750,7 @@ export function planTotals(legs: PricedLeg[]) {
       mi: 0,
       kwh: 0,
       kr: 0,
+      tollKr: 0,
       min: 0,
       driveMin: 0,
       chargeMin: 0,

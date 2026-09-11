@@ -18,6 +18,8 @@ import {
 } from "./modes.ts";
 import { rateForNetwork, networkIdFor, roamExtra, EU_NETWORKS, EU_REGIONS, regionalOwn, regionalRoam } from "./networks.ts";
 import { alongFraction, pickViaOnPath, splitRoutedLeg } from "./insert.ts";
+import { networkFromOsmTags, isDcStation } from "./osm-operator.ts";
+import { estimateTolls, gatesOnPath } from "./tolls.ts";
 import { toDkk, CATALOG_FX, NETWORK_NATIVE } from "./charge-fx.ts";
 import { countryProfile } from "./country-profiles.ts";
 
@@ -211,5 +213,25 @@ describe("leg modes", () => {
     assert.ok(split!.before.miles < route.miles);
     assert.ok(split!.after.miles < route.miles);
     assert.ok(Math.abs(split!.before.miles + split!.after.miles - route.miles) < 0.01);
+  });
+
+  it("maps OSM operators to catalog networks", () => {
+    assert.equal(networkFromOsmTags({ operator: "IONITY GmbH", name: "IONITY Padborg" }), "ionity");
+    assert.equal(networkFromOsmTags({ brand: "Tesla", "tesla:supercharger": "yes" }), "tesla");
+    assert.equal(networkFromOsmTags({ operator: "Mer", amenity: "charging_station" }), "mer");
+    assert.equal(networkFromOsmTags({ operator: "Clever", name: "Clever Kolding" }), "clever");
+    assert.ok(isDcStation({ "socket:ccs": "2", "charging_station:output": "150 kW" }));
+  });
+
+  it("prices Storebælt when the path crosses the bridge", () => {
+    const path: [number, number][] = [
+      [55.33, 10.9],
+      [55.3417, 10.9944],
+      [55.36, 11.1],
+    ];
+    assert.equal(gatesOnPath(path)[0]?.id, "storebaelt");
+    const toll = estimateTolls(path, 12, false, "fastest");
+    assert.ok(toll.kr >= 268);
+    assert.equal(estimateTolls(path, 12, false, "eco").kr, 268);
   });
 });
