@@ -29,9 +29,9 @@ export function modeLabel(mode: LegMode) {
 }
 
 export function modeHint(mode: LegMode) {
-  if (mode === "eco") return "Most efficient path — shorter roads, fewer highways and tolls";
-  if (mode === "cheapest") return "Uses the fastest roads, then hunts cheaper charging nearby";
-  return "Highways and tolls for earliest arrival";
+  if (mode === "eco") return "Avoids motorways, toll gates and road fees";
+  if (mode === "cheapest") return "Lowest charging cost — looks farther for a cheaper stall";
+  return "Motorways and tolls for earliest arrival. Road fees don't matter.";
 }
 
 export function modeColor(mode: LegMode) {
@@ -44,8 +44,8 @@ export const MODE_FOCUSES = ["distance", "pris", "time"] as const;
 export type ModeFocus = (typeof MODE_FOCUSES)[number];
 
 export function defaultFocus(mode: LegMode): ModeFocus {
-  if (mode === "cheapest") return "time";
-  if (mode === "fastest") return "pris";
+  if (mode === "cheapest") return "pris";
+  if (mode === "fastest") return "time";
   return "distance";
 }
 
@@ -69,8 +69,8 @@ export function focusHint(focus: ModeFocus) {
 
 export const DEFAULT_MODE_FOCUS: Record<LegMode, ModeFocus> = {
   eco: "distance",
-  fastest: "pris",
-  cheapest: "time",
+  fastest: "time",
+  cheapest: "pris",
 };
 
 /** Time always takes the highway/fastest corridor. */
@@ -302,21 +302,21 @@ export function hoursFrom<T extends { hour: string; ymd?: string }>(hours: T[], 
   return next >= 0 ? hours.slice(next) : hours;
 }
 
-/** Eco = efficient distance. Standard/cheapest = recommended time. Fastest = time on highways. */
+/** Eco = no motorways or tolls. Fastest = highways. Cheapest = fastest roads, cheap stalls. */
 export function costingFor(mode: LegMode): AutoCosting {
   if (mode === "eco") {
     return {
       shortest: true,
-      use_highways: 0.1,
+      use_highways: 0,
       use_tolls: 0,
-      use_ferry: 0.25,
+      use_ferry: 0.15,
     };
   }
   return {
     shortest: false,
     use_highways: 1,
     use_tolls: 1,
-    use_ferry: 0.15,
+    use_ferry: 0.2,
     top_speed: 140,
   };
 }

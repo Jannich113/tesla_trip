@@ -32,7 +32,7 @@ describe("leg modes", () => {
   it("eco is shortest + avoids highways and tolls", () => {
     const c = costingFor("eco");
     assert.equal(c.shortest, true);
-    assert.ok(c.use_highways < 0.2);
+    assert.equal(c.use_highways, 0);
     assert.equal(c.use_tolls, 0);
   });
 
@@ -54,6 +54,12 @@ describe("leg modes", () => {
     assert.equal(formatWaitCap(0), "0");
     assert.equal(formatWaitCap(30), "30m");
     assert.equal(formatWaitCap(120), "2h");
+  });
+
+  it("default focus matches the mode", () => {
+    assert.equal(pathMode("eco", "distance"), "eco");
+    assert.equal(pathMode("fastest", "time"), "fastest");
+    assert.equal(pathMode("cheapest", "pris"), "fastest");
   });
 
   it("time takes the highway corridor at 130 km/t", () => {

@@ -705,7 +705,7 @@ export function PlanScreen() {
 
         <p className="mt-5 text-[11px] font-medium uppercase tracking-wide text-muted">Route options</p>
         <p className="mt-1 text-[11px] text-subtle">
-          Eco · distance. Fastest · pris. Cheapest · time (highway). Switch any to pris, time, or distance.
+          Eco skips motorways and tolls. Fastest takes them. Cheapest hunts the lowest kWh.
         </p>
         <ul className="mt-2 divide-y divide-border rounded-xl bg-surface-2">
           {optionRows.map((row) => {

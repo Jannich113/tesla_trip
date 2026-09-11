@@ -28,9 +28,12 @@ function pickValhallaTrip(
 ) {
   if (!trips.length) return null;
   if (mode === "eco") {
-    return trips.reduce((best, trip) =>
-      Number(trip.summary?.length ?? Infinity) < Number(best.summary?.length ?? Infinity) ? trip : best,
-    );
+    return trips.reduce((best, trip) => {
+      const toll = Number(Boolean(trip.summary?.has_toll));
+      const bestToll = Number(Boolean(best.summary?.has_toll));
+      if (toll !== bestToll) return toll < bestToll ? trip : best;
+      return Number(trip.summary?.length ?? Infinity) < Number(best.summary?.length ?? Infinity) ? trip : best;
+    });
   }
   if (mode === "fastest" || mode === "cheapest") {
     return trips.reduce((best, trip) =>
@@ -64,7 +67,7 @@ async function valhalla(from: Stop, to: Stop, mode: LegMode): Promise<DriveRoute
       costing_options: { auto: costing },
       directions_options: { units: "miles" },
       shape_format: "geojson",
-      alternates: mode === "eco" ? 2 : 0,
+      alternates: mode === "eco" ? 3 : 2,
     }),
   });
   if (!res.ok) return null;
@@ -148,7 +151,7 @@ async function osrmOnce(from: Stop, to: Stop, mode: LegMode, extra: string): Pro
 }
 
 async function osrm(from: Stop, to: Stop, mode: LegMode): Promise<DriveRouteJson | null> {
-  const extras = mode === "eco" ? ["&exclude=motorway", ""] : [""];
+  const extras = mode === "eco" ? ["&exclude=motorway,toll", "&exclude=motorway", ""] : [""];
   for (const extra of extras) {
     const routed = await osrmOnce(from, to, mode, extra).catch(() => null);
     if (routed) return routed;
@@ -160,9 +163,14 @@ function pickRouted(mode: LegMode, routes: DriveRouteJson[]): DriveRouteJson | n
   const list = routes.filter((r) => r.path.length >= 2 && r.miles > 0);
   if (!list.length) return null;
   if (mode === "eco") {
-    return list.reduce((best, r) => (r.miles < best.miles ? r : best));
+    return list.reduce((best, r) => {
+      const rt = r.tollKr ?? 0;
+      const bt = best.tollKr ?? 0;
+      if (rt !== bt) return rt < bt ? r : best;
+      return r.miles < best.miles ? r : best;
+    });
   }
-  if (mode === "fastest") {
+  if (mode === "fastest" || mode === "cheapest") {
     return list.reduce((best, r) => (r.seconds < best.seconds ? r : best));
   }
   const valhalla = list.find((r) => r.source === "valhalla");
