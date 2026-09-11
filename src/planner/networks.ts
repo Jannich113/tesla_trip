@@ -139,6 +139,19 @@ export const EU_NETWORKS: ChargeNetwork[] = [
     note: "App roaming. Plus is the cheaper kWh on partner stalls.",
   },
   {
+    id: "mer",
+    name: "Mer / Recharge",
+    region: "NO · SE · FI",
+    spotKr: dkkFromEur(0.4),
+    aboKr: dkkFromEur(0.32),
+    aboMonthlyKr: dkkFromEur(4.99),
+    aboName: "Mer Plus",
+    roamKr: dkkFromEur(0.55),
+    roamAboKr: dkkFromEur(0.48),
+    roamNote: "Own Nordic HPC is cheap. Roam-out on the continent sits nearer EU HPC.",
+    note: "Biggest Norwegian CPO (ex Fortum Charge & Drive). Abo is Mer Plus.",
+  },
+  {
     id: "shell",
     name: "Shell Recharge",
     region: "EU",
@@ -276,7 +289,7 @@ export type EuBloc =
   | "near";
 
 export const EU_BLOCS: { id: EuBloc; label: string; ids: readonly EuRegion[] }[] = [
-  { id: "nordic", label: "Nordics", ids: ["DK", "SE", "FI", "IS", "FO"] },
+  { id: "nordic", label: "Nordics", ids: ["DK", "SE", "FI", "NO", "IS", "FO"] },
   { id: "baltics", label: "Baltics", ids: ["EE", "LV", "LT"] },
   { id: "dach", label: "DACH", ids: ["DE", "AT", "LI"] },
   { id: "benelux", label: "Benelux", ids: ["NL", "BE", "LU"] },
@@ -285,7 +298,7 @@ export const EU_BLOCS: { id: EuBloc; label: string; ids: readonly EuRegion[] }[]
   { id: "east", label: "East EU", ids: ["PL", "CZ", "SK", "HU", "RO", "BG", "HR", "SI"] },
   { id: "balkans", label: "Balkans", ids: ["AL", "BA", "MK", "ME", "RS", "XK"] },
   { id: "steppe", label: "East", ids: ["UA", "MD", "BY", "RU", "TR"] },
-  { id: "near", label: "Near", ids: ["UK", "NO", "CH"] },
+  { id: "near", label: "Near", ids: ["UK", "CH"] },
 ];
 
 export const EU_REGIONS: { id: EuRegion; label: EuRegion; bloc: EuBloc }[] = EU_BLOCS.flatMap((b) =>
@@ -360,7 +373,7 @@ export const REGION_MARKETS: Record<string, Partial<Record<EuRegion, MarketCell>
       IE: cell(dkkFromEur(0.72), null),
       UK: cell(dkkFromEur(0.93), null),
       CH: cell(dkkFromEur(0.79), null),
-      NO: cell(null, null),
+      NO: cell(dkkFromEur(0.45), null),
       IS: cell(null, null),
       FO: cell(null, null),
       LI: cell(null, null),
@@ -512,6 +525,30 @@ export const REGION_MARKETS: Record<string, Partial<Record<EuRegion, MarketCell>
     steppe: cell(null, dkkFromEur(0.6)),
     near: cell(null, dkkFromEur(0.85)),
   }),
+  mer: spread(
+    {
+      nordic: cell(dkkFromEur(0.38), dkkFromEur(0.5)),
+      baltics: cell(null, dkkFromEur(0.55)),
+      dach: cell(null, dkkFromEur(0.55)),
+      benelux: cell(null, dkkFromEur(0.55)),
+      west: cell(null, dkkFromEur(0.55)),
+      south: cell(null, dkkFromEur(0.52)),
+      east: cell(null, dkkFromEur(0.48)),
+      balkans: cell(null, dkkFromEur(0.48)),
+      steppe: cell(null, null),
+      near: cell(null, dkkFromEur(0.6)),
+    },
+    {
+      NO: cell(dkkFromEur(0.35), dkkFromEur(0.48)),
+      SE: cell(dkkFromEur(0.38), dkkFromEur(0.5)),
+      FI: cell(dkkFromEur(0.36), dkkFromEur(0.5)),
+      DK: cell(null, dkkFromEur(0.5)),
+      IS: cell(null, null),
+      FO: cell(null, null),
+      UK: cell(null, null),
+      CH: cell(null, dkkFromEur(0.55)),
+    },
+  ),
   shell: spread(
     {
       nordic: cell(dkkFromEur(0.62), dkkFromEur(0.75)),
