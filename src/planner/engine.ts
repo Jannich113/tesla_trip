@@ -384,6 +384,8 @@ function toPriced(
   maxWaitMin: number,
   memberships: Record<string, boolean> = {},
 ): PricedCharge {
+  const loss = loc.kind === "home" ? 1.1 : 1.08;
+  const billedKwh = kwhNeed * loss;
   const netId = networkIdFor(loc.kind, (loc as { networkId?: string }).networkId);
   if (netId) {
     const hasAbo = Boolean(memberships[netId]);
@@ -392,8 +394,8 @@ function toPriced(
       locationId: loc.id,
       name: loc.short || loc.name,
       kind: loc.kind,
-      kwh: kwhNeed,
-      kr: kwhNeed * rate,
+      kwh: billedKwh,
+      kr: billedKwh * rate,
       rateKr: rate,
       label: chargerLabel(loc, hasAbo),
       inBand,
@@ -403,14 +405,14 @@ function toPriced(
       waitMin: 0,
     };
   }
-  if (loc.kind === "supercharger") {
-    const rate = usdToKr(loc.usdPerKwh);
+  if (loc.kind !== "home") {
+    const rate = usdToKr(loc.usdPerKwh) || acKr;
     return {
       locationId: loc.id,
       name: loc.short || loc.name,
       kind: loc.kind,
-      kwh: kwhNeed,
-      kr: kwhNeed * rate,
+      kwh: billedKwh,
+      kr: billedKwh * rate,
       rateKr: rate,
       label: chargerLabel(loc),
       inBand,
@@ -421,9 +423,9 @@ function toPriced(
     };
   }
   const win = preferCheap
-    ? cheapestWindow(hours, kwhNeed, acKw, clockHhmm, maxWaitMin)
-    : nowWindow(hours, kwhNeed, acKw);
-  const kr = win?.kr ?? kwhNeed * acKr;
+    ? cheapestWindow(hours, billedKwh, acKw, clockHhmm, maxWaitMin)
+    : nowWindow(hours, billedKwh, acKw);
+  const kr = win?.kr ?? billedKwh * acKr;
   const waitMin = win?.waitMin ?? 0;
   const windowLabel =
     waitMin > 0 && win ? `${win.label} · wait ${minutesToHm(waitMin)}` : (win?.label ?? "live");
@@ -431,7 +433,7 @@ function toPriced(
     locationId: loc.id,
     name: loc.short || loc.name,
     kind: loc.kind,
-    kwh: kwhNeed,
+    kwh: billedKwh,
     kr,
     rateKr: win?.avgKr ?? acKr,
     label: chargerLabel(loc),
