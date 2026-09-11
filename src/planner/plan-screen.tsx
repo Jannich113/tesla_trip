@@ -71,6 +71,12 @@ function offsetPath(path: [number, number][], meters: number): [number, number][
   });
 }
 
+const ROUTE_OFFSET_M: Record<LegMode, number> = {
+  eco: -280,
+  fastest: 0,
+  cheapest: 280,
+};
+
 const CHARGE_OFFSET: Record<LegMode, [number, number]> = {
   eco: [-0.0016, -0.0009],
   fastest: [0, 0],
@@ -141,6 +147,7 @@ export function PlanScreen() {
   const [chargeToSoc, setChargeToSoc] = useState<Record<number, number>>({});
   const [backupLoc, setBackupLoc] = useState<Record<number, string>>({});
   const [openStops, setOpenStops] = useState<Record<string, boolean>>({});
+  const [showAllRoutes, setShowAllRoutes] = useState(false);
   const [pane, setPane] = useState<"plan" | "advanced">("plan");
   const { data: elpris } = useLiveElpris(area);
 
@@ -495,33 +502,35 @@ export function PlanScreen() {
   const mapRoutes: MapRoute[] = useMemo(() => {
     const out: MapRoute[] = [];
     if (stops.length < 2) return out;
-    for (let i = 0; i < stops.length - 1; i++) {
-      const mode = mixed ? (activeModes[i] ?? mapMode) : mapMode;
-      const hit =
-        routeMap[routeKey(stops[i], stops[i + 1], pathMode(mode, cheapAvoidFees))] ??
-        routeMap[routeKey(stops[i], stops[i + 1], mode)] ??
-        (mode === "cheapest" ? routeMap[routeKey(stops[i], stops[i + 1], "fastest")] : undefined);
-      if (!hit) continue;
-      const raw =
-        hit.path.length >= 2
-          ? simplifyPath(hit.path, 120)
-          : ([[stops[i].lat, stops[i].lng], [stops[i + 1].lat, stops[i + 1].lng]] as [number, number][]);
-      out.push({
-        id: `opt-${mode}-${i}`,
-        from: [stops[i].lat, stops[i].lng],
-        to: [stops[i + 1].lat, stops[i + 1].lng],
-        weight: 3,
-        path: offsetPath(raw, 0),
-        color: modeColor(mode),
-      });
+    const draw = showAllRoutes ? LEG_MODES : [mapMode];
+    for (const mode of draw) {
+      for (let i = 0; i < stops.length - 1; i++) {
+        const hit =
+          routeMap[routeKey(stops[i], stops[i + 1], pathMode(mode, cheapAvoidFees))] ??
+          routeMap[routeKey(stops[i], stops[i + 1], mode)] ??
+          (mode === "cheapest" ? routeMap[routeKey(stops[i], stops[i + 1], "fastest")] : undefined);
+        if (!hit) continue;
+        const raw =
+          hit.path.length >= 2
+            ? simplifyPath(hit.path, 120)
+            : ([[stops[i].lat, stops[i].lng], [stops[i + 1].lat, stops[i + 1].lng]] as [number, number][]);
+        out.push({
+          id: `opt-${mode}-${i}`,
+          from: [stops[i].lat, stops[i].lng],
+          to: [stops[i + 1].lat, stops[i + 1].lng],
+          weight: showAllRoutes && mode !== mapMode ? 2.4 : 3.2,
+          path: offsetPath(raw, showAllRoutes ? ROUTE_OFFSET_M[mode] : 0),
+          color: modeColor(mode),
+        });
+      }
     }
     return out;
-  }, [stops, routeMap, cheapAvoidFees, mapMode, mixed, activeModes]);
+  }, [stops, routeMap, cheapAvoidFees, mapMode, showAllRoutes]);
 
   const mapMarkers: MapMarker[] = useMemo(() => {
     const chargerMarkers: MapMarker[] = [];
     for (const row of optionRows) {
-      if (row.mode !== mapMode) continue;
+      if (!showAllRoutes && row.mode !== mapMode) continue;
       const [dLat, dLng] = CHARGE_OFFSET[row.mode];
       const color = modeColor(row.mode);
       for (const [i, leg] of row.legs.entries()) {
@@ -559,7 +568,7 @@ export function PlanScreen() {
       })),
       ...chargerMarkers,
     ];
-  }, [optionRows, locations, stops, mapMode]);
+  }, [optionRows, locations, stops, mapMode, showAllRoutes]);
 
   return (
     <div className="space-y-5 px-4 pb-6">
@@ -709,7 +718,7 @@ export function PlanScreen() {
                           <span className="text-subtle"> · </span>
                           {minutesToHm(t.driveMin)} drive
                           <span className="text-subtle"> · </span>
-                          {formatNumber(row.kmh, 0)} km/t
+                          avg {formatNumber(row.kmh, 0)} km/t
                           {row.mode === "cheapest"
                             ? cheapAvoidFees
                               ? " · no motorways / tolls"
@@ -829,13 +838,42 @@ export function PlanScreen() {
       ) : null}
 
       <div className="space-y-2">
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setShowAllRoutes(false)}
+            className={cn(
+              "h-8 rounded-full px-3 text-[11px] font-medium",
+              !showAllRoutes ? "text-background" : "bg-surface-2 text-muted",
+            )}
+            style={!showAllRoutes ? { background: modeColor(mapMode) } : undefined}
+          >
+            {modeLabel(mapMode)}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowAllRoutes(true)}
+            className={cn(
+              "h-8 rounded-full px-3 text-[11px] font-medium",
+              showAllRoutes ? "bg-foreground text-background" : "bg-surface-2 text-muted",
+            )}
+          >
+            All 3
+          </button>
+        </div>
         <BayMap
           markers={mapMarkers}
           routes={mapRoutes}
           selectedId={selected}
           selectedIds={selectedIds}
           onSelect={onMapSelect}
-          caption={routing ? "Routing…" : `${modeLabel(mapMode)} · tap a leg or charger`}
+          caption={
+            routing
+              ? "Routing…"
+              : showAllRoutes
+                ? "All modes · tap a leg or charger"
+                : `${modeLabel(mapMode)} · tap a leg or charger`
+          }
           hidden={!shareLocation}
         />
       </div>
