@@ -155,8 +155,9 @@ describe("leg modes", () => {
     assert.ok(regionalOwn(tesla, "ES", false)! > 0);
     assert.ok(regionalOwn(tesla, "NO", false)! > 0);
     const mer = EU_NETWORKS.find((n) => n.id === "mer")!;
+    const recharge = EU_NETWORKS.find((n) => n.id === "recharge")!;
     assert.ok(regionalOwn(mer, "NO", false)! > 0);
-    assert.ok(regionalOwn(mer, "NO", false)! < regionalOwn(tesla, "DE", false)!);
+    assert.ok(regionalOwn(recharge, "NO", false)! > regionalOwn(tesla, "NO", false)!);
   });
 
   it("regional roam is cheaper in DK partners than DE IONITY", () => {
