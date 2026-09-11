@@ -81,6 +81,8 @@ export type PricedCharge = {
   windowLabel: string;
   cheapWindow: boolean;
   waitMin: number;
+  nearest?: boolean;
+  cheapest?: boolean;
 };
 
 export type PricedLeg = {
@@ -105,6 +107,7 @@ export type PricedLeg = {
   accepted: boolean;
   autoStartSoc: number;
   extraKr: number;
+  chargeOptions: PricedCharge[];
 };
 
 export const DKK_PER_USD = 6.85;
@@ -391,7 +394,7 @@ export function pickCharges(opts: {
   clockHhmm: string;
   maxWaitMin: number;
   backupId?: string | null;
-}): { primary: PricedCharge; backup: PricedCharge | null } | null {
+}): { primary: PricedCharge; backup: PricedCharge | null; options: PricedCharge[] } | null {
   const { kwhNeed, path, detourKm, mode, locations, acKr, hours, acKw, speedEff, clockHhmm, maxWaitMin, backupId } = opts;
   if (kwhNeed <= 0.05 || !locations.length) return null;
   const preferCheap = mode === "cheapest";
@@ -432,6 +435,14 @@ export function pickCharges(opts: {
     return a.distM - b.distM;
   };
 
+  const nearestId = [...scored].sort((a, b) => a.distM - b.distM)[0]?.loc.id;
+  const cheapestId = [...scored].sort((a, b) => a.priced.kr - b.priced.kr)[0]?.loc.id;
+  const tag = (priced: PricedCharge, locId: string): PricedCharge => ({
+    ...priced,
+    nearest: locId === nearestId,
+    cheapest: locId === cheapestId,
+  });
+
   const inSearch = scored.filter((s) => s.distM <= searchBand).sort(byRank);
   const outside = scored.filter((s) => s.distM > searchBand).sort(byRank);
   const primarySrc = inSearch[0] ?? outside[0];
@@ -445,11 +456,24 @@ export function pickCharges(opts: {
     outside.find((s) => s.loc.id !== primarySrc.loc.id) ??
     null;
 
+  const ranked = preferCheap
+    ? [...scored].sort(byRank)
+    : [...scored].sort((a, b) => a.distM - b.distM || a.priced.kr - b.priced.kr);
+
   return {
-    primary: primarySrc.priced,
+    primary: tag(primarySrc.priced, primarySrc.loc.id),
     backup: backupSrc
-      ? { ...backupSrc.priced, label: backupSrc.priced.inBand ? backupSrc.priced.label : `${backupSrc.priced.label} · farther` }
+      ? {
+          ...tag(backupSrc.priced, backupSrc.loc.id),
+          label: backupSrc.priced.inBand
+            ? backupSrc.priced.label
+            : `${backupSrc.priced.label} · farther`,
+        }
       : null,
+    options: ranked.map((s) => {
+      const priced = tag(s.priced, s.loc.id);
+      return s.priced.inBand ? priced : { ...priced, label: `${priced.label} · farther` };
+    }),
   };
 }
 
@@ -598,6 +622,7 @@ export function pricePlan(opts: {
       accepted,
       autoStartSoc: autoTarget,
       extraKr,
+      chargeOptions: pick?.options ?? [],
     });
     soc = arriveSoc;
     readyAt = arriveAt;

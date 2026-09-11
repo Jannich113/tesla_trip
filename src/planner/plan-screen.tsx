@@ -1073,57 +1073,21 @@ export function PlanScreen() {
                         ) : (
                           <p className="text-[11px] text-subtle">No backup in this detour</p>
                         )}
-                        <label className="block text-xs text-muted">
-                          Backup location
-                          <select
-                            value={backupLoc[i - 1] ?? ""}
-                            onChange={(e) => {
-                              const id = e.target.value;
-                              setBackupLoc((cur) => {
-                                const next = { ...cur };
-                                if (!id) delete next[i - 1];
-                                else next[i - 1] = id;
-                                return next;
-                              });
-                            }}
-                            className="mt-1 h-9 w-full rounded-full bg-surface-2 px-3 text-xs text-foreground outline-none"
-                          >
-                            <option value="">Auto</option>
-                            {locations
-                              .filter((loc) => loc.id !== leg.charge?.locationId)
-                              .map((loc) => (
-                                <option key={loc.id} value={loc.id}>
-                                  {loc.short || loc.name}
-                                </option>
-                              ))}
-                          </select>
-                        </label>
-                      </div>
-                    ) : (
-                      <label className="mt-3 block text-xs text-muted">
-                        Backup location
-                        <select
-                          value={backupLoc[i - 1] ?? ""}
-                          onChange={(e) => {
-                            const id = e.target.value;
+                        <BackupPicks
+                          options={leg.chargeOptions}
+                          primaryId={leg.charge?.locationId}
+                          selectedId={backupLoc[i - 1]}
+                          onPick={(id) =>
                             setBackupLoc((cur) => {
                               const next = { ...cur };
                               if (!id) delete next[i - 1];
                               else next[i - 1] = id;
                               return next;
-                            });
-                          }}
-                          className="mt-1 h-9 w-full rounded-full bg-surface-2 px-3 text-xs text-foreground outline-none"
-                        >
-                          <option value="">Auto</option>
-                          {locations.map((loc) => (
-                            <option key={loc.id} value={loc.id}>
-                              {loc.short || loc.name}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    )}
+                            })
+                          }
+                        />
+                      </div>
+                    ) : null}
                       </div>
                     ) : null}
                   </div>
@@ -1178,6 +1142,60 @@ export function PlanScreen() {
           )}
         </div>
       </section>
+    </div>
+  );
+}
+
+function BackupPicks({
+  options,
+  primaryId,
+  selectedId,
+  onPick,
+}: {
+  options: PricedCharge[];
+  primaryId?: string;
+  selectedId?: string;
+  onPick: (id: string) => void;
+}) {
+  const list = options.filter((o) => o.locationId !== primaryId).slice(0, 8);
+  if (!list.length) return null;
+  return (
+    <div>
+      <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Backup · nearest / cheapest</p>
+      <ul className="mt-1 divide-y divide-border rounded-xl bg-surface-2">
+        <li>
+          <button
+            type="button"
+            onClick={() => onPick("")}
+            className={cn("flex w-full items-center px-3 py-2 text-left text-xs", !selectedId && "bg-background/40")}
+          >
+            Auto
+          </button>
+        </li>
+        {list.map((o) => {
+          const on = selectedId === o.locationId;
+          return (
+            <li key={o.locationId}>
+              <button
+                type="button"
+                onClick={() => onPick(o.locationId)}
+                className={cn("flex w-full items-center gap-3 px-3 py-2 text-left", on && "bg-background/40")}
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm">{o.name}</span>
+                  <span className="block text-[11px] text-subtle">
+                    {formatKrPerKwh(o.rateKr, 2)}
+                    {Number.isFinite(o.distM) ? ` · ${(o.distM / 1000).toFixed(1)} km` : ""}
+                    {o.cheapest ? " · cheapest" : ""}
+                    {o.nearest ? " · nearest" : ""}
+                  </span>
+                </span>
+                <span className="shrink-0 text-sm tabular-nums">{formatKrValue(o.kr, 0)} kr</span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }
