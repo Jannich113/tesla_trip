@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { geo } from "@/lib/places";
-import { type LegMode, type LegWhen, type PlanStop } from "./engine";
+import { primeRouteCache, type LegMode, type LegWhen, type PlanStop, type RoutedLeg } from "./engine";
 import { DEFAULT_DETOUR_KM, DEFAULT_WAIT_MIN, normalizeMode, type SpeedEff } from "./modes";
 
 export type WhenKind = "depart" | "arrive";
@@ -24,6 +24,7 @@ export type SavedPlan = {
   min?: number;
   kr?: number;
   mi?: number;
+  routes?: Record<string, RoutedLeg>;
 };
 
 export type PlanSummary = {
@@ -59,6 +60,7 @@ type PlanState = {
   whPerMi: number | null;
   speedEff: SpeedEff | null;
   networkAbo: Record<string, boolean>;
+  routeCache: Record<string, RoutedLeg>;
   saved: SavedPlan[];
   seq: number;
 };
@@ -80,6 +82,7 @@ type PlanStore = PlanState & {
   setSpeedEff: (next: SpeedEff | null) => void;
   setNetworkAbo: (id: string, on: boolean) => void;
   insertStopAt: (index: number, stop: Omit<PlanStop, "id"> & { id?: string }) => void;
+  setRouteCache: (patch: Record<string, RoutedLeg>) => void;
   savePlan: (label?: string, summary?: PlanSummary) => SavedPlan | null;
   loadPlan: (id: string) => void;
   deleteSaved: (id: string) => void;
@@ -99,6 +102,7 @@ const empty = (): PlanState => ({
   whPerMi: null,
   speedEff: null,
   networkAbo: { tesla: true },
+  routeCache: {},
   saved: [],
   seq: 0,
 });
@@ -115,6 +119,12 @@ export const usePlanStore = create<PlanStore>()(
       setSpeedEff: (speedEff) => set({ speedEff, whPerMi: speedEff ? speedEff[80] : null }),
       setNetworkAbo: (id, on) =>
         set({ networkAbo: { ...get().networkAbo, [id]: on } }),
+
+      setRouteCache: (patch) => {
+        const routeCache = { ...get().routeCache, ...patch };
+        primeRouteCache(patch);
+        set({ routeCache });
+      },
 
       addStop: (input) => {
         const stop: PlanStop = {
@@ -254,6 +264,7 @@ export const usePlanStore = create<PlanStore>()(
           min: summary?.min,
           kr: summary?.kr,
           mi: summary?.mi,
+          routes: get().routeCache,
         };
         set({
           seq: seq + 1,
@@ -278,7 +289,9 @@ export const usePlanStore = create<PlanStore>()(
           legWhen: plan.legWhen ?? plan.stops.slice(1).map(() => autoWhen()),
           whPerMi: plan.whPerMi ?? null,
           speedEff: plan.speedEff ?? null,
+          routeCache: { ...get().routeCache, ...(plan.routes ?? {}) },
         });
+        if (plan.routes) primeRouteCache(plan.routes);
       },
 
       deleteSaved: (id) => set({ saved: get().saved.filter((p) => p.id !== id) }),
@@ -306,9 +319,20 @@ export const usePlanStore = create<PlanStore>()(
         whPerMi: s.whPerMi,
         speedEff: s.speedEff,
         networkAbo: s.networkAbo,
+        routeCache: s.routeCache,
         saved: s.saved,
         seq: s.seq,
       }),
+      onRehydrateStorage: () => (state) => {
+        if (state?.routeCache) primeRouteCache(state.routeCache);
+        for (const plan of state?.saved ?? []) {
+          if (plan.routes) primeRouteCache(plan.routes);
+        }
+      },
     },
   ),
 );
+
+if (typeof window !== "undefined") {
+  void usePlanStore.persist.rehydrate();
+}

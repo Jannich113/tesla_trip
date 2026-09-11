@@ -138,8 +138,9 @@ export function PlanScreen() {
   const loadPlan = usePlanStore((s) => s.loadPlan);
   const deleteSaved = usePlanStore((s) => s.deleteSaved);
   const reset = usePlanStore((s) => s.reset);
+  const routeMap = usePlanStore((s) => s.routeCache);
+  const setRouteCache = usePlanStore((s) => s.setRouteCache);
 
-  const [routeMap, setRouteMap] = useState<Record<string, RoutedLeg>>({});
   const [routing, setRouting] = useState(false);
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<AddressHit[]>([]);
@@ -178,37 +179,33 @@ export function PlanScreen() {
   }, [query]);
 
   useEffect(() => {
-    if (stops.length < 2) {
-      setRouteMap({});
-      return;
-    }
+    if (stops.length < 2) return;
     let cancelled = false;
-    setRouting(true);
+    const jobs: { from: (typeof stops)[number]; to: (typeof stops)[number]; mode: LegMode; key: string }[] = [];
+    for (let i = 0; i < stops.length - 1; i++) {
+      for (const mode of PATH_MODES) {
+        const from = stops[i];
+        const to = stops[i + 1];
+        jobs.push({ from, to, mode, key: routeKey(from, to, mode) });
+      }
+    }
+    const missing = jobs.some((job) => !routeMap[job.key]);
+    if (missing) setRouting(true);
+    else setRouting(false);
     void (async () => {
-      const next: Record<string, RoutedLeg> = {};
-      const jobs: Promise<void>[] = [];
-      for (let i = 0; i < stops.length - 1; i++) {
-        for (const mode of PATH_MODES) {
-          const from = stops[i];
-          const to = stops[i + 1];
-          const key = routeKey(from, to, mode);
-          jobs.push(
-            fetchRoute(from, to, mode).then((route) => {
-              next[key] = route;
-            }),
-          );
-        }
-      }
-      await Promise.all(jobs);
-      if (!cancelled) {
-        setRouteMap(next);
-        setRouting(false);
-      }
+      await Promise.all(
+        jobs.map(async (job) => {
+          const route = await fetchRoute(job.from, job.to, job.mode);
+          if (cancelled) return;
+          setRouteCache({ [job.key]: route });
+        }),
+      );
+      if (!cancelled) setRouting(false);
     })();
     return () => {
       cancelled = true;
     };
-  }, [stops]);
+  }, [stops, setRouteCache]);
 
   useEffect(() => {
     setPrefer({});
