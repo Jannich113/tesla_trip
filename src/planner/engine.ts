@@ -102,6 +102,7 @@ export type PricedLeg = {
   charge: PricedCharge | null;
   backup: PricedCharge | null;
   kr: number;
+  accepted: boolean;
 };
 
 export const DKK_PER_USD = 6.85;
@@ -461,6 +462,7 @@ export function pricePlan(opts: {
   departHhmm: string;
   arriveHhmm?: string;
   legWhen?: LegWhen[];
+  acceptCharge?: boolean[];
 }): PricedLeg[] {
   const { stops, modes, detours, routes, usableKwh, locations, hours, acKw, acKr, speedEff } =
     opts;
@@ -525,7 +527,8 @@ export function pricePlan(opts: {
       : suggested || (mode === "cheapest" && charge)
         ? "suggested"
         : null;
-    const billed = advice !== null && charge !== null;
+    const accepted = required || (suggested && Boolean(opts.acceptCharge?.[i]));
+    const billed = accepted && charge !== null;
     const chargeMin = billed && charge ? (charge.kwh / Math.max(acKw, 1)) * 60 : 0;
     const rawWait = billed && charge && charge.cheapWindow ? charge.waitMin : 0;
     const windowStart = addMinutesDateTime(readyAt, rawWait);
@@ -563,6 +566,7 @@ export function pricePlan(opts: {
       charge: pricedCharge,
       backup,
       kr: billed ? (charge?.kr ?? 0) : 0,
+      accepted,
     });
     soc = arriveSoc;
     readyAt = arriveAt;
@@ -581,9 +585,9 @@ export function planTotals(legs: PricedLeg[]) {
       acc.chargeMin += leg.chargeMin;
       acc.waitMin += leg.waitMin;
       acc.min += leg.route.seconds / 60 + leg.chargeMin + leg.waitMin;
-      acc.chargeKwh += leg.advice ? (leg.charge?.kwh ?? 0) : 0;
+      acc.chargeKwh += leg.accepted && leg.charge ? (leg.charge.kwh ?? 0) : 0;
       acc.requiredKwh += leg.needed ? (leg.charge?.kwh ?? 0) : 0;
-      acc.charges += leg.advice && leg.charge ? 1 : 0;
+      acc.charges += leg.accepted && leg.charge ? 1 : 0;
       return acc;
     },
     {

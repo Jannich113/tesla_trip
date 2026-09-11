@@ -121,6 +121,7 @@ export function PlanScreen() {
   const [hits, setHits] = useState<AddressHit[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [prefer, setPrefer] = useState<Record<number, string>>({});
+  const [acceptCharge, setAcceptCharge] = useState<Record<number, boolean>>({});
   const [showRoutes, setShowRoutes] = useState<Record<LegMode, boolean>>({
     eco: true,
     standard: true,
@@ -187,6 +188,7 @@ export function PlanScreen() {
 
   useEffect(() => {
     setPrefer({});
+    setAcceptCharge({});
   }, [stops, detours]);
 
   const carWhPerMi = epaWhPerMi(profile.usableKwh, profile.epaRangeMi);
@@ -240,6 +242,7 @@ export function PlanScreen() {
     departHhmm,
     arriveHhmm: whenKind === "arrive" ? clock : undefined,
     legWhen,
+    acceptCharge: stops.slice(1).map((_, i) => Boolean(acceptCharge[i])),
   };
 
   const legs: PricedLeg[] = useMemo(() => {
@@ -249,13 +252,13 @@ export function PlanScreen() {
       modes: activeModes,
       routes: selectedRoutes,
     });
-  }, [stops, activeModes, detours, selectedRoutes, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen]);
+  }, [stops, activeModes, detours, selectedRoutes, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge]);
 
   const viewLegs = useMemo(() => {
     return legs.map((leg, i) => {
       const id = prefer[i];
       if (!id || !leg.charge || !leg.backup || id !== leg.backup.locationId) return leg;
-      const billed = leg.advice !== null;
+      const billed = leg.accepted;
       return { ...leg, charge: leg.backup, backup: leg.charge, kr: billed ? leg.backup.kr : 0 };
     });
   }, [legs, prefer]);
@@ -283,7 +286,7 @@ export function PlanScreen() {
         kwhPerMi: interpolateWhPerMi(speedEff, kmh) / 1000,
       };
     });
-  }, [routeMap, stops, detours, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen]);
+  }, [routeMap, stops, detours, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge]);
 
   function addStop(hit: AddressHit) {
     addStopToStore({ name: hit.label.split(",")[0] || hit.label, lat: hit.lat, lng: hit.lng });
@@ -781,7 +784,7 @@ export function PlanScreen() {
                           >
                             {" · "}
                             charge to {formatNumber(chargeTo, 0)}%
-                            {chargeRequired ? " required" : " recommended"}
+                            {chargeRequired ? " required" : chargeLeg?.accepted ? " accepted" : " recommended"}
                           </span>
                         ) : null}
                       </p>
@@ -799,6 +802,20 @@ export function PlanScreen() {
                       <ChevronDown className={cn("size-4 shrink-0 text-muted transition", open && "rotate-180")} />
                     ) : null}
                   </button>
+                  {chargeTo != null && !chargeRequired ? (
+                    <button
+                      type="button"
+                      onClick={() => setAcceptCharge((cur) => ({ ...cur, [i]: !cur[i] }))}
+                      className={cn(
+                        "h-8 shrink-0 rounded-full px-3 text-[11px] font-medium",
+                        chargeLeg?.accepted
+                          ? "bg-emerald-400 text-background"
+                          : "bg-emerald-400/15 text-emerald-300",
+                      )}
+                    >
+                      {chargeLeg?.accepted ? "Accepted" : "Accept"}
+                    </button>
+                  ) : null}
                   {i > 0 ? (
                     <button
                       type="button"
@@ -952,6 +969,22 @@ export function PlanScreen() {
                           <p className="rounded-lg bg-emerald-400/15 px-3 py-1.5 text-[11px] font-medium text-emerald-300">
                             Optional · good price, battery low enough
                           </p>
+                        ) : null}
+                        {leg.suggested && !leg.needed ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setAcceptCharge((cur) => ({ ...cur, [i - 1]: !cur[i - 1] }))
+                            }
+                            className={cn(
+                              "h-9 w-full rounded-full text-xs font-medium",
+                              leg.accepted
+                                ? "bg-emerald-400 text-background"
+                                : "bg-emerald-400/15 text-emerald-300",
+                            )}
+                          >
+                            {leg.accepted ? "Accepted · SOC includes this charge" : "Accept recommended charge"}
+                          </button>
                         ) : null}
                         {leg.backup ? (
                           <button
