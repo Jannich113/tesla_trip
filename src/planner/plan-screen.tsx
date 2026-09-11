@@ -403,10 +403,6 @@ export function PlanScreen() {
     setSelected(`leg-${stops.length - 1}`);
   }
 
-  function dropStop(lat: number, lng: number) {
-    addStop({ label: "Pinned stop", lat, lng });
-  }
-
   function insertCharge(legIndex: number, spot: PricedCharge) {
     const loc = locations.find((x) => x.id === spot.locationId);
     if (!loc) return;
@@ -885,9 +881,7 @@ export function PlanScreen() {
           selectedId={selected}
           selectedIds={selectedIds}
           onSelect={onMapSelect}
-          onDrop={dropStop}
-          dropping
-          caption={routing ? "Routing…" : "Tap a leg or charger · tap map to add a stop"}
+          caption={routing ? "Routing…" : "Tap a leg or charger"}
           hidden={!shareLocation}
         />
       </div>
