@@ -373,7 +373,48 @@ export function dailyEnergy(
     row.chargeKwh += c.kwh;
     row.chargeUsd += c.usd;
   }
-  return [...map.values()].sort((a, b) => (a.key < b.key ? -1 : 1));
+  return [...map.values()].sort((a, b) => (a.key < b.key ? 1 : -1));
+}
+
+function eachDayDesc(start: string, end: string, fn: (day: string) => void) {
+  for (let day = end; ; day = addDays(day, -1)) {
+    fn(day);
+    if (day === start) break;
+  }
+}
+
+function bucketEnergy(
+  trips: Trip[],
+  sessions: ChargeSession[],
+  keyOf: (day: string) => { key: string; label: string },
+  fill: { key: string; label: string }[],
+): EnergyDay[] {
+  const out = new Map<string, EnergyDay>();
+  for (const slot of fill) out.set(slot.key, emptyEnergy(slot.key, slot.label));
+  for (const t of trips) {
+    const { key, label } = keyOf(t.day);
+    let row = out.get(key);
+    if (!row) {
+      row = emptyEnergy(key, label);
+      out.set(key, row);
+    }
+    row.driveKwh += t.kwh;
+    row.mi += t.mi;
+    row.trips += 1;
+  }
+  for (const c of sessions) {
+    const { key, label } = keyOf(c.day);
+    let row = out.get(key);
+    if (!row) {
+      row = emptyEnergy(key, label);
+      out.set(key, row);
+    }
+    row.chargeKwh += c.kwh;
+    row.chargeUsd += c.usd;
+  }
+  const seen = new Set(fill.map((s) => s.key));
+  const extra = [...out.keys()].filter((k) => !seen.has(k)).sort((a, b) => (a < b ? 1 : -1));
+  return [...fill.map((s) => s.key), ...extra].map((k) => out.get(k)!);
 }
 
 export function periodEnergy(
@@ -381,31 +422,68 @@ export function periodEnergy(
   sessions: ChargeSession[],
   today = laDayString(),
 ): EnergyDay[] {
-  if (period === "year" || period === "total") {
-    const map = emptyBuckets(period, today);
-    const out = new Map<string, EnergyDay>();
-    for (const b of map.values()) out.set(b.key, emptyEnergy(b.key, b.label));
-    for (const t of tripsIn(period, today)) {
-      const row = out.get(labelFor(t.day, period).key);
-      if (!row) continue;
-      row.driveKwh += t.kwh;
-      row.mi += t.mi;
-      row.trips += 1;
-    }
-    for (const c of chargesInFrom(sessions, period, today)) {
-      const row = out.get(labelFor(c.day, period).key);
-      if (!row) continue;
-      row.chargeKwh += c.kwh;
-      row.chargeUsd += c.usd;
-    }
-    return [...out.values()];
-  }
+  const trips = tripsIn(period, today);
+  const charges = chargesInFrom(sessions, period, today);
   const start = periodStart(period, today);
-  return dailyEnergy(tripsIn(period, today), chargesInFrom(sessions, period, today), today, {
-    start,
-    end: today,
-    fill: true,
+
+  if (period === "day") {
+    return bucketEnergy(trips, charges, (d) => ({ key: d, label: formatDayLabel(d, today) }), [
+      { key: today, label: formatDayLabel(today, today) },
+    ]);
+  }
+
+  if (period === "week") {
+    const fill: { key: string; label: string }[] = [];
+    eachDayDesc(start, today, (d) => fill.push({ key: d, label: formatDayLabel(d, today) }));
+    return bucketEnergy(trips, charges, (d) => ({ key: d, label: formatDayLabel(d, today) }), fill);
+  }
+
+  if (period === "month") {
+    const fill: { key: string; label: string }[] = [];
+    const seen = new Set<string>();
+    eachDayDesc(start, today, (d) => {
+      const w = weekStartDay(d);
+      if (seen.has(w)) return;
+      seen.add(w);
+      fill.push({ key: `w-${w}`, label: weekGroupLabel(w, today) });
+    });
+    return bucketEnergy(
+      trips,
+      charges,
+      (d) => {
+        const w = weekStartDay(d);
+        return { key: `w-${w}`, label: weekGroupLabel(w, today) };
+      },
+      fill,
+    );
+  }
+
+  if (period === "year") {
+    const fill: { key: string; label: string }[] = [];
+    const seen = new Set<string>();
+    eachDayDesc(start, today, (d) => {
+      const m = d.slice(0, 7);
+      if (seen.has(m)) return;
+      seen.add(m);
+      fill.push({ key: m, label: monthGroupLabel(d, false) });
+    });
+    return bucketEnergy(
+      trips,
+      charges,
+      (d) => ({ key: d.slice(0, 7), label: monthGroupLabel(d, false) }),
+      fill,
+    );
+  }
+
+  const fill: { key: string; label: string }[] = [];
+  const seen = new Set<string>();
+  eachDayDesc(start, today, (d) => {
+    const y = d.slice(0, 4);
+    if (seen.has(y)) return;
+    seen.add(y);
+    fill.push({ key: y, label: y });
   });
+  return bucketEnergy(trips, charges, (d) => ({ key: d.slice(0, 4), label: d.slice(0, 4) }), fill);
 }
 
 export function chargesInFrom(sessions: ChargeSession[], period: Period, today = laDayString()) {
@@ -539,6 +617,133 @@ export function groupTrips(period: Period, today = laDayString()) {
     else groups.push({ day: t.day, label: formatDayLabel(t.day, today), items: [t] });
   }
   return groups;
+}
+
+export type TripHistoryGroup = {
+  key: string;
+  label: string;
+  items: Trip[];
+  groups: TripHistoryGroup[];
+};
+
+function sortTripsNewest(trips: Trip[]) {
+  return [...trips].sort((a, b) => (a.day === b.day ? b.hour - a.hour : a.day < b.day ? 1 : -1));
+}
+
+function emptyDay(day: string, today: string): TripHistoryGroup {
+  return { key: day, label: formatDayLabel(day, today), items: [], groups: [] };
+}
+
+function tripsByDay(trips: Trip[], today: string): TripHistoryGroup[] {
+  const groups: TripHistoryGroup[] = [];
+  for (const t of sortTripsNewest(trips)) {
+    const last = groups[groups.length - 1];
+    if (last && last.key === t.day) last.items.push(t);
+    else groups.push({ key: t.day, label: formatDayLabel(t.day, today), items: [t], groups: [] });
+  }
+  return groups;
+}
+
+function weekStartDay(day: string) {
+  return addDays(day, -weekday(day));
+}
+
+function weekGroupLabel(start: string, today: string) {
+  const end = addDays(start, 6);
+  const clipped = end > today ? today : end;
+  const thisStart = weekStartDay(today);
+  if (start === thisStart) return "This week";
+  if (start === addDays(thisStart, -7)) return "Last week";
+  return formatDayRange(start, clipped, today);
+}
+
+function monthGroupLabel(day: string, withYear: boolean) {
+  const [y, m] = day.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString("en-US", {
+    month: "long",
+    year: withYear ? "numeric" : undefined,
+    timeZone: "UTC",
+  });
+}
+
+function leafDay(group: TripHistoryGroup): string {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(group.key)) return group.key;
+  if (group.key.startsWith("w-")) return group.key.slice(2);
+  if (group.key.startsWith("m-")) return `${group.key.slice(2)}-01`;
+  if (group.key.startsWith("y-")) return `${group.key.slice(2)}-01-01`;
+  return group.groups[0] ? leafDay(group.groups[0]) : group.key;
+}
+
+function cluster(children: TripHistoryGroup[], keyOf: (g: TripHistoryGroup) => { key: string; label: string }) {
+  const parents = new Map<string, TripHistoryGroup>();
+  const order: string[] = [];
+  for (const child of children) {
+    const { key, label } = keyOf(child);
+    let parent = parents.get(key);
+    if (!parent) {
+      parent = { key, label, items: [], groups: [] };
+      parents.set(key, parent);
+      order.push(key);
+    }
+    parent.groups.push(child);
+    parent.items.push(...child.items);
+  }
+  return order.map((k) => parents.get(k)!);
+}
+
+function padDays(days: TripHistoryGroup[], start: string, end: string, today: string) {
+  const map = new Map(days.map((d) => [d.key, d]));
+  const out: TripHistoryGroup[] = [];
+  for (let day = end; ; day = addDays(day, -1)) {
+    out.push(map.get(day) ?? emptyDay(day, today));
+    if (day === start) break;
+  }
+  return out;
+}
+
+function weeksOf(days: TripHistoryGroup[], today: string) {
+  return cluster(days, (g) => {
+    const start = weekStartDay(leafDay(g));
+    return { key: `w-${start}`, label: weekGroupLabel(start, today) };
+  });
+}
+
+function monthsOf(days: TripHistoryGroup[], today: string, withYear: boolean) {
+  const months = cluster(days, (g) => {
+    const day = leafDay(g);
+    const month = day.slice(0, 7);
+    return { key: `m-${month}`, label: monthGroupLabel(day, withYear) };
+  });
+  return months.map((month) => ({ ...month, groups: weeksOf(month.groups, today) }));
+}
+
+function yearsOf(days: TripHistoryGroup[], today: string) {
+  return cluster(monthsOf(days, today, false), (g) => {
+    const year = g.key.startsWith("m-") ? g.key.slice(2, 6) : leafDay(g).slice(0, 4);
+    return { key: `y-${year}`, label: year };
+  });
+}
+
+/**
+ * History tree for the selected period, newest first.
+ * Day → today; Week → 7 days; Month → weeks → days; Year → months → weeks;
+ * Total → years → months.
+ */
+export function nestTrips(trips: Trip[], period: Period, today = laDayString()): TripHistoryGroup[] {
+  const days = tripsByDay(trips, today);
+  if (period === "day") {
+    const todayGroup = days.find((d) => d.key === today) ?? emptyDay(today, today);
+    return [{ ...todayGroup, label: "Today" }];
+  }
+  if (period === "week") {
+    const start = periodStart("week", today);
+    const inWindow = trips.every((t) => t.day >= start && t.day <= today);
+    if (inWindow) return padDays(days, start, today, today);
+    return days;
+  }
+  if (period === "month") return weeksOf(days, today);
+  if (period === "year") return monthsOf(days, today, false);
+  return yearsOf(days, today);
 }
 
 export function periodCaption(period: Period, today = laDayString()) {

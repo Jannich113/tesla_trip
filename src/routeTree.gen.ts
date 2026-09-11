@@ -10,12 +10,24 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as PlanRouteImport } from './routes/plan'
+import { Route as ApiDriveRouteImport } from './routes/api/drive'
 import { Route as ApiElprisRouteImport } from './routes/api/elpris'
 import { Route as ApiTeslaCallbackRouteImport } from './routes/api/tesla/callback'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PlanRoute = PlanRouteImport.update({
+  id: '/plan',
+  path: '/plan',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiDriveRoute = ApiDriveRouteImport.update({
+  id: '/api/drive',
+  path: '/api/drive',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiElprisRoute = ApiElprisRouteImport.update({
@@ -31,30 +43,45 @@ const ApiTeslaCallbackRoute = ApiTeslaCallbackRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/plan': typeof PlanRoute
+  '/api/drive': typeof ApiDriveRoute
   '/api/elpris': typeof ApiElprisRoute
   '/api/tesla/callback': typeof ApiTeslaCallbackRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/plan': typeof PlanRoute
+  '/api/drive': typeof ApiDriveRoute
   '/api/elpris': typeof ApiElprisRoute
   '/api/tesla/callback': typeof ApiTeslaCallbackRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/plan': typeof PlanRoute
+  '/api/drive': typeof ApiDriveRoute
   '/api/elpris': typeof ApiElprisRoute
   '/api/tesla/callback': typeof ApiTeslaCallbackRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/api/elpris' | '/api/tesla/callback'
+  fullPaths:
+    '/' | '/plan' | '/api/drive' | '/api/elpris' | '/api/tesla/callback'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/api/elpris' | '/api/tesla/callback'
-  id: '__root__' | '/' | '/api/elpris' | '/api/tesla/callback'
+  to: '/' | '/plan' | '/api/drive' | '/api/elpris' | '/api/tesla/callback'
+  id:
+    | '__root__'
+    | '/'
+    | '/plan'
+    | '/api/drive'
+    | '/api/elpris'
+    | '/api/tesla/callback'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  PlanRoute: typeof PlanRoute
+  ApiDriveRoute: typeof ApiDriveRoute
   ApiElprisRoute: typeof ApiElprisRoute
   ApiTeslaCallbackRoute: typeof ApiTeslaCallbackRoute
 }
@@ -66,6 +93,20 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/plan': {
+      id: '/plan'
+      path: '/plan'
+      fullPath: '/plan'
+      preLoaderRoute: typeof PlanRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/drive': {
+      id: '/api/drive'
+      path: '/api/drive'
+      fullPath: '/api/drive'
+      preLoaderRoute: typeof ApiDriveRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/elpris': {
@@ -87,6 +128,8 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  PlanRoute: PlanRoute,
+  ApiDriveRoute: ApiDriveRoute,
   ApiElprisRoute: ApiElprisRoute,
   ApiTeslaCallbackRoute: ApiTeslaCallbackRoute,
 }

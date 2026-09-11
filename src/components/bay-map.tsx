@@ -17,6 +17,8 @@ export type MapRoute = {
   from: [number, number];
   to: [number, number];
   weight: number;
+  path?: [number, number][];
+  color?: string;
 };
 
 function escapeHtml(s: string) {
@@ -138,10 +140,10 @@ export function BayMap({
       const maxW = Math.max(1, ...routes.map((r) => r.weight));
       for (const route of routes) {
         const selected = selectedSet.has(route.id);
-        const pts = arc(route.from, route.to);
+        const pts = route.path && route.path.length >= 2 ? route.path : arc(route.from, route.to);
         pts.forEach((p) => bounds.push(p));
         L.polyline(pts, {
-          color: "#1ecf8a",
+          color: route.color || "#1ecf8a",
           opacity: selected ? 0.95 : selectedSet.size ? 0.16 : 0.28,
           weight: selected ? 4 : 1.6 + (route.weight / maxW) * 2.4,
           lineCap: "round",
@@ -153,11 +155,10 @@ export function BayMap({
 
       for (const marker of markers) {
         bounds.push([marker.lat, marker.lng]);
-        const onRoute = selectedRoutes.some(
-          (route) =>
-            (marker.lat === route.from[0] && marker.lng === route.from[1]) ||
-            (marker.lat === route.to[0] && marker.lng === route.to[1]),
-        );
+        const onRoute = selectedRoutes.some((route) => {
+          const pts = route.path && route.path.length >= 2 ? route.path : [route.from, route.to];
+          return pts.some((p) => Math.abs(p[0] - marker.lat) < 1e-4 && Math.abs(p[1] - marker.lng) < 1e-4);
+        });
         const selected = selectedSet.has(marker.id) || onRoute;
         if (marker.radiusM && marker.radiusM > 0 && (selected || dropping || markers.length <= 8)) {
           const circle = L.circle([marker.lat, marker.lng], {
@@ -192,7 +193,7 @@ export function BayMap({
 
       const focus =
         selectedRoutes.length > 0
-          ? selectedRoutes.flatMap((r) => arc(r.from, r.to))
+          ? selectedRoutes.flatMap((r) => (r.path && r.path.length >= 2 ? r.path : arc(r.from, r.to)))
           : bounds;
       if (!dropping && focus.length >= 2) {
         map.fitBounds(L.latLngBounds(focus), {

@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { ChevronDown } from "lucide-react";
 import { BayMap, type MapMarker, type MapRoute } from "@/components/bay-map";
 import { PeriodPills } from "@/components/period-pills";
 import {
@@ -7,19 +8,20 @@ import {
   DELIVERED_DAY,
   TRIPS,
   dailyEnergy,
-  formatDayLabel,
   formatDayRange,
   formatUsd,
   formatWhen,
-  groupTrips,
   laDayString,
+  nestTrips,
   periodCaption,
   periodEnergy,
   periodStart,
   tripCorridors,
   tripTotals,
+  tripsIn,
   tripsInRange,
   type Trip,
+  type TripHistoryGroup,
 } from "@/lib/history";
 import { geo } from "@/lib/places";
 import { cn } from "@/lib/utils";
@@ -31,6 +33,7 @@ import {
   albumTotals,
   albumTrips,
   useTripStore,
+  type TripAlbum,
 } from "@/store/trip-store";
 import { useVehicleStore } from "@/store/vehicle-store";
 
@@ -85,10 +88,10 @@ export function TripsScreen() {
   const [draftName, setDraftName] = useState("");
   const [rangeStart, setRangeStart] = useState("");
   const [rangeEnd, setRangeEnd] = useState("");
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
 
   const today = useMemo(() => laDayString(), []);
   const periodTotals = useMemo(() => tripTotals(period, today), [period, today]);
-  const groups = useMemo(() => groupTrips(period, today), [period, today]);
   const corridors = useMemo(() => tripCorridors(period, today), [period, today]);
   const album = albums.find((a) => a.id === albumId) ?? null;
   const albumItems = useMemo(() => (album ? albumTrips(album) : []), [album]);
@@ -178,15 +181,14 @@ export function TripsScreen() {
     () => (focusView ? focusView.keys : active ? [active] : []),
     [focusView, active],
   );
-  const listed = groups.reduce((n, g) => n + g.items.length, 0);
-  const visible = groups.slice(0, period === "week" || period === "day" ? 14 : 28);
+  const historyTree = useMemo(() => {
+    if (album && !picking) return nestTrips(albumItems, "week", today);
+    if (picking && rangeStart && rangeEnd) return nestTrips(tripsInRange(rangeStart, rangeEnd), "week", today);
+    return nestTrips(tripsIn(period, today), period, today);
+  }, [album, picking, albumItems, today, rangeStart, rangeEnd, period]);
+  const listed = historyTree.reduce((n, g) => n + g.items.length, 0);
   const hero = insight ?? periodTotals;
   const whMi = hero.mi > 0.1 ? (hero.kwh * 1000) / hero.mi : 0;
-  const historyGroups = useMemo(() => {
-    if (album && !picking) return byDay(albumItems, today);
-    if (picking && rangeStart && rangeEnd) return byDay(tripsInRange(rangeStart, rangeEnd), today);
-    return visible;
-  }, [album, picking, albumItems, today, rangeStart, rangeEnd, visible]);
 
   const caption = picking && picked.length
     ? `${picked.length} selected`
@@ -241,9 +243,62 @@ export function TripsScreen() {
         onChange={(p) => {
           setPeriod(p);
           setSelected(null);
+          setOpenGroups({});
           if (!album) setAlbumId(null);
         }}
       />
+
+      <section className="rounded-xl bg-surface px-5 py-5 shadow-[var(--shadow-border)]">
+        <p className="text-xs font-medium text-muted">{periodCaption(period, today)}</p>
+        {insight ? (
+          <p className="mt-1 text-xs text-subtle">
+            {picking
+              ? `${insight.count} selected · ${formatDayRange(insight.firstDay, insight.lastDay, today)}`
+              : album
+                ? `${album.name} · ${formatDayRange(insight.firstDay, insight.lastDay, today)}`
+                : formatDayRange(insight.firstDay, insight.lastDay, today)}
+          </p>
+        ) : null}
+        <p className="mt-2 text-4xl font-medium tracking-tight tabular-nums">
+          {formatDistance(hero.mi, units, hero.mi >= 100 ? 0 : 1)}
+        </p>
+        <p className="mt-2 text-sm text-muted">
+          {formatNumber(hero.count, 0)} {hero.count === 1 ? "trip" : "trips"}
+          <span className="text-subtle"> · </span>
+          {formatNumber(hero.kwh, 1)} kWh
+          {insight ? (
+            <>
+              <span className="text-subtle"> · </span>
+              {insight.days.length} {insight.days.length === 1 ? "day" : "days"}
+            </>
+          ) : null}
+          <span className="text-subtle"> · </span>
+          {formatEfficiency(whMi, units)}
+          <span className="text-subtle"> · </span>
+          {minutesToHm(hero.min)}
+        </p>
+      </section>
+
+      {insight ? (
+        <div className="grid grid-cols-2 gap-3">
+          <Tile
+            label="Drive cost"
+            value={formatUsd(insight.driveUsd)}
+            hint={insight.chargeCount ? "at charging mix" : "est. home rate"}
+          />
+          <Tile
+            label="Energy"
+            value={`${formatNumber(insight.kwh, 1)} kWh`}
+            hint={insight.farthest ? `Longest ${formatDistance(insight.farthest.mi, units, 1)}` : undefined}
+          />
+          <Tile label="Time" value={minutesToHm(insight.min)} hint={`${formatNumber(insight.mi / Math.max(insight.count, 1), 1)} avg`} />
+          <Tile
+            label="Places"
+            value={String(insight.places.length)}
+            hint={insight.places[0] ? insight.places[0].short : undefined}
+          />
+        </div>
+      ) : null}
 
       <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
         <div className="flex items-center justify-between gap-3">
@@ -412,63 +467,21 @@ export function TripsScreen() {
         hidden={!shareLocation}
       />
 
-      <section className="rounded-xl bg-surface px-5 py-5 shadow-[var(--shadow-border)]">
-        <p className="text-xs font-medium text-muted">
-          {picking && insight
-            ? `${insight.count} selected`
-            : album
-              ? album.name
-              : periodCaption(period, today)}
-        </p>
-        {insight ? (
-          <p className="mt-1 text-xs text-subtle">{formatDayRange(insight.firstDay, insight.lastDay, today)}</p>
-        ) : null}
-        <p className="mt-2 text-4xl font-medium tracking-tight tabular-nums">
-          {formatDistance(hero.mi, units, hero.mi >= 100 ? 0 : 1)}
-        </p>
-        <p className="mt-2 text-sm text-muted">
-          {formatNumber(hero.count, 0)} {hero.count === 1 ? "trip" : "trips"}
-          {insight ? (
-            <>
-              <span className="text-subtle"> · </span>
-              {insight.days.length} {insight.days.length === 1 ? "day" : "days"}
-            </>
-          ) : null}
-          <span className="text-subtle"> · </span>
-          {formatEfficiency(whMi, units)}
-          <span className="text-subtle"> · </span>
-          {minutesToHm(hero.min)}
-        </p>
-      </section>
-
-      {insight ? (
-        <>
-          <div className="grid grid-cols-2 gap-3">
-            <Tile
-              label="Drive cost"
-              value={formatUsd(insight.driveUsd)}
-              hint={insight.chargeCount ? "at charging mix" : "est. home rate"}
-            />
-            <Tile
-              label="Energy"
-              value={`${formatNumber(insight.kwh, 1)} kWh`}
-              hint={insight.farthest ? `Longest ${formatDistance(insight.farthest.mi, units, 1)}` : undefined}
-            />
-            <Tile label="Time" value={minutesToHm(insight.min)} hint={`${formatNumber(insight.mi / Math.max(insight.count, 1), 1)} avg`} />
-            <Tile
-              label="Places"
-              value={String(insight.places.length)}
-              hint={insight.places[0] ? insight.places[0].short : undefined}
-            />
-          </div>
-        </>
-      ) : null}
-
       <EnergyDays
         days={energyDays}
         maxKwh={maxKwh}
         units={units}
-        monthly={(period === "year" || period === "total") && !focusTrips}
+        title={
+          focusTrips
+            ? "Daily energy"
+            : period === "total"
+              ? "Yearly energy"
+              : period === "year"
+                ? "Monthly energy"
+                : period === "month"
+                  ? "Weekly energy"
+                  : "Daily energy"
+        }
       />
 
       {insight ? (
@@ -523,79 +536,27 @@ export function TripsScreen() {
         <div className="flex items-end justify-between">
           <p className="text-sm font-medium">{album && !picking ? album.name : "History"}</p>
           <p className="text-xs text-muted">
-            {picking
-              ? `${picked.length} selected`
-              : album
-                ? `${albumItems.length} trips`
-                : visible.length < groups.length
-                  ? `Latest ${visible.reduce((n, g) => n + g.items.length, 0)} of ${listed}`
-                  : `${listed} trips`}
+            {picking ? `${picked.length} selected` : `${listed} trips`}
           </p>
         </div>
-        <div className="mt-2">
-          {historyGroups.map((group) => (
-            <div key={group.day} className="pt-3">
-              <p className="text-[11px] font-medium uppercase tracking-wide text-subtle">
-                {group.label}
-              </p>
-              <ul className="divide-y divide-border">
-                {group.items.map((trip) => {
-                  const key = `${trip.from}→${trip.to}`;
-                  const on = !picking && key === active;
-                  const marked = picked.includes(trip.id);
-                  const owned = albumOfTrip(albums, trip.id);
-                  const wh = (trip.kwh * 1000) / trip.mi;
-                  return (
-                    <li key={trip.id}>
-                      <button
-                        type="button"
-                        onClick={() => (picking ? togglePick(trip.id) : setSelected(key))}
-                        className={cn(
-                          "flex w-full items-center gap-3 py-3 text-left",
-                          "transition-[opacity] duration-150 ease-[var(--ease-out)]",
-                          picking && marked ? "opacity-100" : on ? "opacity-100" : "opacity-80",
-                        )}
-                      >
-                        {picking ? (
-                          <span
-                            className={cn(
-                              "flex size-5 shrink-0 items-center justify-center rounded-full",
-                              marked ? "bg-foreground" : "bg-surface-2 shadow-[var(--shadow-border)]",
-                            )}
-                          >
-                            {marked ? <span className="size-2 rounded-full bg-background" /> : null}
-                          </span>
-                        ) : null}
-                        <div className="min-w-0 flex-1 pr-3">
-                          <p className={cn("truncate text-sm", (on || marked) && "text-accent")}>
-                            {trip.to}
-                          </p>
-                          <p className="truncate text-xs text-muted">
-                            {formatWhen(trip.day, trip.hour, trip.minute, today)}
-                            <span className="text-subtle"> · </span>
-                            {trip.from}
-                            {owned && !album ? (
-                              <>
-                                <span className="text-subtle"> · </span>
-                                {owned.name}
-                              </>
-                            ) : null}
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-sm tabular-nums">
-                            {formatDistance(trip.mi, units, 1)}
-                          </p>
-                          <p className="text-xs tabular-nums text-muted">
-                            {formatNumber(trip.kwh, 1)} kWh · {formatEfficiency(wh, units)}
-                          </p>
-                        </div>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
+        <div className="mt-1">
+          {historyTree.map((group) => (
+            <HistoryGroup
+              key={group.key}
+              group={group}
+              depth={0}
+              open={openGroups}
+              onToggle={(key) => setOpenGroups((cur) => ({ ...cur, [key]: !cur[key] }))}
+              picking={picking}
+              picked={picked}
+              active={active}
+              album={album}
+              albums={albums}
+              today={today}
+              units={units}
+              onPick={togglePick}
+              onSelect={setSelected}
+            />
           ))}
         </div>
       </section>
@@ -603,27 +564,153 @@ export function TripsScreen() {
   );
 }
 
-function byDay(trips: Trip[], today: string) {
-  const groups: { day: string; label: string; items: Trip[] }[] = [];
-  const sorted = [...trips].sort((a, b) => (a.day === b.day ? b.hour - a.hour : a.day < b.day ? 1 : -1));
-  for (const t of sorted) {
-    const last = groups[groups.length - 1];
-    if (last && last.day === t.day) last.items.push(t);
-    else groups.push({ day: t.day, label: formatDayLabel(t.day, today), items: [t] });
-  }
-  return groups;
+function HistoryGroup({
+  group,
+  depth,
+  open,
+  onToggle,
+  picking,
+  picked,
+  active,
+  album,
+  albums,
+  today,
+  units,
+  onPick,
+  onSelect,
+}: {
+  group: TripHistoryGroup;
+  depth: number;
+  open: Record<string, boolean>;
+  onToggle: (key: string) => void;
+  picking: boolean;
+  picked: string[];
+  active: string | undefined;
+  album: TripAlbum | null;
+  albums: TripAlbum[];
+  today: string;
+  units: "mi" | "km";
+  onPick: (id: string) => void;
+  onSelect: (key: string) => void;
+}) {
+  const expanded = Boolean(open[group.key]);
+  const miles = group.items.reduce((n, t) => n + t.mi, 0);
+  return (
+    <div className={depth ? "pl-4" : undefined}>
+      <button
+        type="button"
+        onClick={() => onToggle(group.key)}
+        className="flex w-full items-center gap-3 py-3 text-left transition-[scale] duration-150 ease-[var(--ease-out)] active:scale-[0.99]"
+      >
+        <ChevronDown
+          className={cn(
+            "size-4 shrink-0 text-muted transition-transform duration-150 ease-[var(--ease-out)]",
+            expanded ? "rotate-0" : "-rotate-90",
+          )}
+        />
+        <div className="min-w-0 flex-1">
+          <p className={cn("truncate", depth ? "text-sm" : "text-sm font-medium")}>{group.label}</p>
+          <p className="text-xs text-muted">
+            {group.items.length} {group.items.length === 1 ? "trip" : "trips"}
+            {miles > 0 ? (
+              <>
+                <span className="text-subtle"> · </span>
+                {formatDistance(miles, units, miles >= 100 ? 0 : 1)}
+              </>
+            ) : null}
+          </p>
+        </div>
+      </button>
+      {expanded ? (
+        group.groups.length ? (
+          group.groups.map((child) => (
+            <HistoryGroup
+              key={child.key}
+              group={child}
+              depth={depth + 1}
+              open={open}
+              onToggle={onToggle}
+              picking={picking}
+              picked={picked}
+              active={active}
+              album={album}
+              albums={albums}
+              today={today}
+              units={units}
+              onPick={onPick}
+              onSelect={onSelect}
+            />
+          ))
+        ) : (
+          <ul className="divide-y divide-border pl-7">
+            {group.items.map((trip) => {
+              const key = `${trip.from}→${trip.to}`;
+              const on = !picking && key === active;
+              const marked = picked.includes(trip.id);
+              const owned = albumOfTrip(albums, trip.id);
+              const wh = trip.mi > 0 ? (trip.kwh * 1000) / trip.mi : 0;
+              return (
+                <li key={trip.id}>
+                  <button
+                    type="button"
+                    onClick={() => (picking ? onPick(trip.id) : onSelect(key))}
+                    className={cn(
+                      "flex w-full items-center gap-3 py-3 text-left",
+                      "transition-[opacity] duration-150 ease-[var(--ease-out)]",
+                      picking && marked ? "opacity-100" : on ? "opacity-100" : "opacity-80",
+                    )}
+                  >
+                    {picking ? (
+                      <span
+                        className={cn(
+                          "flex size-5 shrink-0 items-center justify-center rounded-full",
+                          marked ? "bg-foreground" : "bg-surface-2 shadow-[var(--shadow-border)]",
+                        )}
+                      >
+                        {marked ? <span className="size-2 rounded-full bg-background" /> : null}
+                      </span>
+                    ) : null}
+                    <div className="min-w-0 flex-1 pr-3">
+                      <p className={cn("truncate text-sm", (on || marked) && "text-accent")}>{trip.to}</p>
+                      <p className="truncate text-xs text-muted">
+                        {formatWhen(trip.day, trip.hour, trip.minute, today)}
+                        <span className="text-subtle"> · </span>
+                        {trip.from}
+                        {owned && !album ? (
+                          <>
+                            <span className="text-subtle"> · </span>
+                            {owned.name}
+                          </>
+                        ) : null}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm tabular-nums">{formatDistance(trip.mi, units, 1)}</p>
+                      <p className="text-xs tabular-nums text-muted">
+                        {formatNumber(trip.kwh, 1)} kWh · {formatEfficiency(wh, units)}
+                      </p>
+                    </div>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )
+      ) : null}
+    </div>
+  );
 }
 
 function EnergyDays({
   days,
   maxKwh,
   units,
-  monthly,
+  title,
 }: {
   days: EnergyDay[];
   maxKwh: number;
   units: "mi" | "km";
-  monthly?: boolean;
+  title: string;
 }) {
   if (!days.length) return null;
   const drive = days.reduce((n, d) => n + d.driveKwh, 0);
@@ -631,7 +718,7 @@ function EnergyDays({
   return (
     <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
       <div className="flex items-end justify-between gap-3">
-        <p className="text-sm font-medium">{monthly ? "Monthly energy" : "Daily energy"}</p>
+        <p className="text-sm font-medium">{title}</p>
         <p className="text-xs text-muted">
           <span className="text-accent">Driven</span>
           <span className="text-subtle"> · </span>

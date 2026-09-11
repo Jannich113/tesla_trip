@@ -111,6 +111,12 @@ input[type="range"].charge-range::-moz-range-thumb {
   z-index: 0;
 }
 
+.bay-map .leaflet-pane,
+.bay-map .leaflet-top,
+.bay-map .leaflet-bottom {
+  z-index: 1 !important;
+}
+
 /* Dark-friendly OSM basemap without a tile API key (tiles stay in tile-pane). */
 .bay-map .leaflet-tile-pane {
   filter: invert(1) hue-rotate(180deg) brightness(0.95) contrast(0.9) saturate(0.85);

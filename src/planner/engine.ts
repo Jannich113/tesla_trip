@@ -1,0 +1,386 @@
+import { type ChargeLocation } from "@/lib/charge-locations";
+import { type HourPrice } from "@/lib/elpris";
+import { type Units } from "@/lib/vehicle";
+
+export const LEG_MODES = ["eco", "standard", "fastest", "cheapest"] as const;
+export type LegMode = (typeof LEG_MODES)[number];
+
+export const DETOUR_KM = [0, 5, 10, 20] as const;
+export type DetourKm = (typeof DETOUR_KM)[number];
+
+export type PlanStop = {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+};
+
+export type RoutedLeg = {
+  miles: number;
+  seconds: number;
+  path: [number, number][];
+  source: "valhalla" | "osrm" | "air";
+};
+
+export type PricedCharge = {
+  locationId: string;
+  name: string;
+  kind: ChargeLocation["kind"];
+  kwh: number;
+  kr: number;
+  rateKr: number;
+  label: string;
+  inBand: boolean;
+  distM: number;
+  windowLabel: string;
+  cheapWindow: boolean;
+};
+
+export type PricedLeg = {
+  from: PlanStop;
+  to: PlanStop;
+  mode: LegMode;
+  detourKm: number;
+  route: RoutedLeg;
+  kwh: number;
+  arriveSoc: number;
+  needed: boolean;
+  charge: PricedCharge | null;
+  backup: PricedCharge | null;
+  kr: number;
+};
+
+const WH_PER_MI: Record<LegMode, number> = {
+  eco: 210,
+  standard: 240,
+  fastest: 280,
+  cheapest: 235,
+};
+
+export const DKK_PER_USD = 6.85;
+const RESERVE_SOC = 15;
+const TARGET_SOC = 70;
+
+export function modeLabel(mode: LegMode) {
+  if (mode === "eco") return "Eco";
+  if (mode === "fastest") return "Fastest";
+  if (mode === "cheapest") return "Cheapest";
+  return "Standard";
+}
+
+export function modeColor(mode: LegMode) {
+  if (mode === "eco") return "#1ecf8a";
+  if (mode === "fastest") return "#6ea8ff";
+  if (mode === "cheapest") return "#e4c15a";
+  return "#c8cdd4";
+}
+
+export function haversineM(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
+  const R = 6371000;
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+  const s =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((a.lat * Math.PI) / 180) * Math.cos((b.lat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
+}
+
+export function airRoute(from: PlanStop, to: PlanStop): RoutedLeg {
+  const m = haversineM(from, to) * 1.22;
+  const miles = m / 1609.344;
+  return {
+    miles,
+    seconds: (miles / 42) * 3600,
+    path: [
+      [from.lat, from.lng],
+      [to.lat, to.lng],
+    ],
+    source: "air",
+  };
+}
+
+export async function fetchRoute(from: PlanStop, to: PlanStop, mode: LegMode): Promise<RoutedLeg> {
+  try {
+    const res = await fetch("/api/drive", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        from: { lat: from.lat, lng: from.lng },
+        to: { lat: to.lat, lng: to.lng },
+        mode,
+      }),
+    });
+    if (!res.ok) return airRoute(from, to);
+    const body = (await res.json()) as RoutedLeg;
+    if (!body.path?.length || !Number.isFinite(body.miles)) return airRoute(from, to);
+    return body;
+  } catch {
+    return airRoute(from, to);
+  }
+}
+
+export function driveKwh(miles: number, mode: LegMode) {
+  return (miles * WH_PER_MI[mode]) / 1000;
+}
+
+export function minDistToPathM(lat: number, lng: number, path: [number, number][]) {
+  if (path.length === 0) return Infinity;
+  const step = Math.max(1, Math.floor(path.length / 40));
+  let best = Infinity;
+  for (let i = 0; i < path.length; i += step) {
+    const d = haversineM({ lat, lng }, { lat: path[i][0], lng: path[i][1] });
+    if (d < best) best = d;
+  }
+  const last = path[path.length - 1];
+  best = Math.min(best, haversineM({ lat, lng }, { lat: last[0], lng: last[1] }));
+  return best;
+}
+
+function usdToKr(usd: number) {
+  return usd * DKK_PER_USD;
+}
+
+export type ChargeWindow = {
+  hours: HourPrice[];
+  kr: number;
+  avgKr: number;
+  label: string;
+};
+
+function hourSpan(h: string, add: number) {
+  return String((Number(h) + add + 24) % 24).padStart(2, "0");
+}
+
+export function formatChargeWindow(hours: HourPrice[]) {
+  if (!hours.length) return "live";
+  const start = hours[0].hour;
+  if (hours.length === 1) return `${start}:00`;
+  return `${start}–${hourSpan(hours[hours.length - 1].hour, 1)}`;
+}
+
+function windowCost(hours: HourPrice[], start: number, kwh: number, acKw: number) {
+  const kw = Math.max(acKw, 1);
+  const n = Math.max(1, Math.ceil(kwh / kw));
+  let left = kwh;
+  let cost = 0;
+  for (let j = 0; j < n && left > 0.001; j++) {
+    const hour = hours[Math.min(start + j, hours.length - 1)];
+    const slice = Math.min(left, kw);
+    cost += slice * hour.krPerKwh;
+    left -= slice;
+  }
+  return cost;
+}
+
+/** Sequential hours from now (remaining list already starts at the current hour). */
+export function nowWindow(hours: HourPrice[], kwh: number, acKw: number): ChargeWindow | null {
+  if (kwh <= 0 || hours.length === 0) return null;
+  const kw = Math.max(acKw, 1);
+  const n = Math.max(1, Math.ceil(kwh / kw));
+  const used = hours.slice(0, Math.min(n, hours.length));
+  while (used.length < n) used.push(hours[hours.length - 1]);
+  const kr = windowCost(hours, 0, kwh, acKw);
+  return { hours: used, kr, avgKr: kr / kwh, label: formatChargeWindow(used) };
+}
+
+/** Cheapest contiguous window that covers the AC session. */
+export function cheapestWindow(hours: HourPrice[], kwh: number, acKw: number): ChargeWindow | null {
+  if (kwh <= 0 || hours.length === 0) return null;
+  const kw = Math.max(acKw, 1);
+  const n = Math.max(1, Math.ceil(kwh / kw));
+  const last = Math.max(0, hours.length - n);
+  let bestI = 0;
+  let best = Infinity;
+  for (let i = 0; i <= last; i++) {
+    const cost = windowCost(hours, i, kwh, acKw);
+    if (cost < best) {
+      best = cost;
+      bestI = i;
+    }
+  }
+  const used = hours.slice(bestI, bestI + n);
+  while (used.length < n) used.push(hours[hours.length - 1]);
+  return { hours: used, kr: best, avgKr: best / kwh, label: formatChargeWindow(used) };
+}
+
+export function cheapestHour(hours: HourPrice[]): HourPrice | null {
+  if (!hours.length) return null;
+  return hours.reduce((best, h) => (h.krPerKwh < best.krPerKwh ? h : best));
+}
+
+/** Blend live spot hours over the AC session length. */
+export function acChargeKr(kwh: number, hours: HourPrice[], acKw: number) {
+  return nowWindow(hours, kwh, acKw)?.kr ?? 0;
+}
+
+export function remainingHours(today: HourPrice[], tomorrow: HourPrice[], currentHour: string | null) {
+  const rest = currentHour ? today.filter((h) => h.hour >= currentHour) : today;
+  return rest.length ? [...rest, ...tomorrow] : [...today, ...tomorrow];
+}
+
+function chargerLabel(loc: ChargeLocation) {
+  if (loc.kind === "supercharger") return `${loc.short} Supercharger`;
+  if (loc.kind === "home") return "Home · live spot";
+  return loc.short || loc.name;
+}
+
+function toPriced(
+  loc: ChargeLocation,
+  kwhNeed: number,
+  acKr: number,
+  hours: HourPrice[],
+  acKw: number,
+  distM: number,
+  inBand: boolean,
+  preferCheap: boolean,
+): PricedCharge {
+  if (loc.kind === "supercharger") {
+    const rate = usdToKr(loc.usdPerKwh);
+    return {
+      locationId: loc.id,
+      name: loc.short || loc.name,
+      kind: loc.kind,
+      kwh: kwhNeed,
+      kr: kwhNeed * rate,
+      rateKr: rate,
+      label: chargerLabel(loc),
+      inBand,
+      distM,
+      windowLabel: "DC now",
+      cheapWindow: false,
+    };
+  }
+  const win = preferCheap ? cheapestWindow(hours, kwhNeed, acKw) : nowWindow(hours, kwhNeed, acKw);
+  const kr = win?.kr ?? kwhNeed * acKr;
+  return {
+    locationId: loc.id,
+    name: loc.short || loc.name,
+    kind: loc.kind,
+    kwh: kwhNeed,
+    kr,
+    rateKr: win?.avgKr ?? acKr,
+    label: chargerLabel(loc),
+    inBand,
+    distM,
+    windowLabel: win?.label ?? "live",
+    cheapWindow: Boolean(preferCheap && win),
+  };
+}
+
+export function pickCharges(opts: {
+  kwhNeed: number;
+  path: [number, number][];
+  detourKm: number;
+  locations: ChargeLocation[];
+  acKr: number;
+  hours: HourPrice[];
+  acKw: number;
+  preferCheap: boolean;
+}): { primary: PricedCharge; backup: PricedCharge | null } | null {
+  const { kwhNeed, path, detourKm, locations, acKr, hours, acKw, preferCheap } = opts;
+  if (kwhNeed <= 0.05 || !locations.length) return null;
+  const band = Math.max(detourKm * 1000, 80);
+
+  const scored = locations.map((loc) => {
+    const distM = minDistToPathM(loc.lat, loc.lng, path);
+    const priced = toPriced(loc, kwhNeed, acKr, hours, acKw, distM, distM <= band, preferCheap);
+    return { loc, distM, priced };
+  });
+
+  const byRank = (a: (typeof scored)[0], b: (typeof scored)[0]) => {
+    if (preferCheap) return a.priced.kr - b.priced.kr || a.distM - b.distM;
+    const dc = Number(b.loc.kind === "supercharger") - Number(a.loc.kind === "supercharger");
+    if (dc) return dc;
+    return a.distM - b.distM;
+  };
+
+  const inBand = scored.filter((s) => s.distM <= band).sort(byRank);
+  const outBand = scored.filter((s) => s.distM > band).sort((a, b) => a.distM - b.distM || a.priced.kr - b.priced.kr);
+  const primarySrc = inBand[0] ?? outBand[0];
+  if (!primarySrc) return null;
+
+  const backupSrc =
+    inBand.find((s) => s.loc.id !== primarySrc.loc.id) ??
+    outBand.find((s) => s.loc.id !== primarySrc.loc.id) ??
+    null;
+
+  return {
+    primary: primarySrc.priced,
+    backup: backupSrc
+      ? { ...backupSrc.priced, label: backupSrc.priced.inBand ? backupSrc.priced.label : `${backupSrc.priced.label} · outside` }
+      : null,
+  };
+}
+
+export function pricePlan(opts: {
+  stops: PlanStop[];
+  modes: LegMode[];
+  detours: number[];
+  routes: RoutedLeg[];
+  soc: number;
+  usableKwh: number;
+  locations: ChargeLocation[];
+  hours: HourPrice[];
+  acKw: number;
+  acKr: number;
+}): PricedLeg[] {
+  const { stops, modes, detours, routes, usableKwh, locations, hours, acKw, acKr } = opts;
+  let soc = opts.soc;
+  const out: PricedLeg[] = [];
+  for (let i = 0; i < routes.length; i++) {
+    const mode = modes[i] ?? "standard";
+    const route = routes[i];
+    const kwh = driveKwh(route.miles, mode);
+    const socAfter = soc - (kwh / usableKwh) * 100;
+    const needed = socAfter < RESERVE_SOC;
+    const needSoc = needed
+      ? Math.max(TARGET_SOC - soc, RESERVE_SOC + (kwh / usableKwh) * 100 - soc)
+      : Math.min(20, kwh);
+    const kwhNeed = Math.max(needSoc / 100, 0) * usableKwh || kwh;
+    const pick = pickCharges({
+      kwhNeed: needed ? kwhNeed : Math.max(kwh, 5),
+      path: route.path,
+      detourKm: detours[i] ?? 10,
+      locations,
+      acKr,
+      hours,
+      acKw,
+      preferCheap: mode === "cheapest",
+    });
+    const charge = pick?.primary ?? null;
+    const backup = pick?.backup ?? null;
+    let startSoc = soc;
+    if (needed && charge) startSoc = soc + (charge.kwh / usableKwh) * 100;
+    const arriveSoc = Math.max(1, startSoc - (kwh / usableKwh) * 100);
+    const billed = needed || mode === "cheapest" ? charge : null;
+    out.push({
+      from: stops[i],
+      to: stops[i + 1],
+      mode,
+      detourKm: detours[i] ?? 10,
+      route,
+      kwh,
+      arriveSoc,
+      needed,
+      charge,
+      backup,
+      kr: billed?.kr ?? 0,
+    });
+    soc = arriveSoc;
+  }
+  return out;
+}
+
+export function minutesToHm(min: number) {
+  const m = Math.max(0, Math.round(min));
+  const h = Math.floor(m / 60);
+  const r = m % 60;
+  if (!h) return `${r} min`;
+  return `${h} h ${r} min`;
+}
+
+export function formatDetour(km: number, units: Units) {
+  if (units === "km") return `${km} km`;
+  const mi = km / 1.609344;
+  return mi < 10 ? `${mi.toFixed(0)} mi` : `${Math.round(mi)} mi`;
+}

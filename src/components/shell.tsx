@@ -8,16 +8,17 @@ import { VehicleScreen } from "@/components/vehicle-screen";
 import { ElprisScreen } from "@/components/elpris-screen";
 import { type Tab, VEHICLE } from "@/lib/vehicle";
 import { cn } from "@/lib/utils";
+import { useVehicleProfile } from "@/hooks/use-vehicle-profile";
 import { useChargeStore } from "@/store/charge-store";
 import { useTripStore } from "@/store/trip-store";
 import { useVehicleStore } from "@/store/vehicle-store";
 
-const TABS: { id: Tab; label: string; icon: typeof House }[] = [
+const TABS: { id: Tab; label?: string; icon: typeof House }[] = [
   { id: "home", label: "Home", icon: House },
   { id: "trips", label: "Trips", icon: Route },
   { id: "costs", label: "Costs", icon: CircleDollarSign },
   { id: "elpris", label: "Elpris", icon: Zap },
-  { id: "vehicle", label: "Juniper", icon: Car },
+  { id: "vehicle", icon: Car },
 ];
 
 function LightBar() {
@@ -49,15 +50,23 @@ function writeTabToLocation(next: Tab) {
 }
 
 export function Dashboard() {
-  const [tab, setTab] = useState<Tab>(() => readTabFromLocation());
+  const [tab, setTab] = useState<Tab>("home");
   const wake = useVehicleStore((s) => s.wake);
   const waking = useVehicleStore((s) => s.waking);
   const tick = useVehicleStore((s) => s.tick);
+  const { profile } = useVehicleProfile();
 
   const selectTab = (next: Tab) => {
     setTab(next);
     writeTabToLocation(next);
   };
+
+  useEffect(() => {
+    setTab(readTabFromLocation());
+    const onPop = () => setTab(readTabFromLocation());
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
 
   useEffect(() => {
     void Promise.all([
@@ -123,13 +132,14 @@ export function Dashboard() {
         </main>
 
         <nav
-          className="fixed inset-x-0 bottom-0 z-20 mx-auto max-w-lg border-t border-border bg-background/95 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-1 backdrop-blur-sm"
+          className="fixed inset-x-0 bottom-0 z-50 mx-auto max-w-lg border-t border-border bg-background/95 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-1 backdrop-blur-sm"
           aria-label="Primary"
         >
           <ul className="grid grid-cols-5">
             {TABS.map((item) => {
               const Icon = item.icon;
               const active = tab === item.id;
+              const label = item.id === "vehicle" ? profile.name : item.label!;
               return (
                 <li key={item.id}>
                   <button
@@ -143,14 +153,15 @@ export function Dashboard() {
                       selectTab(item.id);
                     }}
                     className={cn(
-                      "flex h-14 w-full touch-manipulation flex-col items-center justify-center gap-0.5 text-[11px] font-medium",
+                      "flex h-14 w-full touch-manipulation flex-col items-center justify-center gap-0.5 text-[10px] font-medium",
                       "transition-[color,scale] duration-150 ease-[var(--ease-out)] active:scale-[0.96]",
                       active ? "text-foreground" : "text-muted",
                     )}
                     aria-current={active ? "page" : undefined}
+                    aria-label={label}
                   >
                     <Icon className="size-5" strokeWidth={active ? 2.2 : 1.8} />
-                    {item.label}
+                    <span className="max-w-full truncate px-0.5">{label}</span>
                   </button>
                 </li>
               );

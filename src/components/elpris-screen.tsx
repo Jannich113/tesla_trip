@@ -34,15 +34,29 @@ function barWidth(kr: number, min: number, max: number) {
   return Math.round(8 + t * 92);
 }
 
+function dkHourNow() {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Copenhagen",
+    hour: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+  const raw = parts.find((p) => p.type === "hour")?.value ?? "00";
+  const hour = raw === "24" ? "00" : raw;
+  return hour.padStart(2, "0");
+}
+
 function HourList({
   hours,
   currentHour,
+  dimPast,
   emptyNote,
 }: {
   hours: HourPrice[];
   currentHour?: string | null;
+  dimPast?: boolean;
   emptyNote?: string;
 }) {
+  const [pastOpen, setPastOpen] = useState(false);
   const { min, max } = useMemo(() => {
     if (hours.length === 0) return { min: 0, max: 0 };
     let lo = hours[0].krPerKwh;
@@ -54,58 +68,88 @@ function HourList({
     return { min: lo, max: hi };
   }, [hours]);
 
+  const pastHours =
+    dimPast && currentHour != null ? hours.filter((h) => h.hour < currentHour) : [];
+  const rest =
+    dimPast && currentHour != null ? hours.filter((h) => h.hour >= currentHour) : hours;
+
   if (hours.length === 0) {
     return (
       <p className="px-1 py-3 text-sm text-muted">{emptyNote ?? "Ingen priser endnu"}</p>
     );
   }
 
-  return (
-    <ul className="space-y-1">
-      {hours.map((h) => {
-        const active = currentHour != null && h.hour === currentHour;
-        const tint = priceTint(h.krPerKwh, min, max);
-        return (
-          <li
-            key={h.timeDk}
+  function rows(list: HourPrice[], past: boolean) {
+    return list.map((h) => {
+      const active = !past && currentHour != null && h.hour === currentHour;
+      const tint = priceTint(h.krPerKwh, min, max);
+      return (
+        <li
+          key={h.timeDk}
+          className={cn(
+            "flex items-center gap-3 rounded-lg px-3 py-2 transition-opacity duration-300",
+            active ? "bg-surface-2 shadow-[var(--shadow-border)]" : "bg-transparent",
+            past && "opacity-45",
+          )}
+        >
+          <span
             className={cn(
-              "flex items-center gap-3 rounded-lg px-3 py-2",
-              active ? "bg-surface-2 shadow-[var(--shadow-border)]" : "bg-transparent",
+              "w-10 shrink-0 text-sm tabular-nums",
+              active ? "font-medium text-foreground" : "text-muted",
             )}
           >
-            <span
+            {h.hour}:00
+          </span>
+          <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-surface-2">
+            <div
               className={cn(
-                "w-10 shrink-0 text-sm tabular-nums",
-                active ? "font-medium text-foreground" : "text-muted",
+                "h-full rounded-full transition-[width] duration-300",
+                tint === "text-accent" && "bg-accent",
+                tint === "text-danger" && "bg-danger",
+                tint === "text-foreground" && "bg-muted",
               )}
-            >
-              {h.hour}:00
-            </span>
-            <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-surface-2">
-              <div
-                className={cn(
-                  "h-full rounded-full transition-[width] duration-300",
-                  tint === "text-accent" && "bg-accent",
-                  tint === "text-danger" && "bg-danger",
-                  tint === "text-foreground" && "bg-muted",
-                )}
-                style={{ width: `${barWidth(h.krPerKwh, min, max)}%` }}
-              />
-            </div>
-            <div className="w-[5.5rem] shrink-0 text-right">
-              <p className={cn("text-sm font-medium tabular-nums", tint)}>
-                {formatKrValue(h.krPerKwh)} <span className="text-xs font-normal text-muted">kr</span>
-              </p>
-              <p className="text-[11px] tabular-nums text-subtle">
-                {formatOreValue(h.orePerKwh)} øre
-              </p>
-            </div>
-          </li>
-        );
-      })}
-    </ul>
+              style={{ width: `${barWidth(h.krPerKwh, min, max)}%` }}
+            />
+          </div>
+          <div className="w-[5.5rem] shrink-0 text-right">
+            <p className={cn("text-sm font-medium tabular-nums", past ? "text-muted" : tint)}>
+              {formatKrValue(h.krPerKwh)} <span className="text-xs font-normal text-muted">kr</span>
+            </p>
+            <p className="text-[11px] tabular-nums text-subtle">
+              {formatOreValue(h.orePerKwh)} øre
+            </p>
+          </div>
+        </li>
+      );
+    });
+  }
+
+  return (
+    <div>
+      {pastHours.length ? (
+        <button
+          type="button"
+          onClick={() => setPastOpen((open) => !open)}
+          className="mb-1 flex w-full items-center gap-2 px-2 py-1 text-left"
+        >
+          <ChevronDown
+            className={cn(
+              "size-4 shrink-0 text-muted transition-transform duration-150 ease-[var(--ease-out)]",
+              pastOpen ? "rotate-0" : "-rotate-90",
+            )}
+          />
+          <p className="text-xs font-medium uppercase tracking-wide text-muted">Tidligere</p>
+          <p className="ml-auto text-[11px] text-subtle">
+            {pastHours.length} {pastHours.length === 1 ? "time" : "timer"}
+          </p>
+        </button>
+      ) : null}
+      {pastOpen ? <ul className="mb-2 space-y-1">{rows(pastHours, true)}</ul> : null}
+      <ul className="space-y-1">{rows(rest, false)}</ul>
+    </div>
   );
 }
+
 
 function SelectField({
   label,
@@ -151,15 +195,17 @@ export function ElprisScreen() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [tomorrowOpen, setTomorrowOpen] = useState(false);
+  const [nowHour, setNowHour] = useState(dkHourNow);
 
   const load = useCallback(
     async (isRefresh = false, nextArea: PriceArea = area) => {
       if (isRefresh) setRefreshing(true);
       else setLoading(true);
-      setError(null);
       try {
         const next = await fetchElpris(nextArea);
         setRaw(next);
+        setError(null);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Kunne ikke hente elpris");
       } finally {
@@ -175,6 +221,12 @@ export function ElprisScreen() {
     const id = window.setInterval(() => void load(true, area), 5 * 60_000);
     return () => window.clearInterval(id);
   }, [load, area]);
+
+  useEffect(() => {
+    setNowHour(dkHourNow());
+    const id = window.setInterval(() => setNowHour(dkHourNow()), 30_000);
+    return () => window.clearInterval(id);
+  }, []);
 
   const data = useMemo(() => {
     if (!raw) return null;
@@ -194,7 +246,6 @@ export function ElprisScreen() {
   }, [raw, provider.tillægOre]);
 
   const current = data?.current ?? null;
-  const currentHour = current?.hour ?? null;
   const areaMeta = PRICE_AREAS.find((a) => a.id === area);
 
   function onAreaChange(next: string) {
@@ -303,20 +354,34 @@ export function ElprisScreen() {
               <p className="text-xs font-medium uppercase tracking-wide text-muted">I dag</p>
               <p className="text-[11px] text-subtle">{data?.today.length ?? 0} timer</p>
             </div>
-            <HourList hours={data?.today ?? []} currentHour={currentHour} />
+            <HourList hours={data?.today ?? []} currentHour={nowHour} dimPast />
           </section>
 
           <section className="mt-4 rounded-xl bg-surface px-3 py-4 shadow-[var(--shadow-border)]">
-            <div className="mb-2 flex items-baseline justify-between px-2">
+            <button
+              type="button"
+              onClick={() => setTomorrowOpen((open) => !open)}
+              className="flex w-full items-center gap-2 px-2 py-1 text-left"
+            >
+              <ChevronDown
+                className={cn(
+                  "size-4 shrink-0 text-muted transition-transform duration-150 ease-[var(--ease-out)]",
+                  tomorrowOpen ? "rotate-0" : "-rotate-90",
+                )}
+              />
               <p className="text-xs font-medium uppercase tracking-wide text-muted">I morgen</p>
-              <p className="text-[11px] text-subtle">
+              <p className="ml-auto text-[11px] text-subtle">
                 {(data?.tomorrow.length ?? 0) > 0 ? `${data?.tomorrow.length} timer` : "Afventer"}
               </p>
-            </div>
-            <HourList
-              hours={data?.tomorrow ?? []}
-              emptyNote="Morgendagens priser er endnu ikke offentliggjort (typisk ~13:00)."
-            />
+            </button>
+            {tomorrowOpen ? (
+              <div className="mt-2">
+                <HourList
+                  hours={data?.tomorrow ?? []}
+                  emptyNote="Morgendagens priser er endnu ikke offentliggjort (typisk ~13:00)."
+                />
+              </div>
+            ) : null}
           </section>
 
           <p className="mt-4 px-1 text-[11px] leading-relaxed text-subtle">
