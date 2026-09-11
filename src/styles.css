@@ -1,0 +1,220 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Outfit", ui-sans-serif, system-ui, sans-serif;
+
+  --color-background: #070708;
+  --color-foreground: #f3f3f4;
+  --color-surface: #121214;
+  --color-surface-2: #1b1b1f;
+  --color-muted: #8d8d95;
+  --color-subtle: #5e5e66;
+  --color-border: #ffffff14;
+  --color-accent: #1ecf8a;
+  --color-accent-fg: #04140e;
+  --color-warn: #e0b36a;
+  --color-danger: #e56a6a;
+  --color-climate: #7aa8ff;
+  --color-heat: #f08a62;
+
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1.25rem;
+  --radius-xl: 1.75rem;
+  --radius-2xl: 2rem;
+
+  --shadow-border: 0 0 0 1px #ffffff14;
+  --shadow-border-hover: 0 0 0 1px #ffffff22;
+
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background: var(--color-background);
+    color: var(--color-foreground);
+    color-scheme: dark;
+  }
+
+  body {
+    min-height: 100dvh;
+    background: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+}
+
+.car-hero {
+  mask-image: linear-gradient(to bottom, #000 58%, transparent 100%);
+}
+
+.battery-fill {
+  width: var(--soc);
+}
+
+.limit-tick {
+  left: var(--limit);
+}
+
+input[type="range"].charge-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--color-foreground) 12%, transparent);
+  outline: none;
+}
+
+input[type="range"].charge-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--color-foreground);
+  box-shadow: 0 0 0 4px var(--color-background);
+}
+
+input[type="range"].charge-range::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--color-foreground);
+}
+
+.leaflet-container {
+  background: var(--color-surface);
+  font-family: var(--font-sans);
+  z-index: 0;
+}
+
+.leaflet-control-zoom {
+  border: 0 !important;
+  margin: 0 10px 10px 0 !important;
+}
+
+.leaflet-control-zoom a {
+  width: 32px !important;
+  height: 32px !important;
+  line-height: 32px !important;
+  background: var(--color-surface-2) !important;
+  color: var(--color-foreground) !important;
+  border: 0 !important;
+  border-radius: 8px !important;
+}
+
+.leaflet-control-zoom a:first-child {
+  margin-bottom: 4px;
+}
+
+.leaflet-bar {
+  box-shadow: var(--shadow-border) !important;
+}
+
+.map-pin-wrap {
+  background: none !important;
+  border: none !important;
+}
+
+.map-pin {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  transform: translate(-50%, calc(-100% - 2px));
+  color: var(--color-foreground);
+}
+
+.map-pin-dot,
+.map-pin-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  box-shadow: 0 0 0 2px var(--color-background);
+}
+
+.map-pin-dot {
+  width: 10px;
+  height: 10px;
+  background: var(--color-foreground);
+}
+
+.map-pin-badge {
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  background: var(--color-foreground);
+  color: var(--color-background);
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.map-pin-home .map-pin-dot,
+.map-pin-home .map-pin-badge {
+  background: var(--color-accent);
+  color: var(--color-accent-fg);
+}
+
+.map-pin-charger .map-pin-dot,
+.map-pin-charger .map-pin-badge {
+  background: var(--color-warn);
+  color: var(--color-background);
+}
+
+.map-pin-label {
+  max-width: 92px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 999px;
+  background: var(--color-background);
+  padding: 2px 7px;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--color-foreground);
+}
+
+.map-pin.is-selected .map-pin-dot {
+  width: 14px;
+  height: 14px;
+}
+
+.map-pin.is-selected .map-pin-label {
+  background: var(--color-foreground);
+  color: var(--color-background);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

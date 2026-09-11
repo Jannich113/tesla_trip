@@ -1,0 +1,38 @@
+{
+  "url": "http://127.0.0.1:8081/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "Juniper",
+      "hasCanvas": false,
+      "bodyTextLen": 181,
+      "bodyTextHash": "a349a5a62b06569a3671f395d75945d0036c9247eeca7748272eb6155e53134b",
+      "bodyTextPrefix": "Juniper Model Y · Long Range AWD Parked Updated just now 68% Bat",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-built.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "Juniper",
+      "hasCanvas": false,
+      "bodyTextLen": 181,
+      "bodyTextHash": "a349a5a62b06569a3671f395d75945d0036c9247eeca7748272eb6155e53134b",
+      "bodyTextPrefix": "Juniper Model Y · Long Range AWD Parked Updated just now 68% Bat",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-built-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/app-builder-built.json",
+  "divergesFromBaseline": false,
+  "baselineReasons": []
+}
