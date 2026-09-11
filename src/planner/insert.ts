@@ -74,9 +74,10 @@ export function splitRoutedLeg(route: SplitRoute, lat: number, lng: number): { b
   if (route.path.length < 2) return null;
   let idx = closestPathIndex(route.path, lat, lng);
   idx = Math.max(1, Math.min(route.path.length - 2, idx));
-  const via: [number, number] = [lat, lng];
-  const beforePath: [number, number][] = [...route.path.slice(0, idx + 1), via];
-  const afterPath: [number, number][] = [via, ...route.path.slice(idx)];
+  const via = route.path[idx];
+  const beforePath = route.path.slice(0, idx + 1);
+  const afterPath = route.path.slice(idx);
+  if (beforePath.length < 2 || afterPath.length < 2) return null;
   const total = pathMeters(route.path) || 1;
   const frac = Math.min(0.95, Math.max(0.05, pathMeters(beforePath) / total));
   return {
@@ -119,11 +120,14 @@ export function pickViaOnPath(opts: {
     const distM = minDistToPathM(loc.lat, loc.lng, path);
     if (distM > searchBand) continue;
     const frac = alongFraction(path, loc.lat, loc.lng);
-    if (frac < 0.08 || frac > 0.92) continue;
+    if (frac < 0.18 || frac > 0.82) continue;
     const energyTo = totalKwh * frac;
     if (energyTo > budgetKwh * 0.95) continue;
-    const netId = networkIdFor(loc.kind, (loc as { networkId?: string }).networkId);
+    const netId = networkIdFor(loc.kind, loc.networkId);
     const rate = (netId ? rateForNetwork(netId, Boolean(memberships[netId])) : null) ?? loc.usdPerKwh * 6.85;
+    if (!(rate > 0.3)) continue;
+    const extraMin = (distM / 1000 / 80) * 60;
+    if (focus === "pris" && extraMin > Math.max(12, (detourKm / 80) * 60)) continue;
     const fit = chargeFitScore(focus, {
       distM,
       kr: rate * 20,
@@ -131,7 +135,7 @@ export function pickViaOnPath(opts: {
       extraDriveKr: (distM / 1000) * 1.2,
       extraKwh: (distM / 1000) * 0.2,
     });
-    const along = focus === "pris" ? energyTo * 1.2 : energyTo * 6;
+    const along = energyTo * 6;
     const score = along - fit;
     if (score > bestScore) {
       bestScore = score;

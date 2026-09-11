@@ -491,6 +491,10 @@ export function pickCharges(opts: {
     preferCheap && opts.routeSeconds
       ? (opts.routeSeconds * 0.15) / 60
       : Infinity;
+  const locRate = (loc: ChargeLocation) => {
+    const id = networkIdFor(loc.kind, loc.networkId);
+    return (id ? rateForNetwork(id, Boolean(memberships[id])) : null) ?? usdToKr(loc.usdPerKwh);
+  };
 
   const nearby = locations
     .map((loc) => ({ loc, distM: minDistToPathM(loc.lat, loc.lng, path) }))
@@ -499,12 +503,9 @@ export function pickCharges(opts: {
         s.loc.id === preferId ||
         s.loc.id === backupId ||
         (s.distM <= Math.max(searchBand, 40_000) &&
-          (s.distM / 1000 / 80) * 60 <= maxExtraMin),
+          (s.distM / 1000 / 80) * 60 <= maxExtraMin &&
+          locRate(s.loc) > 0.3),
     );
-  const locRate = (loc: ChargeLocation) => {
-    const id = networkIdFor(loc.kind, loc.networkId);
-    return (id ? rateForNetwork(id, Boolean(memberships[id])) : null) ?? usdToKr(loc.usdPerKwh);
-  };
   const rankedNear = preferCheap
     ? [...nearby].sort((a, b) => a.distM - b.distM).slice(0, 16)
     : [...nearby].sort((a, b) => a.distM - b.distM).slice(0, 24);
