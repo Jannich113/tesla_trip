@@ -402,13 +402,20 @@ export function PlanScreen() {
       if (!loc) continue;
                     const isBackup = leg.backup?.locationId === spot.locationId && leg.charge?.locationId !== spot.locationId;
                     const required = Boolean(!isBackup && leg.needed);
+                    const suggested = Boolean(!isBackup && !required && leg.suggested);
                     chargerMarkers.push({
                       id: `chg-${i}-${spot.locationId}`,
                       lat: loc.lat,
                       lng: loc.lng,
-                      label: required ? `Required · ${spot.name}` : isBackup ? `Backup · ${spot.name}` : spot.name,
+                      label: required
+                        ? `Required · ${spot.name}`
+                        : suggested
+                          ? `Suggested · ${spot.name}`
+                          : isBackup
+                            ? `Backup · ${spot.name}`
+                            : spot.name,
                       kind: "charger",
-                      badge: required ? "!" : isBackup ? "B" : "C",
+                      badge: required ? "!" : suggested ? "+" : isBackup ? "B" : "C",
                     });
     }
   }
@@ -751,11 +758,8 @@ export function PlanScreen() {
                         {formatNumber(leg.arriveSoc, 0)}% in
                         {leg.needed ? (
                           <span className="font-medium text-amber-300"> · charge required</span>
-                        ) : leg.advice && leg.charge ? (
-                          <>
-                            <span className="text-subtle"> · </span>
-                            Suggested {formatKrValue(leg.charge.kr, 2)} kr
-                          </>
+                        ) : leg.suggested && leg.charge ? (
+                          <span className="font-medium text-emerald-400"> · suggested</span>
                         ) : null}
                       </p>
                     ) : (
@@ -896,6 +900,7 @@ export function PlanScreen() {
                           spot={leg.charge}
                           active
                           required={leg.needed}
+                          suggested={leg.suggested}
                         />
                         <button
                           type="button"
@@ -907,6 +912,10 @@ export function PlanScreen() {
                         {leg.needed ? (
                           <p className="rounded-lg bg-amber-400/15 px-3 py-1.5 text-[11px] font-medium text-amber-200">
                             Charge required here to finish this leg
+                          </p>
+                        ) : leg.suggested ? (
+                          <p className="rounded-lg bg-emerald-400/15 px-3 py-1.5 text-[11px] font-medium text-emerald-300">
+                            Optional · good price, battery low enough
                           </p>
                         ) : null}
                         {leg.backup ? (
@@ -985,11 +994,13 @@ function ChargeChoice({
   spot,
   active,
   required = false,
+  suggested = false,
 }: {
   title: string;
   spot: PricedCharge;
   active: boolean;
   required?: boolean;
+  suggested?: boolean;
 }) {
   return (
     <div
@@ -997,13 +1008,20 @@ function ChargeChoice({
         "flex items-center gap-3 rounded-xl px-3 py-2",
         required
           ? "bg-amber-400/15 shadow-[inset_0_0_0_1px_rgba(251,191,36,0.55)]"
-          : active
-            ? "bg-surface-2 shadow-[var(--shadow-border)]"
-            : "bg-transparent",
+          : suggested
+            ? "bg-emerald-400/15 shadow-[inset_0_0_0_1px_rgba(52,211,153,0.55)]"
+            : active
+              ? "bg-surface-2 shadow-[var(--shadow-border)]"
+              : "bg-transparent",
       )}
     >
       <div className="min-w-0 flex-1">
-        <p className={cn("text-[11px] font-medium uppercase tracking-wide", required ? "text-amber-200" : "text-muted")}>
+        <p
+          className={cn(
+            "text-[11px] font-medium uppercase tracking-wide",
+            required ? "text-amber-200" : suggested ? "text-emerald-300" : "text-muted",
+          )}
+        >
           {title}
         </p>
         <p className="truncate text-sm">{spot.label}</p>

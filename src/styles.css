@@ -211,6 +211,18 @@ input[type="range"].charge-range::-moz-range-thumb {
   color: var(--color-background);
 }
 
+.map-pin-ok .map-pin-dot,
+.map-pin-ok .map-pin-badge {
+  background: #1ecf8a;
+  color: #04120c;
+}
+
+.map-pin-need .map-pin-dot,
+.map-pin-need .map-pin-badge {
+  background: #fbbf24;
+  color: #1a1400;
+}
+
 .map-pin-label {
   max-width: 92px;
   overflow: hidden;

@@ -178,7 +178,9 @@ export function BayMap({
             bounds.push([c.getSouth(), c.getWest()], [c.getNorth(), c.getEast()]);
           }
         }
-        const html = `<div class="map-pin map-pin-${marker.kind}${selected ? " is-selected" : ""}">${
+        const html = `<div class="map-pin map-pin-${marker.kind}${selected ? " is-selected" : ""}${
+          marker.badge === "+" ? " map-pin-ok" : marker.badge === "!" ? " map-pin-need" : ""
+        }">${
           marker.badge ? `<span class="map-pin-badge">${escapeHtml(marker.badge)}</span>` : `<span class="map-pin-dot"></span>`
         }<span class="map-pin-label">${escapeHtml(marker.label)}</span></div>`;
         L.marker([marker.lat, marker.lng], {
