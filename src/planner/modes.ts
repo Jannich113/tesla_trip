@@ -35,8 +35,8 @@ export function modeLabel(mode: LegMode) {
 }
 
 export function modeHint(mode: LegMode) {
-  if (mode === "eco") return "Avoids motorways, toll gates and road fees";
-  if (mode === "cheapest") return "Lowest charging cost. Optional: skip motorways and tolls.";
+  if (mode === "eco") return "Skips tolls and prefers slower roads. Uses a motorway only when it saves a lot of time.";
+  if (mode === "cheapest") return "Motorways ok. Skips tolls and hunts the lowest kWh.";
   return "Motorways and tolls for earliest arrival. Road fees don't matter.";
 }
 
@@ -67,10 +67,10 @@ export const DEFAULT_MODE_FOCUS: Record<LegMode, ModeFocus> = {
   cheapest: "pris",
 };
 
-/** Cheapest can take the quiet eco corridor when avoid-fees is on. */
-export function pathMode(mode: LegMode, avoidFees = false): "eco" | "fastest" {
+/** Eco: soft-avoid motorways. Cheapest: highways ok, skip tolls unless avoid-fees. */
+export function pathMode(mode: LegMode, avoidFees = false): LegMode {
   if (mode === "eco") return "eco";
-  if (mode === "cheapest" && avoidFees) return "eco";
+  if (mode === "cheapest") return avoidFees ? "eco" : "cheapest";
   return "fastest";
 }
 
@@ -298,15 +298,24 @@ export function hoursFrom<T extends { hour: string; ymd?: string }>(hours: T[], 
   return next >= 0 ? hours.slice(next) : hours;
 }
 
-/** Eco = no motorways or tolls. Fastest = highways. Cheapest = fastest roads, cheap stalls. */
+/** Eco discourages motorways. Fastest takes them + tolls. Cheapest takes motorways, skips tolls. */
 export function costingFor(mode: LegMode): AutoCosting {
   if (mode === "eco") {
     return {
       shortest: false,
-      use_highways: 0,
+      use_highways: 0.35,
       use_tolls: 0,
       use_ferry: 0.2,
-      top_speed: 90,
+      top_speed: 110,
+    };
+  }
+  if (mode === "cheapest") {
+    return {
+      shortest: false,
+      use_highways: 1,
+      use_tolls: 0,
+      use_ferry: 0.2,
+      top_speed: 130,
     };
   }
   return {

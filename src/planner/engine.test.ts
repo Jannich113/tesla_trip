@@ -30,10 +30,10 @@ import { encodePolyline, decodePolyline, polylineBufferKm, chargersOnPath, simpl
 import { countryProfile } from "./country-profiles.ts";
 
 describe("leg modes", () => {
-  it("eco is shortest + avoids highways and tolls", () => {
+  it("eco discourages highways and skips tolls", () => {
     const c = costingFor("eco");
     assert.equal(c.shortest, false);
-    assert.equal(c.use_highways, 0);
+    assert.ok(c.use_highways < 0.5);
     assert.equal(c.use_tolls, 0);
   });
 
@@ -44,8 +44,11 @@ describe("leg modes", () => {
     assert.equal(c.use_tolls, 1);
   });
 
-  it("cheapest uses the same path as fastest", () => {
-    assert.deepEqual(costingFor("cheapest"), costingFor("fastest"));
+  it("cheapest uses motorways but skips tolls", () => {
+    const c = costingFor("cheapest");
+    assert.equal(c.use_highways, 1);
+    assert.equal(c.use_tolls, 0);
+    assert.notEqual(c.use_tolls, costingFor("fastest").use_tolls);
   });
 
   it("charge search is wider for eco and cheapest", () => {
@@ -66,7 +69,7 @@ describe("leg modes", () => {
   it("default focus matches the mode", () => {
     assert.equal(pathMode("eco"), "eco");
     assert.equal(pathMode("fastest"), "fastest");
-    assert.equal(pathMode("cheapest"), "fastest");
+    assert.equal(pathMode("cheapest"), "cheapest");
     assert.equal(pathMode("cheapest", true), "eco");
   });
 

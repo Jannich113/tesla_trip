@@ -189,7 +189,7 @@ export function cachedRoutes(): Record<string, RoutedLeg> {
 }
 
 export async function fetchRoute(from: PlanStop, to: PlanStop, mode: LegMode): Promise<RoutedLeg> {
-  const key = `${from.lat.toFixed(4)},${from.lng.toFixed(4)}|${to.lat.toFixed(4)},${to.lng.toFixed(4)}|${mode === "cheapest" ? "fastest" : mode}|v4`;
+  const key = `${from.lat.toFixed(4)},${from.lng.toFixed(4)}|${to.lat.toFixed(4)},${to.lng.toFixed(4)}|${mode}|v5`;
   const hit = routeCache.get(key);
   if (hit && hit.source !== "air" && hit.path.length >= 8) return hit;
   try {

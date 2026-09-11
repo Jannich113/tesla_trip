@@ -91,11 +91,10 @@ function routeKey(
   to: { lat: number; lng: number },
   mode: LegMode,
 ) {
-  const path = mode === "cheapest" ? "fastest" : mode;
-  return `${from.lat.toFixed(4)},${from.lng.toFixed(4)}|${to.lat.toFixed(4)},${to.lng.toFixed(4)}|${path}`;
+  return `${from.lat.toFixed(4)},${from.lng.toFixed(4)}|${to.lat.toFixed(4)},${to.lng.toFixed(4)}|${mode}`;
 }
 
-const PATH_MODES: LegMode[] = ["eco", "fastest"];
+const PATH_MODES: LegMode[] = ["eco", "fastest", "cheapest"];
 
 export function PlanScreen() {
   const units = useVehicleStore((s) => s.units);
@@ -834,7 +833,7 @@ export function PlanScreen() {
                           {row.mode === "cheapest"
                             ? cheapAvoidFees
                               ? " · no motorways / tolls"
-                              : " · fastest path"
+                              : " · motorways, no tolls"
                             : sameCorridor
                               ? " · same corridor"
                               : ""}
@@ -861,7 +860,7 @@ export function PlanScreen() {
                       onChange={(e) => setCheapAvoidFees(e.target.checked)}
                       className="size-4 accent-foreground"
                     />
-                    Avoid motorways, toll gates and road fees
+                    Also skip motorways
                   </label>
                 ) : null}
                 </div>
@@ -1251,7 +1250,7 @@ export function PlanScreen() {
                           onChange={(e) => setCheapAvoidFees(e.target.checked)}
                           className="size-4 accent-foreground"
                         />
-                        Avoid motorways, toll gates and road fees
+                        Also skip motorways
                       </label>
                     ) : null}
                     <div className="mt-3 flex gap-1">
