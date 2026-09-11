@@ -258,6 +258,7 @@ export const usePlanStore = create<PlanStore>()(
         legWhen: s.legWhen,
         whPerMi: s.whPerMi,
         speedEff: s.speedEff,
+        networkAbo: s.networkAbo,
         saved: s.saved,
         seq: s.seq,
       }),
