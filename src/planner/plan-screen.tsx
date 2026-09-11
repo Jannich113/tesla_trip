@@ -208,6 +208,7 @@ export function PlanScreen() {
     acKr,
     speedEff,
     departHhmm,
+    arriveHhmm: whenKind === "arrive" ? clock : undefined,
     legWhen,
   };
 
@@ -484,7 +485,7 @@ export function PlanScreen() {
                         </span>
                         <span className="mt-0.5 block text-xs text-muted">
                           {t.chargeKwh > 0
-                            ? `${formatNumber(t.chargeKwh, 1)} kWh ${t.chargeLabel || "charge"} · ${minutesToHm(t.chargeMin)}${row.mode === "cheapest" ? " · cheaper power" : ""}`
+                            ? `${formatNumber(t.chargeKwh, 1)} kWh ${t.chargeLabel || "charge"} · ${t.waitMin > 0 ? `${minutesToHm(t.waitMin)} wait · ` : ""}${minutesToHm(t.chargeMin)} charge${row.mode === "cheapest" ? " · cheaper power" : ""}`
                             : "no charge"}
                         </span>
                       </>
@@ -853,7 +854,7 @@ function ChargeChoice({
         <p className="truncate text-sm">{spot.label}</p>
         <p className="text-xs text-subtle">
           {formatNumber(spot.kwh, 1)} kWh · {spot.windowLabel}
-          {spot.cheapWindow ? " cheapest" : ""}
+          {spot.cheapWindow ? " · cheapest" : ""}
           {spot.inBand ? "" : " · outside detour"}
         </p>
       </div>

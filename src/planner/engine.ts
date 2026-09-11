@@ -8,6 +8,8 @@ import {
   chargeSearchKm,
   driveKwhAtSpeed,
   hoursFrom,
+  minutesAhead,
+  waitMinUntil,
 } from "./modes";
 
 export {
@@ -64,6 +66,7 @@ export type PricedCharge = {
   distM: number;
   windowLabel: string;
   cheapWindow: boolean;
+  waitMin: number;
 };
 
 export type PricedLeg = {
@@ -80,6 +83,7 @@ export type PricedLeg = {
   departAt: string;
   arriveAt: string;
   chargeMin: number;
+  waitMin: number;
   startSoc: number;
   charge: PricedCharge | null;
   backup: PricedCharge | null;
@@ -175,6 +179,8 @@ export type ChargeWindow = {
   kr: number;
   avgKr: number;
   label: string;
+  waitMin: number;
+  startHour: string;
 };
 
 function hourSpan(h: string, add: number) {
@@ -210,27 +216,50 @@ export function nowWindow(hours: HourPrice[], kwh: number, acKw: number): Charge
   const used = hours.slice(0, Math.min(n, hours.length));
   while (used.length < n) used.push(hours[hours.length - 1]);
   const kr = windowCost(hours, 0, kwh, acKw);
-  return { hours: used, kr, avgKr: kr / kwh, label: formatChargeWindow(used) };
+  return {
+    hours: used,
+    kr,
+    avgKr: kr / kwh,
+    label: formatChargeWindow(used),
+    waitMin: 0,
+    startHour: used[0]?.hour ?? "00",
+  };
 }
 
-/** Cheapest contiguous window that covers the AC session. */
-export function cheapestWindow(hours: HourPrice[], kwh: number, acKw: number): ChargeWindow | null {
+/** Cheapest contiguous window that covers the AC session, after optional wait. */
+export function cheapestWindow(
+  hours: HourPrice[],
+  kwh: number,
+  acKw: number,
+  clockHhmm: string,
+  maxWaitMin = 18 * 60,
+): ChargeWindow | null {
   if (kwh <= 0 || hours.length === 0) return null;
   const kw = Math.max(acKw, 1);
   const n = Math.max(1, Math.ceil(kwh / kw));
   const last = Math.max(0, hours.length - n);
-  let bestI = 0;
+  let bestI = -1;
   let best = Infinity;
   for (let i = 0; i <= last; i++) {
+    const wait = waitMinUntil(clockHhmm, hours[i].hour);
+    if (wait > maxWaitMin) continue;
     const cost = windowCost(hours, i, kwh, acKw);
     if (cost < best) {
       best = cost;
       bestI = i;
     }
   }
+  if (bestI < 0) return nowWindow(hours, kwh, acKw);
   const used = hours.slice(bestI, bestI + n);
   while (used.length < n) used.push(hours[hours.length - 1]);
-  return { hours: used, kr: best, avgKr: best / kwh, label: formatChargeWindow(used) };
+  return {
+    hours: used,
+    kr: best,
+    avgKr: best / kwh,
+    label: formatChargeWindow(used),
+    waitMin: waitMinUntil(clockHhmm, used[0].hour),
+    startHour: used[0].hour,
+  };
 }
 
 export function cheapestHour(hours: HourPrice[]): HourPrice | null {
@@ -263,6 +292,8 @@ function toPriced(
   distM: number,
   inBand: boolean,
   preferCheap: boolean,
+  clockHhmm: string,
+  maxWaitMin: number,
 ): PricedCharge {
   if (loc.kind === "supercharger") {
     const rate = usdToKr(loc.usdPerKwh);
@@ -278,10 +309,16 @@ function toPriced(
       distM,
       windowLabel: "DC now",
       cheapWindow: false,
+      waitMin: 0,
     };
   }
-  const win = preferCheap ? cheapestWindow(hours, kwhNeed, acKw) : nowWindow(hours, kwhNeed, acKw);
+  const win = preferCheap
+    ? cheapestWindow(hours, kwhNeed, acKw, clockHhmm, maxWaitMin)
+    : nowWindow(hours, kwhNeed, acKw);
   const kr = win?.kr ?? kwhNeed * acKr;
+  const waitMin = win?.waitMin ?? 0;
+  const windowLabel =
+    waitMin > 0 && win ? `${win.label} · wait ${minutesToHm(waitMin)}` : (win?.label ?? "live");
   return {
     locationId: loc.id,
     name: loc.short || loc.name,
@@ -292,8 +329,9 @@ function toPriced(
     label: chargerLabel(loc),
     inBand,
     distM,
-    windowLabel: win?.label ?? "live",
+    windowLabel,
     cheapWindow: Boolean(preferCheap && win),
+    waitMin,
   };
 }
 
@@ -307,8 +345,10 @@ export function pickCharges(opts: {
   hours: HourPrice[];
   acKw: number;
   speedEff: SpeedEff;
+  clockHhmm: string;
+  maxWaitMin: number;
 }): { primary: PricedCharge; backup: PricedCharge | null } | null {
-  const { kwhNeed, path, detourKm, mode, locations, acKr, hours, acKw, speedEff } = opts;
+  const { kwhNeed, path, detourKm, mode, locations, acKr, hours, acKw, speedEff, clockHhmm, maxWaitMin } = opts;
   if (kwhNeed <= 0.05 || !locations.length) return null;
   const preferCheap = mode === "cheapest";
   const userBand = Math.max(detourKm * 1000, 80);
@@ -316,7 +356,18 @@ export function pickCharges(opts: {
 
   const scored = locations.map((loc) => {
     const distM = minDistToPathM(loc.lat, loc.lng, path);
-    const priced = toPriced(loc, kwhNeed, acKr, hours, acKw, distM, distM <= userBand, preferCheap);
+    const priced = toPriced(
+      loc,
+      kwhNeed,
+      acKr,
+      hours,
+      acKw,
+      distM,
+      distM <= userBand,
+      preferCheap,
+      clockHhmm,
+      maxWaitMin,
+    );
     return { loc, distM, priced };
   });
 
@@ -368,6 +419,7 @@ export function pricePlan(opts: {
   acKr: number;
   speedEff: SpeedEff;
   departHhmm: string;
+  arriveHhmm?: string;
   legWhen?: LegWhen[];
 }): PricedLeg[] {
   const { stops, modes, detours, routes, usableKwh, locations, hours, acKw, acKr, speedEff } =
@@ -397,6 +449,11 @@ export function pricePlan(opts: {
       ? Math.max(TARGET_SOC - soc, RESERVE_SOC + (kwh / usableKwh) * 100 - soc)
       : Math.min(TARGET_SOC - soc, Math.max((kwh / usableKwh) * 100, 12));
     const kwhNeed = Math.max(needSoc / 100, 0) * usableKwh;
+    const chargeMinEst = (Math.max(kwhNeed, 5) / Math.max(acKw, 1)) * 60;
+    const restDriveMin = routes.slice(i).reduce((n, r) => n + r.seconds / 60, 0);
+    const maxWaitMin = opts.arriveHhmm
+      ? Math.max(0, minutesAhead(clock, opts.arriveHhmm) - chargeMinEst - restDriveMin)
+      : 18 * 60;
     const pick = wantCharge
       ? pickCharges({
           kwhNeed: Math.max(kwhNeed, 5),
@@ -408,6 +465,8 @@ export function pricePlan(opts: {
           hours: legHours,
           acKw,
           speedEff,
+          clockHhmm: clock,
+          maxWaitMin,
         })
       : null;
     const charge = pick?.primary ?? null;
@@ -418,8 +477,10 @@ export function pricePlan(opts: {
         ? "suggested"
         : null;
     const billed = advice !== null && charge !== null;
+    const waitMin = billed && charge && charge.cheapWindow ? charge.waitMin : 0;
     const chargeMin = billed && charge ? (charge.kwh / Math.max(acKw, 1)) * 60 : 0;
     const departAt = clock;
+    if (waitMin > 0) clock = addMinutesHhmm(clock, waitMin);
     if (chargeMin > 0) clock = addMinutesHhmm(clock, chargeMin);
     clock = addMinutesHhmm(clock, route.seconds / 60);
     const startSoc = billed && charge ? Math.min(100, soc + (charge.kwh / usableKwh) * 100) : soc;
@@ -438,6 +499,7 @@ export function pricePlan(opts: {
       departAt,
       arriveAt: clock,
       chargeMin,
+      waitMin,
       startSoc,
       charge,
       backup,
@@ -456,7 +518,8 @@ export function planTotals(legs: PricedLeg[]) {
       acc.kr += leg.kr;
       acc.driveMin += leg.route.seconds / 60;
       acc.chargeMin += leg.chargeMin;
-      acc.min += leg.route.seconds / 60 + leg.chargeMin;
+      acc.waitMin += leg.waitMin;
+      acc.min += leg.route.seconds / 60 + leg.chargeMin + leg.waitMin;
       acc.chargeKwh += leg.advice ? (leg.charge?.kwh ?? 0) : 0;
       acc.requiredKwh += leg.needed ? (leg.charge?.kwh ?? 0) : 0;
       if (leg.advice && leg.charge && !acc.chargeLabel) acc.chargeLabel = leg.charge.label;
@@ -469,6 +532,7 @@ export function planTotals(legs: PricedLeg[]) {
       min: 0,
       driveMin: 0,
       chargeMin: 0,
+      waitMin: 0,
       chargeKwh: 0,
       requiredKwh: 0,
       chargeLabel: "",

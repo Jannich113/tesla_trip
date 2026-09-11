@@ -102,6 +102,25 @@ export function addMinutesHhmm(hhmm: string, add: number) {
   return formatHhmm(parseHhmm(hhmm) + add);
 }
 
+/** Minutes to wait from clock until startHour:00. 0 if that hour is already in progress. */
+export function waitMinUntil(clockHhmm: string, startHour: string) {
+  const clock = parseHhmm(clockHhmm);
+  const startH = Number(startHour);
+  if (!Number.isFinite(startH)) return 0;
+  const clockH = Math.floor(clock / 60);
+  if (startH === clockH) return 0;
+  const start = ((startH % 24) + 24) % 24 * 60;
+  let diff = start - clock;
+  if (diff < 0) diff += 24 * 60;
+  return diff;
+}
+
+export function minutesAhead(fromHhmm: string, toHhmm: string) {
+  let diff = parseHhmm(toHhmm) - parseHhmm(fromHhmm);
+  if (diff < 0) diff += 24 * 60;
+  return diff;
+}
+
 export function hoursFrom<T extends { hour: string }>(hours: T[], hhmm: string) {
   if (!hours.length) return [];
   const hour = hhmm.slice(0, 2).padStart(2, "0");

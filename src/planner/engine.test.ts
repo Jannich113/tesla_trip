@@ -9,6 +9,7 @@ import {
   epaWhPerMi,
   hoursFrom,
   interpolateWhPerMi,
+  waitMinUntil,
 } from "./modes.ts";
 
 describe("leg modes", () => {
@@ -77,9 +78,14 @@ describe("leg modes", () => {
   it("faster average speed uses more kWh", () => {
     const eff = defaultSpeedEff(240);
     const miles = 50;
-    const slow = driveKwhAtSpeed(miles, (50 / 50) * 3600, eff); // 50 km/t-ish wait
     const at50 = driveKwhAtSpeed(miles, (miles * 1.609344) / 50 * 3600, eff);
     const at130 = driveKwhAtSpeed(miles, (miles * 1.609344) / 130 * 3600, eff);
     assert.ok(at130 > at50);
+  });
+
+  it("waitMinUntil is 0 in the current hour and counts to a later cheap hour", () => {
+    assert.equal(waitMinUntil("18:40", "18"), 0);
+    assert.equal(waitMinUntil("18:40", "19"), 20);
+    assert.equal(waitMinUntil("18:40", "02"), 7 * 60 + 20);
   });
 });
