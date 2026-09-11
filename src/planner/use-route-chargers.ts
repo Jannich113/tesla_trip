@@ -59,7 +59,7 @@ export function useRouteChargers(routes: RoutedLeg[], radiusKm?: number) {
     }
     return [...byId.values()];
   }, [paths, radiusKm]);
-  const cached = key ? cacheGet<ChargeLocation[]>("chargers", key, CHARGER_TTL_MS) : undefined;
+  const cached = key ? cacheGet<ChargeLocation[]>("chargers", key) : undefined;
   const [live, setLive] = useState<ChargeLocation[]>(cached ?? []);
   const [loading, setLoading] = useState(!cached && Boolean(key));
   const [error, setError] = useState<string | null>(null);
@@ -70,7 +70,7 @@ export function useRouteChargers(routes: RoutedLeg[], radiusKm?: number) {
       setLoading(false);
       return;
     }
-    const hit = cacheGet<ChargeLocation[]>("chargers", key, CHARGER_TTL_MS);
+    const hit = cacheGet<ChargeLocation[]>("chargers", key);
     if (hit?.length) {
       setLive(hit);
       setLoading(false);

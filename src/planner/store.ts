@@ -4,6 +4,7 @@ import { geo } from "@/lib/places";
 import { primeRouteCache, type LegMode, type LegWhen, type PlanStop, type RoutedLeg } from "./engine";
 import { DEFAULT_DETOUR_KM, DEFAULT_WAIT_MIN, normalizeMode, type SpeedEff } from "./modes";
 import { simplifyPath } from "./polyline";
+import { cacheInvalidate } from "./cache";
 
 export type WhenKind = "depart" | "arrive";
 
@@ -41,7 +42,7 @@ function slimRoutes(routes: Record<string, RoutedLeg> | undefined) {
   const keys = Object.keys(routes).slice(-40);
   for (const key of keys) {
     const route = routes[key];
-    if (!route?.path?.length) continue;
+    if (!route?.path?.length || route.source === "air") continue;
     out[key] = { ...route, path: simplifyPath(route.path, 48) };
   }
   return out;
@@ -312,6 +313,7 @@ export const usePlanStore = create<PlanStore>()(
       reset: () => {
         const saved = get().saved;
         const seq = get().seq;
+        cacheInvalidate("chargers");
         set({ ...empty(), saved, seq });
       },
     }),

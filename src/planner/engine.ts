@@ -178,6 +178,7 @@ const routeCache = new Map<string, RoutedLeg>();
 
 export function primeRouteCache(entries: Record<string, RoutedLeg>) {
   for (const [key, route] of Object.entries(entries)) {
+    if (route?.source === "air") continue;
     if (route?.path?.length >= 2 && Number.isFinite(route.miles)) routeCache.set(key, route);
   }
 }
@@ -189,7 +190,7 @@ export function cachedRoutes(): Record<string, RoutedLeg> {
 export async function fetchRoute(from: PlanStop, to: PlanStop, mode: LegMode): Promise<RoutedLeg> {
   const key = `${from.lat.toFixed(4)},${from.lng.toFixed(4)}|${to.lat.toFixed(4)},${to.lng.toFixed(4)}|${mode === "cheapest" ? "fastest" : mode}`;
   const hit = routeCache.get(key);
-  if (hit) return hit;
+  if (hit && hit.source !== "air") return hit;
   try {
     const body = await withRetry(async () => {
       const res = await fetchWithTimeout("/api/drive", {
