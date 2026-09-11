@@ -1,12 +1,18 @@
 import { type ChargeLocation } from "@/lib/charge-locations";
 import { type HourPrice } from "@/lib/elpris";
 import { type Units } from "@/lib/vehicle";
+import { type LegMode, chargeSearchKm } from "./modes";
 
-export const LEG_MODES = ["eco", "standard", "fastest", "cheapest"] as const;
-export type LegMode = (typeof LEG_MODES)[number];
-
-export const DETOUR_KM = [0, 5, 10, 20] as const;
-export type DetourKm = (typeof DETOUR_KM)[number];
+export {
+  DETOUR_KM,
+  LEG_MODES,
+  chargeSearchKm,
+  modeColor,
+  modeHint,
+  modeLabel,
+  type DetourKm,
+  type LegMode,
+} from "./modes";
 
 export type PlanStop = {
   id: string;
@@ -60,20 +66,6 @@ const WH_PER_MI: Record<LegMode, number> = {
 export const DKK_PER_USD = 6.85;
 const RESERVE_SOC = 15;
 const TARGET_SOC = 70;
-
-export function modeLabel(mode: LegMode) {
-  if (mode === "eco") return "Eco";
-  if (mode === "fastest") return "Fastest";
-  if (mode === "cheapest") return "Cheapest";
-  return "Standard";
-}
-
-export function modeColor(mode: LegMode) {
-  if (mode === "eco") return "#1ecf8a";
-  if (mode === "fastest") return "#6ea8ff";
-  if (mode === "cheapest") return "#a8b4c0";
-  return "#c8cdd4";
-}
 
 export function haversineM(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
   const R = 6371000;
@@ -271,43 +263,51 @@ export function pickCharges(opts: {
   kwhNeed: number;
   path: [number, number][];
   detourKm: number;
+  mode: LegMode;
   locations: ChargeLocation[];
   acKr: number;
   hours: HourPrice[];
   acKw: number;
-  preferCheap: boolean;
 }): { primary: PricedCharge; backup: PricedCharge | null } | null {
-  const { kwhNeed, path, detourKm, locations, acKr, hours, acKw, preferCheap } = opts;
+  const { kwhNeed, path, detourKm, mode, locations, acKr, hours, acKw } = opts;
   if (kwhNeed <= 0.05 || !locations.length) return null;
-  const band = Math.max(detourKm * 1000, 80);
+  const preferCheap = mode === "cheapest";
+  const userBand = Math.max(detourKm * 1000, 80);
+  const searchBand = Math.max(chargeSearchKm(mode, detourKm) * 1000, userBand);
 
   const scored = locations.map((loc) => {
     const distM = minDistToPathM(loc.lat, loc.lng, path);
-    const priced = toPriced(loc, kwhNeed, acKr, hours, acKw, distM, distM <= band, preferCheap);
+    const priced = toPriced(loc, kwhNeed, acKr, hours, acKw, distM, distM <= userBand, preferCheap);
     return { loc, distM, priced };
   });
 
+  const extraDriveKr = (distM: number) => driveKwh(distM / 1609.344, mode) * acKr;
+
   const byRank = (a: (typeof scored)[0], b: (typeof scored)[0]) => {
-    if (preferCheap) return a.priced.kr - b.priced.kr || a.distM - b.distM;
+    if (preferCheap) {
+      const aCost = a.priced.kr + extraDriveKr(a.distM) * 0.4;
+      const bCost = b.priced.kr + extraDriveKr(b.distM) * 0.4;
+      return aCost - bCost || a.distM - b.distM;
+    }
     const dc = Number(b.loc.kind === "supercharger") - Number(a.loc.kind === "supercharger");
     if (dc) return dc;
     return a.distM - b.distM;
   };
 
-  const inBand = scored.filter((s) => s.distM <= band).sort(byRank);
-  const outBand = scored.filter((s) => s.distM > band).sort((a, b) => a.distM - b.distM || a.priced.kr - b.priced.kr);
-  const primarySrc = inBand[0] ?? outBand[0];
+  const inSearch = scored.filter((s) => s.distM <= searchBand).sort(byRank);
+  const outside = scored.filter((s) => s.distM > searchBand).sort(byRank);
+  const primarySrc = inSearch[0] ?? outside[0];
   if (!primarySrc) return null;
 
   const backupSrc =
-    inBand.find((s) => s.loc.id !== primarySrc.loc.id) ??
-    outBand.find((s) => s.loc.id !== primarySrc.loc.id) ??
+    inSearch.find((s) => s.loc.id !== primarySrc.loc.id) ??
+    outside.find((s) => s.loc.id !== primarySrc.loc.id) ??
     null;
 
   return {
     primary: primarySrc.priced,
     backup: backupSrc
-      ? { ...backupSrc.priced, label: backupSrc.priced.inBand ? backupSrc.priced.label : `${backupSrc.priced.label} · outside` }
+      ? { ...backupSrc.priced, label: backupSrc.priced.inBand ? backupSrc.priced.label : `${backupSrc.priced.label} · farther` }
       : null,
   };
 }
@@ -341,11 +341,11 @@ export function pricePlan(opts: {
       kwhNeed: needed ? kwhNeed : Math.max(kwh, 5),
       path: route.path,
       detourKm: detours[i] ?? 10,
+      mode,
       locations,
       acKr,
       hours,
       acKw,
-      preferCheap: mode === "cheapest",
     });
     const charge = pick?.primary ?? null;
     const backup = pick?.backup ?? null;

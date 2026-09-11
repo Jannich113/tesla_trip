@@ -11,12 +11,14 @@ import {
   type PricedCharge,
   type PricedLeg,
   type RoutedLeg,
+  chargeSearchKm,
   cheapestHour,
   DKK_PER_USD,
   fetchRoute,
   formatDetour,
   minutesToHm,
   modeColor,
+  modeHint,
   modeLabel,
   pricePlan,
   remainingHours,
@@ -446,8 +448,13 @@ export function PlanScreen() {
                         );
                       })}
                     </div>
+                    <p className="mt-2 text-[11px] text-subtle">
+                      {modeHint((modes[i - 1] ?? "standard") as LegMode)}
+                    </p>
                     <p className="mt-3 text-[11px] font-medium uppercase tracking-wide text-muted">
-                      Max charge detour
+                      {(modes[i - 1] ?? "standard") === "cheapest"
+                        ? `Charge search · up to ${chargeSearchKm("cheapest", detours[i - 1] ?? 10)} km`
+                        : "Max charge detour"}
                     </p>
                     <div className="mt-1 flex gap-1">
                       {DETOUR_KM.map((km) => {

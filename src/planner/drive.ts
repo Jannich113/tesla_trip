@@ -1,4 +1,4 @@
-import { type LegMode } from "./engine";
+import { costingFor, type LegMode } from "./modes";
 
 type Stop = { lat: number; lng: number };
 
@@ -9,13 +9,39 @@ export type DriveRouteJson = {
   source: "valhalla" | "osrm";
 };
 
-function highwayBias(mode: LegMode) {
-  if (mode === "eco") return 0.15;
-  if (mode === "fastest") return 1;
-  return 0.55;
+function pickValhallaTrip(
+  trips: Array<{
+    summary?: { length?: number; time?: number };
+    legs?: Array<{ shape?: { coordinates?: [number, number][] } | string }>;
+  }>,
+  mode: LegMode,
+) {
+  if (!trips.length) return null;
+  if (mode === "eco") {
+    return trips.reduce((best, trip) =>
+      Number(trip.summary?.length ?? Infinity) < Number(best.summary?.length ?? Infinity) ? trip : best,
+    );
+  }
+  if (mode === "fastest") {
+    return trips.reduce((best, trip) =>
+      Number(trip.summary?.time ?? Infinity) < Number(best.summary?.time ?? Infinity) ? trip : best,
+    );
+  }
+  return trips[0];
+}
+
+function pathFromShape(shape: { coordinates?: [number, number][] } | string | undefined) {
+  const path: [number, number][] = [];
+  if (shape && typeof shape === "object" && Array.isArray(shape.coordinates)) {
+    for (const [lng, lat] of shape.coordinates) {
+      if (Number.isFinite(lat) && Number.isFinite(lng)) path.push([lat, lng]);
+    }
+  }
+  return path;
 }
 
 async function valhalla(from: Stop, to: Stop, mode: LegMode): Promise<DriveRouteJson | null> {
+  const costing = costingFor(mode);
   const res = await fetch("https://valhalla1.openstreetmap.de/route", {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -25,15 +51,10 @@ async function valhalla(from: Stop, to: Stop, mode: LegMode): Promise<DriveRoute
         { lat: to.lat, lon: to.lng },
       ],
       costing: "auto",
-      costing_options: {
-        auto: {
-          shortest: mode === "eco",
-          use_highways: highwayBias(mode),
-          use_tolls: mode === "eco" ? 0.1 : 0.5,
-        },
-      },
+      costing_options: { auto: costing },
       directions_options: { units: "miles" },
       shape_format: "geojson",
+      alternates: mode === "standard" || mode === "cheapest" ? 0 : 2,
     }),
   });
   if (!res.ok) return null;
@@ -42,15 +63,19 @@ async function valhalla(from: Stop, to: Stop, mode: LegMode): Promise<DriveRoute
       summary?: { length?: number; time?: number };
       legs?: Array<{ shape?: { coordinates?: [number, number][] } | string }>;
     };
+    alternates?: Array<{
+      trip?: {
+        summary?: { length?: number; time?: number };
+        legs?: Array<{ shape?: { coordinates?: [number, number][] } | string }>;
+      };
+    }>;
   };
-  const summary = body.trip?.summary;
-  const coords = body.trip?.legs?.[0]?.shape;
-  const path: [number, number][] = [];
-  if (coords && typeof coords === "object" && "coordinates" in coords && Array.isArray(coords.coordinates)) {
-    for (const [lng, lat] of coords.coordinates) {
-      if (Number.isFinite(lat) && Number.isFinite(lng)) path.push([lat, lng]);
-    }
-  }
+  const trips = [body.trip, ...(body.alternates ?? []).map((alt) => alt.trip)].filter(
+    (trip): trip is NonNullable<typeof trip> => Boolean(trip),
+  );
+  const trip = pickValhallaTrip(trips, mode);
+  const summary = trip?.summary;
+  const path = pathFromShape(trip?.legs?.[0]?.shape);
   if (!summary || path.length < 2) return null;
   return {
     miles: Number(summary.length) || 0,
@@ -60,21 +85,36 @@ async function valhalla(from: Stop, to: Stop, mode: LegMode): Promise<DriveRoute
   };
 }
 
-async function osrm(from: Stop, to: Stop): Promise<DriveRouteJson | null> {
+type OsrmRoute = {
+  distance?: number;
+  duration?: number;
+  geometry?: { coordinates?: [number, number][] };
+};
+
+function pickOsrm(routes: OsrmRoute[], mode: LegMode) {
+  if (!routes.length) return null;
+  if (mode === "eco") {
+    return routes.reduce((best, route) =>
+      Number(route.distance ?? Infinity) < Number(best.distance ?? Infinity) ? route : best,
+    );
+  }
+  if (mode === "fastest") {
+    return routes.reduce((best, route) =>
+      Number(route.duration ?? Infinity) < Number(best.duration ?? Infinity) ? route : best,
+    );
+  }
+  return routes[0];
+}
+
+async function osrmOnce(from: Stop, to: Stop, mode: LegMode, extra: string): Promise<DriveRouteJson | null> {
   const url =
     `https://router.project-osrm.org/route/v1/driving/` +
     `${from.lng},${from.lat};${to.lng},${to.lat}` +
-    `?overview=full&geometries=geojson`;
+    `?overview=full&geometries=geojson&alternatives=true${extra}`;
   const res = await fetch(url, { headers: { Accept: "application/json" } });
   if (!res.ok) return null;
-  const body = (await res.json()) as {
-    routes?: Array<{
-      distance?: number;
-      duration?: number;
-      geometry?: { coordinates?: [number, number][] };
-    }>;
-  };
-  const route = body.routes?.[0];
+  const body = (await res.json()) as { routes?: OsrmRoute[] };
+  const route = pickOsrm(body.routes ?? [], mode);
   const path: [number, number][] = [];
   for (const pt of route?.geometry?.coordinates ?? []) {
     const [lng, lat] = pt;
@@ -87,6 +127,15 @@ async function osrm(from: Stop, to: Stop): Promise<DriveRouteJson | null> {
     path,
     source: "osrm",
   };
+}
+
+async function osrm(from: Stop, to: Stop, mode: LegMode): Promise<DriveRouteJson | null> {
+  const extras = mode === "eco" ? ["&exclude=motorway", ""] : [""];
+  for (const extra of extras) {
+    const routed = await osrmOnce(from, to, mode, extra).catch(() => null);
+    if (routed) return routed;
+  }
+  return null;
 }
 
 export async function handleDriveRequest(request: Request): Promise<Response> {
@@ -111,7 +160,7 @@ export async function handleDriveRequest(request: Request): Promise<Response> {
     }
     const routed =
       (await valhalla(from, to, mode).catch(() => null)) ??
-      (await osrm(from, to).catch(() => null));
+      (await osrm(from, to, mode).catch(() => null));
     if (!routed) {
       return Response.json({ error: "No route" }, { status: 502 });
     }
