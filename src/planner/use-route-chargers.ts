@@ -4,6 +4,7 @@ import { type RouteCharger } from "@/routes/api/chargers";
 import { type RoutedLeg } from "./engine";
 import { seedsAlongPath } from "./seed-chargers";
 import { withRetry, fetchWithTimeout } from "./retry";
+import { cacheGet, cacheSet, CHARGER_TTL_MS } from "./cache";
 
 function downsample(path: [number, number][], max = 80) {
   if (path.length <= max) return path;
@@ -58,18 +59,25 @@ export function useRouteChargers(routes: RoutedLeg[], radiusKm?: number) {
     }
     return [...byId.values()];
   }, [paths, radiusKm]);
-  const [live, setLive] = useState<ChargeLocation[]>([]);
-  const [loading, setLoading] = useState(false);
+  const cached = key ? cacheGet<ChargeLocation[]>("chargers", key, CHARGER_TTL_MS) : undefined;
+  const [live, setLive] = useState<ChargeLocation[]>(cached ?? []);
+  const [loading, setLoading] = useState(!cached && Boolean(key));
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!key) {
       setLive([]);
+      setLoading(false);
       return;
+    }
+    const hit = cacheGet<ChargeLocation[]>("chargers", key, CHARGER_TTL_MS);
+    if (hit?.length) {
+      setLive(hit);
+      setLoading(false);
     }
     let cancelled = false;
     const timer = window.setTimeout(() => {
-      setLoading(true);
+      if (!hit?.length) setLoading(true);
       void withRetry(async () => {
         const res = await fetchWithTimeout("/api/chargers", {
           method: "POST",
@@ -80,10 +88,11 @@ export function useRouteChargers(routes: RoutedLeg[], radiusKm?: number) {
         if (!res.ok) throw new Error(body.error || `Chargers ${res.status}`);
         return { rows: (body.chargers ?? []).map(asLocation), warning: body.error };
       })
-        .then((hit) => {
+        .then((result) => {
           if (cancelled) return;
-          setLive(hit.rows);
+          setLive(result.rows);
           setError(null);
+          cacheSet("chargers", key, result.rows, CHARGER_TTL_MS);
         })
         .catch((err) => {
           if (!cancelled) setError(err instanceof Error ? err.message : "Charger search failed");
@@ -91,7 +100,7 @@ export function useRouteChargers(routes: RoutedLeg[], radiusKm?: number) {
         .finally(() => {
           if (!cancelled) setLoading(false);
         });
-    }, 250);
+    }, hit?.length ? 0 : 250);
     return () => {
       cancelled = true;
       window.clearTimeout(timer);

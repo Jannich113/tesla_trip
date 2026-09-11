@@ -3,6 +3,7 @@ import { persist, createJSONStorage } from "zustand/middleware";
 import { geo } from "@/lib/places";
 import { primeRouteCache, type LegMode, type LegWhen, type PlanStop, type RoutedLeg } from "./engine";
 import { DEFAULT_DETOUR_KM, DEFAULT_WAIT_MIN, normalizeMode, type SpeedEff } from "./modes";
+import { simplifyPath } from "./polyline";
 
 export type WhenKind = "depart" | "arrive";
 
@@ -33,6 +34,18 @@ export type PlanSummary = {
   kr?: number;
   mi?: number;
 };
+
+function slimRoutes(routes: Record<string, RoutedLeg> | undefined) {
+  if (!routes) return routes;
+  const out: Record<string, RoutedLeg> = {};
+  const keys = Object.keys(routes).slice(-40);
+  for (const key of keys) {
+    const route = routes[key];
+    if (!route?.path?.length) continue;
+    out[key] = { ...route, path: simplifyPath(route.path, 48) };
+  }
+  return out;
+}
 
 function homeStop(): PlanStop {
   const g = geo("Home") ?? { lat: 37.3852, lng: -122.1141, short: "Home" };
@@ -319,8 +332,8 @@ export const usePlanStore = create<PlanStore>()(
         whPerMi: s.whPerMi,
         speedEff: s.speedEff,
         networkAbo: s.networkAbo,
-        routeCache: s.routeCache,
-        saved: s.saved,
+        routeCache: slimRoutes(s.routeCache) ?? {},
+        saved: s.saved.map((plan) => ({ ...plan, routes: slimRoutes(plan.routes) })),
         seq: s.seq,
       }),
       onRehydrateStorage: () => (state) => {

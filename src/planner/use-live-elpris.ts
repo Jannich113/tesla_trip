@@ -1,25 +1,35 @@
 import { useCallback, useEffect, useState } from "react";
+import { cacheGet, cacheSet, ELPRIS_TTL_MS } from "./cache";
 import { type PriceArea } from "@/lib/el-providers";
 import { type ElprisData, fetchElpris } from "@/lib/elpris";
 
 const POLL_MS = 60_000;
 
 export function useLiveElpris(area: PriceArea) {
-  const [data, setData] = useState<ElprisData | null>(null);
+  const cached = cacheGet<ElprisData>("elpris", area, ELPRIS_TTL_MS);
+  const [data, setData] = useState<ElprisData | null>(cached ?? null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!cached);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(
     async (isRefresh = false) => {
-      if (isRefresh) setRefreshing(true);
-      else setLoading(true);
+      const hit = cacheGet<ElprisData>("elpris", area, ELPRIS_TTL_MS);
+      if (hit && !isRefresh) {
+        setData(hit);
+        setLoading(false);
+      }
+      if (isRefresh || !hit) {
+        if (isRefresh) setRefreshing(true);
+        else if (!hit) setLoading(true);
+      }
       try {
         const next = await fetchElpris(area);
         setData(next);
         setError(null);
+        cacheSet("elpris", area, next, ELPRIS_TTL_MS, 6);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Kunne ikke hente elpris");
+        if (!hit) setError(err instanceof Error ? err.message : "Kunne ikke hente elpris");
       } finally {
         setLoading(false);
         setRefreshing(false);
