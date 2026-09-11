@@ -436,37 +436,61 @@ export function PlanScreen() {
         </p>
 
         <p className="mt-5 text-[11px] font-medium uppercase tracking-wide text-muted">Route options</p>
+        <p className="mt-1 text-[11px] text-subtle">
+          Eco / fastest change the roads. Cheapest keeps the standard path and hunts cheaper power.
+        </p>
         <ul className="mt-2 divide-y divide-border rounded-xl bg-surface-2">
           {optionRows.map((row) => {
             const on = !mixed && activeModes[0] === row.mode;
             const t = row.totals;
+            const standard = optionRows.find((r) => r.mode === "standard")?.totals;
+            const sameCorridor =
+              Boolean(
+                t &&
+                  standard &&
+                  row.mode !== "standard" &&
+                  Math.abs(standard.mi - t.mi) < 0.8 &&
+                  Math.abs(standard.driveMin - t.driveMin) < 2,
+              );
             return (
               <li key={row.mode}>
                 <button
                   type="button"
                   onClick={() => setAllModes(row.mode)}
-                  className={cn("flex w-full items-center gap-3 px-3 py-3 text-left", on && "bg-background/40")}
+                  className={cn("flex w-full items-start gap-3 px-3 py-3 text-left", on && "bg-background/40")}
                 >
                   <span
-                    className="size-2.5 shrink-0 rounded-full"
+                    className="mt-1.5 size-2.5 shrink-0 rounded-full"
                     style={{ background: modeColor(row.mode) }}
                   />
-                  <span className="w-16 shrink-0 text-sm font-medium">{modeLabel(row.mode)}</span>
-                  {t ? (
-                    <span className="min-w-0 flex-1 text-xs text-muted">
-                      {formatDistance(t.mi, units, t.mi >= 100 ? 0 : 1)}
-                      <span className="text-subtle"> · </span>
-                      {t.chargeKwh > 0 ? `${formatNumber(t.chargeKwh, 1)} kWh` : "no charge"}
-                      <span className="text-subtle"> · </span>
-                      {minutesToHm(t.min)}
-                      <span className="text-subtle"> · </span>
-                      {formatNumber(row.kmh, 0)} km/t · {row.kwhPerMi.toFixed(3)} kWh/mi
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-baseline justify-between gap-2">
+                      <span className="text-sm font-medium">{modeLabel(row.mode)}</span>
+                      <span className="text-sm tabular-nums">{t ? `${formatKrValue(t.kr, 0)} kr` : "—"}</span>
                     </span>
-                  ) : (
-                    <span className="flex-1 text-xs text-subtle">{routing ? "Routing…" : "Add a stop"}</span>
-                  )}
-                  <span className="shrink-0 text-sm tabular-nums">
-                    {t ? `${formatKrValue(t.kr, 0)} kr` : "—"}
+                    {t ? (
+                      <>
+                        <span className="mt-0.5 block text-xs text-muted">
+                          {formatDistance(t.mi, units, t.mi >= 100 ? 0 : 1)}
+                          <span className="text-subtle"> · </span>
+                          {minutesToHm(t.driveMin)} drive
+                          <span className="text-subtle"> · </span>
+                          {formatNumber(row.kmh, 0)} km/t
+                          {row.mode === "cheapest"
+                            ? " · standard path"
+                            : sameCorridor
+                              ? " · same corridor"
+                              : ""}
+                        </span>
+                        <span className="mt-0.5 block text-xs text-muted">
+                          {t.chargeKwh > 0
+                            ? `${formatNumber(t.chargeKwh, 1)} kWh ${t.chargeLabel || "charge"} · ${minutesToHm(t.chargeMin)}${row.mode === "cheapest" ? " · cheaper power" : ""}`
+                            : "no charge"}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="mt-0.5 block text-xs text-subtle">{routing ? "Routing…" : "Add a stop"}</span>
+                    )}
                   </span>
                 </button>
               </li>

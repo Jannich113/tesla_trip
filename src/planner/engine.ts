@@ -454,12 +454,25 @@ export function planTotals(legs: PricedLeg[]) {
       acc.mi += leg.route.miles;
       acc.kwh += leg.kwh;
       acc.kr += leg.kr;
+      acc.driveMin += leg.route.seconds / 60;
+      acc.chargeMin += leg.chargeMin;
       acc.min += leg.route.seconds / 60 + leg.chargeMin;
       acc.chargeKwh += leg.advice ? (leg.charge?.kwh ?? 0) : 0;
       acc.requiredKwh += leg.needed ? (leg.charge?.kwh ?? 0) : 0;
+      if (leg.advice && leg.charge && !acc.chargeLabel) acc.chargeLabel = leg.charge.label;
       return acc;
     },
-    { mi: 0, kwh: 0, kr: 0, min: 0, chargeKwh: 0, requiredKwh: 0 },
+    {
+      mi: 0,
+      kwh: 0,
+      kr: 0,
+      min: 0,
+      driveMin: 0,
+      chargeMin: 0,
+      chargeKwh: 0,
+      requiredKwh: 0,
+      chargeLabel: "",
+    },
   );
 }
 

@@ -138,6 +138,19 @@ async function osrm(from: Stop, to: Stop, mode: LegMode): Promise<DriveRouteJson
   return null;
 }
 
+function pickRouted(mode: LegMode, routes: DriveRouteJson[]): DriveRouteJson | null {
+  const list = routes.filter((r) => r.path.length >= 2 && r.miles > 0);
+  if (!list.length) return null;
+  if (mode === "eco") {
+    return list.reduce((best, r) => (r.miles < best.miles ? r : best));
+  }
+  if (mode === "fastest") {
+    return list.reduce((best, r) => (r.seconds < best.seconds ? r : best));
+  }
+  const valhalla = list.find((r) => r.source === "valhalla");
+  return valhalla ?? list[0];
+}
+
 export async function handleDriveRequest(request: Request): Promise<Response> {
   try {
     const body = (await request.json()) as {
@@ -158,9 +171,11 @@ export async function handleDriveRequest(request: Request): Promise<Response> {
     ) {
       return Response.json({ error: "Need two points" }, { status: 400 });
     }
-    const routed =
-      (await valhalla(from, to, mode).catch(() => null)) ??
-      (await osrm(from, to, mode).catch(() => null));
+    const [v, o] = await Promise.all([
+      valhalla(from, to, mode).catch(() => null),
+      osrm(from, to, mode).catch(() => null),
+    ]);
+    const routed = pickRouted(mode, [v, o].filter((r): r is DriveRouteJson => Boolean(r)));
     if (!routed) {
       return Response.json({ error: "No route" }, { status: 502 });
     }
