@@ -632,50 +632,47 @@ export function PlanScreen() {
       ) : (
       <>
 
-      <section className="rounded-xl bg-surface px-5 py-5 shadow-[var(--shadow-border)]">
-        <label className="block text-xs text-muted">
-          Name
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Weekend coast / work run"
-            className="mt-1 h-11 w-full rounded-md bg-surface-2 px-3 text-sm text-foreground outline-none"
-          />
-        </label>
-
-        <div className="mt-4 grid grid-cols-2 gap-2">
-          <label className="text-xs text-muted">
-            {whenKind === "arrive" ? "Arrive by" : "Leave at"}
-            <input
-              type="datetime-local"
-              value={clock}
-              onChange={(e) => setWhen(e.target.value)}
-              className="mt-1 h-11 w-full rounded-md bg-surface-2 px-3 text-sm text-foreground outline-none"
-            />
-          </label>
-          <div>
-            <p className="text-xs text-muted">Timing</p>
-            <div className="mt-1 flex rounded-full bg-surface-2 p-1">
-              {(["depart", "arrive"] as const).map((kind) => (
-                <button
-                  key={kind}
-                  type="button"
-                  onClick={() => setWhenKind(kind)}
-                  className={cn(
-                    "h-9 flex-1 rounded-full text-[11px] font-medium",
-                    whenKind === kind ? "bg-foreground text-background" : "text-muted",
-                  )}
-                >
-                  {kind === "depart" ? "Leave" : "Arrive"}
-                </button>
-              ))}
-            </div>
-          </div>
+      <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder={stops.length >= 2 ? `${stops[0].name} → ${stops[stops.length - 1].name}` : "Name this plan"}
+          className="w-full bg-transparent text-sm font-medium text-foreground outline-none placeholder:text-subtle"
+        />
+        <div className="mt-3 flex rounded-full bg-surface-2 p-1">
+          {(["depart", "arrive"] as const).map((kind) => (
+            <button
+              key={kind}
+              type="button"
+              onClick={() => setWhenKind(kind)}
+              className={cn(
+                "h-8 flex-1 rounded-full text-[11px] font-medium",
+                whenKind === kind ? "bg-foreground text-background" : "text-muted",
+              )}
+            >
+              {kind === "depart" ? "Leave" : "Arrive"}
+            </button>
+          ))}
         </div>
-
-        <p className="mt-4 text-xs text-muted">
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <input
+            type="date"
+            value={clock.slice(0, 10)}
+            onChange={(e) => setWhen(`${e.target.value}T${clock.slice(11, 16) || "00:00"}`)}
+            className="h-10 rounded-xl bg-surface-2 px-3 text-sm tabular-nums text-foreground outline-none"
+          />
+          <input
+            type="time"
+            value={clock.slice(11, 16)}
+            onChange={(e) => setWhen(`${clock.slice(0, 10)}T${e.target.value}`)}
+            className="h-10 rounded-xl bg-surface-2 px-3 text-sm tabular-nums text-foreground outline-none"
+          />
+        </div>
+        <p className="mt-2 text-xs text-muted">
           {profile.usableKwh} kWh usable · {formatNumber(soc, 0)}% now
         </p>
+
+        <p className="mt-5 text-[11px] font-medium uppercase tracking-wide text-muted">Route options</p>
 
         <p className="mt-5 text-[11px] font-medium uppercase tracking-wide text-muted">Route options</p>
         <p className="mt-1 text-[11px] text-subtle">
