@@ -10,7 +10,8 @@ export const VEHICLE = {
   color: "Stealth Grey",
   interior: "All Black",
   wheels: '19" Crossflow',
-  vin: "7SAYGDEE8SA184273",
+  vin: "DEMOYTEST0JUNIPER",
+  isDemo: true,
   software: "2026.36.8",
   fsd: "FSD Supervised",
   plant: "Giga Texas",
@@ -32,9 +33,9 @@ export const VEHICLE = {
   heatPump: true,
   batteryHealth: 0.986,
   home: {
-    label: "Home",
-    address: "Los Altos, CA",
-    detail: "Wall Connector · 48 A",
+    label: "Demo home",
+    address: "Los Altos, CA (sample)",
+    detail: "Demo · Wall Connector · 48 A",
   },
 } as const;
 
