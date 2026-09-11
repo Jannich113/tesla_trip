@@ -305,9 +305,13 @@ export function PlanScreen() {
     for (const p of paths) {
       const ranked = all
         .map((l) => ({ l, d: minDistToPathM(l.lat, l.lng, p) }))
-        .sort((a, b) => a.d - b.d)
-        .slice(0, 36);
-      for (const s of ranked) picked.set(s.l.id, s.l);
+        .sort((a, b) => a.d - b.d);
+      for (const s of ranked.slice(0, 24)) picked.set(s.l.id, s.l);
+      const cheap = ranked
+        .filter((s) => s.d < 50_000)
+        .sort((a, b) => a.l.usdPerKwh - b.l.usdPerKwh)
+        .slice(0, 16);
+      for (const s of cheap) picked.set(s.l.id, s.l);
     }
     return [...picked.values()];
   }, [locationsStored, routeChargers, searchRoutes]);

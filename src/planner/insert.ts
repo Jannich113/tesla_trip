@@ -1,4 +1,5 @@
 import { chargeFitScore, chargeSearchKm, defaultFocus, type LegMode, type ModeFocus } from "./modes.ts";
+import { networkIdFor, rateForNetwork } from "./networks.ts";
 
 export type ViaLoc = {
   id: string;
@@ -8,6 +9,7 @@ export type ViaLoc = {
   usdPerKwh: number;
   name?: string;
   short?: string;
+  networkId?: string | null;
 };
 
 export type SplitRoute = {
@@ -102,9 +104,11 @@ export function pickViaOnPath(opts: {
   focus?: ModeFocus;
   detourKm: number;
   excludeIds?: Iterable<string>;
+  memberships?: Record<string, boolean>;
 }): ViaLoc | null {
   const { path, locations, budgetKwh, totalKwh, mode, detourKm } = opts;
   const focus = opts.focus ?? defaultFocus(mode);
+  const memberships = opts.memberships ?? {};
   if (totalKwh <= 0 || budgetKwh <= 0 || path.length < 2) return null;
   const exclude = new Set(opts.excludeIds ?? []);
   const searchBand = Math.max(chargeSearchKm(mode, detourKm, focus) * 1000, 12_000);
@@ -118,12 +122,14 @@ export function pickViaOnPath(opts: {
     if (frac < 0.08 || frac > 0.92) continue;
     const energyTo = totalKwh * frac;
     if (energyTo > budgetKwh * 0.95) continue;
+    const netId = networkIdFor(loc.kind, (loc as { networkId?: string }).networkId);
+    const rate = (netId ? rateForNetwork(netId, Boolean(memberships[netId])) : null) ?? loc.usdPerKwh * 6.85;
     const fit = chargeFitScore(focus, {
       distM,
-      kr: loc.usdPerKwh * 6.85 * 20,
+      kr: rate * 20,
       dc: loc.kind === "supercharger",
       extraDriveKr: (distM / 1000) * 1.2,
-      extraKwh: distM / 1000 * 0.2,
+      extraKwh: (distM / 1000) * 0.2,
     });
     const along = focus === "pris" ? energyTo * 1.2 : energyTo * 6;
     const score = along - fit;

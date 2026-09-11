@@ -100,7 +100,7 @@ export function chargeFitScore(
     const detourMin = (distKm / kmh) * 60;
     return detourMin + (opts.dc ? 0 : 14);
   }
-  if (focus === "pris") return kr * 4 + extra * 0.12 + distKm * 0.12;
+  if (focus === "pris") return kr * 8 + extra * 0.2 + distKm * 0.08;
   return distKm * 14 + (opts.dc ? 1.5 : 0) + kr * 0.04;
 }
 

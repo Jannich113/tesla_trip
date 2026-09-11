@@ -491,11 +491,25 @@ export function pickCharges(opts: {
         s.distM <= Math.max(searchBand, 40_000) ||
         s.loc.id === preferId ||
         s.loc.id === backupId,
-    )
-    .sort((a, b) => a.distM - b.distM)
-    .slice(0, 24);
+    );
+  const locRate = (loc: ChargeLocation) => {
+    const id = networkIdFor(loc.kind, loc.networkId);
+    return (id ? rateForNetwork(id, Boolean(memberships[id])) : null) ?? usdToKr(loc.usdPerKwh);
+  };
+  const rankedNear = preferCheap
+    ? [...nearby].sort((a, b) => a.distM - b.distM).slice(0, 16)
+    : [...nearby].sort((a, b) => a.distM - b.distM).slice(0, 24);
+  const cheapPool = preferCheap
+    ? [...nearby].sort((a, b) => locRate(a.loc) - locRate(b.loc) || a.distM - b.distM).slice(0, 20)
+    : [];
+  const seen = new Set<string>();
+  const pool = [...rankedNear, ...cheapPool].filter((s) => {
+    if (seen.has(s.loc.id)) return false;
+    seen.add(s.loc.id);
+    return true;
+  });
 
-  const scored = nearby.map((s) => ({
+  const scored = pool.map((s) => ({
     loc: s.loc,
     distM: s.distM,
     priced: toPriced(
@@ -652,6 +666,7 @@ export function pricePlan(opts: {
         focus,
         detourKm: job.detourKm,
         excludeIds: usedVias,
+        memberships: opts.memberships,
       };
       const viaLoc =
         pickViaOnPath(viaOpts) ??
