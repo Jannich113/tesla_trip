@@ -111,6 +111,25 @@ input[type="range"].charge-range::-moz-range-thumb {
   z-index: 0;
 }
 
+/* Dark-friendly OSM basemap without a tile API key (tiles stay in tile-pane). */
+.bay-map .leaflet-tile-pane {
+  filter: invert(1) hue-rotate(180deg) brightness(0.95) contrast(0.9) saturate(0.85);
+}
+
+.bay-map .leaflet-control-attribution {
+  background: color-mix(in oklab, var(--color-background) 82%, transparent) !important;
+  color: var(--color-muted);
+  font-size: 10px;
+  max-width: 70%;
+  margin: 0 0 8px 8px !important;
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+.bay-map .leaflet-control-attribution a {
+  color: var(--color-foreground);
+}
+
 .leaflet-control-zoom {
   border: 0 !important;
   margin: 0 10px 10px 0 !important;
