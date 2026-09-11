@@ -1,3 +1,5 @@
+import type { PriceArea } from "@/lib/el-providers";
+
 export type HourPrice = {
   hour: string;
   timeDk: string;
@@ -6,7 +8,7 @@ export type HourPrice = {
 };
 
 export type ElprisData = {
-  area: "DK1";
+  area: PriceArea;
   source: "Energi Data Service";
   updatedAt: string;
   current: HourPrice | null;
@@ -14,8 +16,14 @@ export type ElprisData = {
   tomorrow: HourPrice[];
 };
 
-export async function fetchElpris(signal?: AbortSignal): Promise<ElprisData> {
-  const res = await fetch("/api/elpris", { signal, headers: { Accept: "application/json" } });
+export async function fetchElpris(
+  area: PriceArea = "DK1",
+  signal?: AbortSignal,
+): Promise<ElprisData> {
+  const res = await fetch(`/api/elpris?area=${encodeURIComponent(area)}`, {
+    signal,
+    headers: { Accept: "application/json" },
+  });
   if (!res.ok) {
     let detail = `HTTP ${res.status}`;
     try {

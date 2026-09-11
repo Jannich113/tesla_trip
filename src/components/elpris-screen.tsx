@@ -1,5 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { RotateCw } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { ChevronDown, RotateCw } from "lucide-react";
+import {
+  PRICE_AREAS,
+  applyTillægToHours,
+  providerById,
+  providersForArea,
+  withTillæg,
+  type ElProvider,
+  type PriceArea,
+} from "@/lib/el-providers";
 import {
   type ElprisData,
   type HourPrice,
@@ -9,6 +18,7 @@ import {
   formatOreValue,
 } from "@/lib/elpris";
 import { cn } from "@/lib/utils";
+import { useElprisStore } from "@/store/elpris-store";
 
 function priceTint(kr: number, min: number, max: number) {
   if (!Number.isFinite(kr) || max <= min) return "text-foreground";
@@ -46,9 +56,7 @@ function HourList({
 
   if (hours.length === 0) {
     return (
-      <p className="px-1 py-3 text-sm text-muted">
-        {emptyNote ?? "Ingen priser endnu"}
-      </p>
+      <p className="px-1 py-3 text-sm text-muted">{emptyNote ?? "Ingen priser endnu"}</p>
     );
   }
 
@@ -99,46 +107,117 @@ function HourList({
   );
 }
 
+function SelectField({
+  label,
+  value,
+  onChange,
+  children,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  children: ReactNode;
+}) {
+  return (
+    <label className="block min-w-0 flex-1">
+      <span className="text-[11px] font-medium uppercase tracking-wide text-muted">{label}</span>
+      <div className="relative mt-1">
+        <select
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="h-11 w-full appearance-none rounded-xl bg-surface-2 py-2 pl-3 pr-9 text-sm font-medium outline-none shadow-[var(--shadow-border)]"
+        >
+          {children}
+        </select>
+        <ChevronDown
+          className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted"
+          aria-hidden
+        />
+      </div>
+    </label>
+  );
+}
+
 export function ElprisScreen() {
-  const [data, setData] = useState<ElprisData | null>(null);
+  const area = useElprisStore((s) => s.area);
+  const providerId = useElprisStore((s) => s.providerId);
+  const setArea = useElprisStore((s) => s.setArea);
+  const setProviderId = useElprisStore((s) => s.setProviderId);
+
+  const provider = useMemo(() => providerById(providerId), [providerId]);
+  const providerOptions = useMemo(() => providersForArea(area), [area]);
+
+  const [raw, setRaw] = useState<ElprisData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  const load = useCallback(async (isRefresh = false) => {
-    if (isRefresh) setRefreshing(true);
-    else setLoading(true);
-    setError(null);
-    try {
-      const next = await fetchElpris();
-      setData(next);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunne ikke hente elpris");
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
+  const load = useCallback(
+    async (isRefresh = false, nextArea: PriceArea = area) => {
+      if (isRefresh) setRefreshing(true);
+      else setLoading(true);
+      setError(null);
+      try {
+        const next = await fetchElpris(nextArea);
+        setRaw(next);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Kunne ikke hente elpris");
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [area],
+  );
 
   useEffect(() => {
-    void load();
-    const id = window.setInterval(() => void load(true), 5 * 60_000);
+    void load(false, area);
+    const id = window.setInterval(() => void load(true, area), 5 * 60_000);
     return () => window.clearInterval(id);
-  }, [load]);
+  }, [load, area]);
+
+  const data = useMemo(() => {
+    if (!raw) return null;
+    const t = provider.tillægOre;
+    return {
+      ...raw,
+      current: raw.current
+        ? {
+            ...raw.current,
+            krPerKwh: withTillæg(raw.current.krPerKwh, t),
+            orePerKwh: withTillæg(raw.current.krPerKwh, t) * 100,
+          }
+        : null,
+      today: applyTillægToHours(raw.today, t),
+      tomorrow: applyTillægToHours(raw.tomorrow, t),
+    };
+  }, [raw, provider.tillægOre]);
 
   const current = data?.current ?? null;
   const currentHour = current?.hour ?? null;
+  const areaMeta = PRICE_AREAS.find((a) => a.id === area);
+
+  function onAreaChange(next: string) {
+    const a = next === "DK2" ? "DK2" : "DK1";
+    setArea(a);
+  }
+
+  function onProviderChange(id: string) {
+    setProviderId(id);
+  }
 
   return (
     <div className="flex flex-col px-4 pb-4 pt-2">
-      <div className="mb-4 flex items-start justify-between gap-3 px-1">
+      <div className="mb-3 flex items-start justify-between gap-3 px-1">
         <div>
           <p className="text-xs font-medium uppercase tracking-wide text-muted">Elpris</p>
-          <p className="mt-1 text-xs text-subtle">DK1 · Energi Data Service (Energi Fyn)</p>
+          <p className="mt-1 text-xs text-subtle">
+            {areaMeta?.hint ?? area} · Energi Data Service
+          </p>
         </div>
         <button
           type="button"
-          onClick={() => void load(true)}
+          onClick={() => void load(true, area)}
           disabled={loading || refreshing}
           className="flex size-10 items-center justify-center rounded-full bg-surface text-foreground shadow-[var(--shadow-border)] transition-[scale,opacity] duration-150 ease-[var(--ease-out)] active:scale-[0.96] disabled:opacity-50"
           aria-label="Opdater elpris"
@@ -146,6 +225,43 @@ export function ElprisScreen() {
           <RotateCw className={cn("size-4", (loading || refreshing) && "animate-spin")} />
         </button>
       </div>
+
+      <section className="mb-4 rounded-xl bg-surface p-3 shadow-[var(--shadow-border)]">
+        <div className="flex gap-2">
+          <SelectField label="Område" value={area} onChange={onAreaChange}>
+            {PRICE_AREAS.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.id} — {a.hint}
+              </option>
+            ))}
+          </SelectField>
+          <SelectField label="Elselskab" value={provider.id} onChange={onProviderChange}>
+            {providerOptions.map((p: ElProvider) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+                {p.product && p.id !== "spot" ? ` · ${p.product}` : ""}
+                {p.tillægOre > 0
+                  ? ` (+${p.tillægOre.toLocaleString("da-DK")} øre)`
+                  : p.id === "spot"
+                    ? ""
+                    : " (0 øre)"}
+              </option>
+            ))}
+          </SelectField>
+        </div>
+        <p className="mt-2 px-0.5 text-[11px] leading-relaxed text-subtle">
+          {provider.name}
+          {provider.product ? ` · ${provider.product}` : ""}
+          {provider.tillægOre > 0
+            ? ` · ca. ${provider.tillægOre.toLocaleString("da-DK")} øre/kWh tillæg`
+            : " · uden spottillæg"}
+          {provider.aboKr > 0
+            ? ` · abo. ca. ${provider.aboKr.toLocaleString("da-DK")} kr/md`
+            : ""}
+          {provider.note ? ` · ${provider.note}` : ""}
+          . Tillæg er vejledende.
+        </p>
+      </section>
 
       {loading && !data ? (
         <section className="rounded-xl bg-surface px-5 py-10 text-center shadow-[var(--shadow-border)]">
@@ -156,7 +272,7 @@ export function ElprisScreen() {
           <p className="text-sm text-danger">{error}</p>
           <button
             type="button"
-            onClick={() => void load()}
+            onClick={() => void load(false, area)}
             className="mt-4 rounded-full bg-surface-2 px-4 py-2 text-sm font-medium shadow-[var(--shadow-border)]"
           >
             Prøv igen
@@ -194,9 +310,7 @@ export function ElprisScreen() {
             <div className="mb-2 flex items-baseline justify-between px-2">
               <p className="text-xs font-medium uppercase tracking-wide text-muted">I morgen</p>
               <p className="text-[11px] text-subtle">
-                {(data?.tomorrow.length ?? 0) > 0
-                  ? `${data?.tomorrow.length} timer`
-                  : "Afventer"}
+                {(data?.tomorrow.length ?? 0) > 0 ? `${data?.tomorrow.length} timer` : "Afventer"}
               </p>
             </div>
             <HourList
@@ -206,8 +320,9 @@ export function ElprisScreen() {
           </section>
 
           <p className="mt-4 px-1 text-[11px] leading-relaxed text-subtle">
-            Nord Pool day-ahead spot for DK1 (Vestdanmark / Fyn). Samme grundlag som Energi Fyn
-            viser. Priser er ekskl. tariffer og afgifter. Opdateret{" "}
+            Spot (ekskl. moms) for {data?.area ?? area} + vejledende spottillæg. Ikke fuld
+            forbrugerpris — mangler moms, nettarif, Energinet og elafgift. Spot via Energi Data
+            Service. Opdateret{" "}
             {data?.updatedAt
               ? new Date(data.updatedAt).toLocaleTimeString("da-DK", {
                   hour: "2-digit",
