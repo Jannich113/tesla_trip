@@ -495,24 +495,40 @@ export function PlanScreen() {
       if (!spot) continue;
       const loc = locations.find((x) => x.id === spot.locationId);
       if (!loc) continue;
-                    const isBackup = leg.backup?.locationId === spot.locationId && leg.charge?.locationId !== spot.locationId;
-                    const required = Boolean(!isBackup && leg.needed);
-                    const suggested = Boolean(!isBackup && !required && leg.suggested);
-                    chargerMarkers.push({
-                      id: `chg-${i}-${spot.locationId}`,
-                      lat: loc.lat,
-                      lng: loc.lng,
-                      label: required
-                        ? `Required · ${spot.name}`
-                        : suggested
-                          ? `Suggested · ${spot.name}`
-                          : isBackup
-                            ? `Backup · ${spot.name}`
-                            : spot.name,
-                      kind: "charger",
-                      badge: required ? "!" : suggested ? "+" : isBackup ? "B" : "C",
-                    });
+      const isBackup = leg.backup?.locationId === spot.locationId && leg.charge?.locationId !== spot.locationId;
+      const required = Boolean(!isBackup && leg.needed);
+      const suggested = Boolean(!isBackup && !required && leg.suggested);
+      chargerMarkers.push({
+        id: `chg-${i}-${spot.locationId}`,
+        lat: loc.lat,
+        lng: loc.lng,
+        label: required
+          ? `Required · ${spot.name}`
+          : suggested
+            ? `Suggested · ${spot.name}`
+            : isBackup
+              ? `Backup · ${spot.name}`
+              : spot.name,
+        kind: "charger",
+        badge: required ? "!" : suggested ? "+" : isBackup ? "B" : "C",
+      });
     }
+  }
+  const billedIds = new Set(
+    chargerMarkers.map((m) => m.id.replace(/^chg-\d+-/, "").replace(/^corridor-/, "")),
+  );
+  for (const loc of routeChargers) {
+    if (billedIds.has(loc.id)) continue;
+    const onPath = searchRoutes.some((r) => minDistToPathM(loc.lat, loc.lng, r.path) < 32_000);
+    if (!onPath) continue;
+    chargerMarkers.push({
+      id: `corridor-${loc.id}`,
+      lat: loc.lat,
+      lng: loc.lng,
+      label: loc.short || loc.name,
+      kind: "charger",
+      badge: (loc.networkId || loc.short || "C").slice(0, 1).toUpperCase(),
+    });
   }
   const mapMarkers: MapMarker[] = [
     ...stops.map((s, i) => ({

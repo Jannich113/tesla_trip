@@ -1,9 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { env } from "@/lib/env.server";
 import { haversineM } from "@/planner/insert";
-import { isDcStation, networkFromOsmTags } from "@/planner/osm-operator";
+import { isDcStation, networkFromOperator, networkFromOsmTags } from "@/planner/osm-operator";
 import { rateForNetwork } from "@/planner/networks";
+import { seedsAlongPath } from "@/planner/seed-chargers";
 
 const DKK_PER_USD = 6.85;
+const OCM_KEY = env("OPENCHARGEMAP_KEY") ?? "d670b729-7bd0-40dd-8a17-4b881edf1a68";
 
 export type RouteCharger = {
   id: string;
@@ -19,8 +22,8 @@ export type RouteCharger = {
   radiusM: number;
 };
 
-function samplePath(path: [number, number][], everyM = 45_000, maxPts = 8) {
-  if (path.length < 2) return path;
+function samplePath(path: [number, number][], everyM = 40_000, maxPts = 10) {
+  if (path.length < 2) return path.slice(0, 2);
   const out: [number, number][] = [path[0]];
   let acc = 0;
   for (let i = 1; i < path.length; i++) {
@@ -40,9 +43,20 @@ function samplePath(path: [number, number][], everyM = 45_000, maxPts = 8) {
   return out.slice(0, maxPts);
 }
 
+function downsample(path: [number, number][], max = 80) {
+  if (path.length <= max) return path;
+  const step = Math.ceil(path.length / max);
+  const out = path.filter((_, i) => i % step === 0);
+  const last = path[path.length - 1];
+  if (out[out.length - 1] !== last) out.push(last);
+  return out;
+}
+
 function overpassQuery(samples: [number, number][], radiusM: number) {
-  const around = samples.map(([lat, lng]) => `  nwr["amenity"="charging_station"](around:${Math.round(radiusM)},${lat.toFixed(5)},${lng.toFixed(5)});`).join("\n");
-  return `[out:json][timeout:22];\n(\n${around}\n);\nout center tags;`;
+  const around = samples
+    .map(([lat, lng]) => `  nwr["amenity"="charging_station"](around:${Math.round(radiusM)},${lat.toFixed(5)},${lng.toFixed(5)});`)
+    .join("\n");
+  return `[out:json][timeout:12];\n(\n${around}\n);\nout center tags;`;
 }
 
 type OsmEl = {
@@ -80,21 +94,124 @@ function toCharger(el: OsmEl): RouteCharger | null {
   };
 }
 
+const OVERPASS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+  "https://overpass.osm.ch/api/interpreter",
+];
+
+async function fetchOneOverpass(url: string, query: string) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 8_000);
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+      body: `data=${encodeURIComponent(query)}`,
+      signal: ctrl.signal,
+    });
+    if (!res.ok) return [];
+    const body = (await res.json()) as { elements?: OsmEl[] };
+    const byId = new Map<string, RouteCharger>();
+    for (const el of body.elements ?? []) {
+      const c = toCharger(el);
+      if (c) byId.set(c.id, c);
+    }
+    return [...byId.values()];
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function fetchOverpass(samples: [number, number][], radiusM: number) {
   const query = overpassQuery(samples, radiusM);
-  const res = await fetch("https://overpass-api.de/api/interpreter", {
-    method: "POST",
-    headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
-    body: `data=${encodeURIComponent(query)}`,
-  });
-  if (!res.ok) throw new Error(`Overpass ${res.status}`);
-  const body = (await res.json()) as { elements?: OsmEl[] };
-  const byId = new Map<string, RouteCharger>();
-  for (const el of body.elements ?? []) {
-    const c = toCharger(el);
-    if (c) byId.set(c.id, c);
+  for (const url of OVERPASS) {
+    const rows = await fetchOneOverpass(url, query);
+    if (rows.length) return rows;
   }
+  return [];
+}
+
+type OcmPoi = {
+  ID?: number;
+  UUID?: string;
+  AddressInfo?: { Title?: string; Latitude?: number; Longitude?: number };
+  OperatorInfo?: { Title?: string };
+  StatusType?: { IsOperational?: boolean };
+  UsageType?: { Title?: string };
+  Connections?: Array<{ PowerKW?: number | null }>;
+};
+
+function ocmToCharger(poi: OcmPoi): RouteCharger | null {
+  const addr = poi.AddressInfo ?? {};
+  const lat = addr.Latitude;
+  const lng = addr.Longitude;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (poi.StatusType?.IsOperational === false) return null;
+  const usage = poi.UsageType?.Title ?? "";
+  if (/private/i.test(usage) && !/public/i.test(usage)) return null;
+  const kw = Math.max(0, ...(poi.Connections ?? []).map((c) => Number(c.PowerKW) || 0));
+  if (kw > 0 && kw < 50) return null;
+  const operator = poi.OperatorInfo?.Title || addr.Title || "Charger";
+  const name = addr.Title || operator;
+  const networkId = networkFromOperator(`${operator} ${name}`);
+  if (!networkId && kw < 50) return null;
+  const rate = networkId ? rateForNetwork(networkId, false) : null;
+  return {
+    id: `ocm-${poi.ID ?? poi.UUID ?? `${lat},${lng}`}`,
+    name,
+    short: (poi.OperatorInfo?.Title || name).split(/[,(/]/)[0].trim().slice(0, 22),
+    lat: lat as number,
+    lng: lng as number,
+    kind: networkId === "tesla" ? "supercharger" : "custom",
+    networkId,
+    usdPerKwh: (rate ?? 4.2) / DKK_PER_USD,
+    operator,
+    preset: false,
+    radiusM: 250,
+  };
+}
+
+async function fetchOcmAt(lat: number, lng: number, radiusKm: number): Promise<RouteCharger[]> {
+  const url =
+    `https://api.openchargemap.io/v3/poi/?output=json&compact=false&verbose=false` +
+    `&key=${encodeURIComponent(OCM_KEY)}` +
+    `&latitude=${lat.toFixed(5)}&longitude=${lng.toFixed(5)}` +
+    `&distance=${Math.round(radiusKm)}&distanceunit=KM&maxresults=40&minpowerkw=50`;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 8_000);
+  try {
+    const res = await fetch(url, { headers: { Accept: "application/json", "X-API-Key": OCM_KEY }, signal: ctrl.signal });
+    if (!res.ok) return [];
+    const body = (await res.json()) as OcmPoi[];
+    if (!Array.isArray(body)) return [];
+    return body.map(ocmToCharger).filter((c): c is RouteCharger => Boolean(c));
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchOcm(samples: [number, number][], radiusKm: number) {
+  const chunks = await Promise.all(samples.slice(0, 6).map(([lat, lng]) => fetchOcmAt(lat, lng, radiusKm)));
+  const byId = new Map<string, RouteCharger>();
+  for (const row of chunks.flat()) byId.set(row.id, row);
   return [...byId.values()];
+}
+
+function mergeChargers(seed: RouteCharger[], live: RouteCharger[]) {
+  const out = new Map<string, RouteCharger>();
+  for (const c of seed) out.set(c.id, c);
+  for (const c of live) {
+    const near = [...out.values()].some(
+      (s) => Math.abs(s.lat - c.lat) < 0.008 && Math.abs(s.lng - c.lng) < 0.012 && s.networkId === c.networkId,
+    );
+    if (!near) out.set(c.id, c);
+  }
+  return [...out.values()];
 }
 
 export const Route = createFileRoute("/api/chargers")({
@@ -103,15 +220,23 @@ export const Route = createFileRoute("/api/chargers")({
       POST: async ({ request }) => {
         try {
           const body = (await request.json()) as { path?: [number, number][]; radiusKm?: number };
-          const path = (body.path ?? []).filter((p) => Number.isFinite(p[0]) && Number.isFinite(p[1]));
+          const path = downsample((body.path ?? []).filter((p) => Number.isFinite(p[0]) && Number.isFinite(p[1])));
           if (path.length < 2) return Response.json({ chargers: [], source: "none" });
-          const radiusM = Math.min(40_000, Math.max(8_000, (body.radiusKm ?? 22) * 1000));
-          const samples = samplePath(path, 48_000, 8);
-          const chargers = await fetchOverpass(samples, radiusM);
-          return Response.json(
-            { chargers, source: "overpass", samples: samples.length, updatedAt: new Date().toISOString() },
-            { headers: { "Cache-Control": "public, max-age=300" } },
-          );
+          const radiusM = Math.min(40_000, Math.max(12_000, (body.radiusKm ?? 28) * 1000));
+          const seed = seedsAlongPath(path, radiusM);
+          const samples = samplePath(path, 40_000, 8);
+          const ocm = await fetchOcm(samples, radiusM / 1000);
+          const osm = ocm.length >= 8 ? [] : await fetchOverpass(samples, radiusM);
+          const chargers = mergeChargers(seed, [...ocm, ...osm]);
+          return Response.json({
+            chargers,
+            source: ocm.length ? "ocm+seed" : osm.length ? "overpass+seed" : "seed",
+            seed: seed.length,
+            live: ocm.length + osm.length,
+            ocm: ocm.length,
+            samples: samples.length,
+            updatedAt: new Date().toISOString(),
+          });
         } catch (err) {
           return Response.json(
             { error: err instanceof Error ? err.message : "charger search failed", chargers: [] },

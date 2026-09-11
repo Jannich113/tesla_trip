@@ -18,8 +18,9 @@ import {
 } from "./modes.ts";
 import { rateForNetwork, networkIdFor, roamExtra, EU_NETWORKS, EU_REGIONS, regionalOwn, regionalRoam } from "./networks.ts";
 import { alongFraction, pickViaOnPath, splitRoutedLeg } from "./insert.ts";
-import { networkFromOsmTags, isDcStation } from "./osm-operator.ts";
+import { networkFromOsmTags, isDcStation, networkFromOperator } from "./osm-operator.ts";
 import { estimateTolls, gatesOnPath } from "./tolls.ts";
+import { seedsAlongPath } from "./seed-chargers.ts";
 import { toDkk, CATALOG_FX, NETWORK_NATIVE } from "./charge-fx.ts";
 import { countryProfile } from "./country-profiles.ts";
 
@@ -233,5 +234,20 @@ describe("leg modes", () => {
     const toll = estimateTolls(path, 12, false, "fastest");
     assert.ok(toll.kr >= 268);
     assert.equal(estimateTolls(path, 12, false, "eco").kr, 268);
+  });
+
+  it("seeds IONITY and Tesla on a Kolding–Padborg corridor", () => {
+    const path: [number, number][] = [
+      [55.5324, 9.4918],
+      [55.1, 9.42],
+      [54.8236, 9.3594],
+    ];
+    const hits = seedsAlongPath(path, 28_000);
+    const ids = hits.map((h) => h.networkId);
+    assert.ok(ids.includes("tesla"), ids.join(","));
+    assert.ok(ids.includes("ionity"), ids.join(","));
+    assert.equal(networkFromOperator("CLEVER"), "clever");
+    assert.equal(networkFromOperator("Tesla Supercharger Kolding"), "tesla");
+    assert.ok(hits.some((h) => /padborg/i.test(h.name)));
   });
 });

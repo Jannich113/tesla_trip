@@ -471,7 +471,7 @@ export function pickCharges(opts: {
 
   const inSearch = scored.filter((s) => s.distM <= searchBand).sort(byRank);
   const outside = scored.filter((s) => s.distM > searchBand).sort(byRank);
-  const primarySrc = inSearch[0] ?? outside[0];
+  const primarySrc = inSearch[0] ?? (preferCheap ? outside[0] : null);
   if (!primarySrc) return null;
 
   const backupSrc =
@@ -612,7 +612,8 @@ export function pricePlan(opts: {
     const cheap = cheapestHour(searchHours);
     const goodPrice = Boolean(cheap && cheap.krPerKwh <= live * CHEAP_VS_LIVE);
     const lowEnough = soc < 55 || socAfter < SUGGEST_SOC;
-    const suggested = !required && goodPrice && lowEnough;
+    const deep = socAfter < SUGGEST_SOC;
+    const suggested = !required && ((goodPrice && lowEnough) || (deep && mode !== "fastest"));
     const autoNeedSoc = required
       ? Math.max(TARGET_SOC - soc, RESERVE_SOC + (kwh / usableKwh) * 100 - soc)
       : Math.min(TARGET_SOC - soc, Math.max((kwh / usableKwh) * 100, 12));
