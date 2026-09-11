@@ -762,14 +762,22 @@ export function PlanScreen() {
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm">{stop.name}</p>
                       {leg ? (
-                        <p className="text-xs text-muted">
-                          {modeLabel(leg.mode)}
-                          {leg.needed ? (
-                            <span className="font-medium text-amber-300"> · required</span>
-                          ) : leg.suggested ? (
-                            <span className="font-medium text-emerald-400"> · suggested</span>
+                        <>
+                          <p className="text-xs text-muted">
+                            {modeLabel(leg.mode)}
+                            <span className="tabular-nums"> · {formatNumber(leg.arriveSoc, 0)}%</span>
+                            {leg.needed ? (
+                              <span className="font-medium text-amber-300"> · required</span>
+                            ) : leg.suggested ? (
+                              <span className="font-medium text-emerald-400"> · suggested</span>
+                            ) : null}
+                          </p>
+                          {!open && leg.backup ? (
+                            <p className="truncate text-[11px] text-subtle">Backup · {leg.backup.name}</p>
+                          ) : !open && leg.charge ? (
+                            <p className="truncate text-[11px] text-subtle">{leg.charge.name}</p>
                           ) : null}
-                        </p>
+                        </>
                       ) : (
                         <p className="text-xs text-muted">{formatNumber(soc, 0)}% now</p>
                       )}
