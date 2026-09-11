@@ -214,7 +214,7 @@ export function BayMap({
   useEffect(() => {
     if (!ready || !focus) return;
     mapRef.current?.setView([focus.lat, focus.lng], focus.zoom ?? 15, { animate: false });
-  }, [ready, focus?.lat, focus?.lng, focus?.zoom]);
+  }, [ready, focus]);
 
   if (hidden) {
     return (
