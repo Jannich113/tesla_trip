@@ -744,7 +744,7 @@ export function PlanScreen() {
             const leftPct = inbound ? inbound.arriveSoc : soc;
             const chargeLeg = outbound;
             const chargeTo =
-              chargeLeg?.advice && chargeLeg.charge ? chargeLeg.startSoc : null;
+              chargeLeg?.charge && (chargeLeg.needed || chargeLeg.suggested) ? chargeLeg.startSoc : null;
             const chargeRequired = Boolean(chargeLeg?.needed);
             return (
               <li
