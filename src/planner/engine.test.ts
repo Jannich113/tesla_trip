@@ -57,15 +57,13 @@ describe("leg modes", () => {
   });
 
   it("default focus matches the mode", () => {
-    assert.equal(pathMode("eco", "distance"), "eco");
-    assert.equal(pathMode("fastest", "time"), "fastest");
-    assert.equal(pathMode("cheapest", "pris"), "fastest");
+    assert.equal(pathMode("eco"), "eco");
+    assert.equal(pathMode("fastest"), "fastest");
+    assert.equal(pathMode("cheapest"), "fastest");
+    assert.equal(pathMode("cheapest", true), "eco");
   });
 
   it("time takes the highway corridor at 130 km/t", () => {
-    assert.equal(pathMode("eco", "time"), "fastest");
-    assert.equal(pathMode("cheapest", "time"), "fastest");
-    assert.equal(pathMode("eco", "distance"), "eco");
     const highway = chargeFitScore("time", { distM: 8000, kr: 90, dc: true });
     const local = chargeFitScore("time", { distM: 8000, kr: 20, dc: false });
     assert.ok(highway < local);

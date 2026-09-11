@@ -62,8 +62,6 @@ export {
   modeHint,
   modeLabel,
   normalizeMode,
-  focusLabel,
-  focusHint,
   MODE_FOCUSES,
   DEFAULT_MODE_FOCUS,
   pathMode,

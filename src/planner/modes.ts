@@ -30,7 +30,7 @@ export function modeLabel(mode: LegMode) {
 
 export function modeHint(mode: LegMode) {
   if (mode === "eco") return "Avoids motorways, toll gates and road fees";
-  if (mode === "cheapest") return "Lowest charging cost — looks farther for a cheaper stall";
+  if (mode === "cheapest") return "Lowest charging cost. Optional: skip motorways and tolls.";
   return "Motorways and tolls for earliest arrival. Road fees don't matter.";
 }
 
@@ -55,28 +55,17 @@ export function normalizeFocus(focus: string | null | undefined, mode?: LegMode)
   return defaultFocus(mode ?? "fastest");
 }
 
-export function focusLabel(focus: ModeFocus) {
-  if (focus === "pris") return "Pris";
-  if (focus === "time") return "Time";
-  return "Distance";
-}
-
-export function focusHint(focus: ModeFocus) {
-  if (focus === "pris") return "Lowest kr for the charge plus extra drive";
-  if (focus === "time") return "Highway speed, earliest arrival";
-  return "Closest stall on this road";
-}
-
 export const DEFAULT_MODE_FOCUS: Record<LegMode, ModeFocus> = {
   eco: "distance",
   fastest: "time",
   cheapest: "pris",
 };
 
-/** Time always takes the highway/fastest corridor. */
-export function pathMode(mode: LegMode, focus?: ModeFocus): "eco" | "fastest" {
-  if (focus === "time") return "fastest";
-  return mode === "eco" ? "eco" : "fastest";
+/** Cheapest can take the quiet eco corridor when avoid-fees is on. */
+export function pathMode(mode: LegMode, avoidFees = false): "eco" | "fastest" {
+  if (mode === "eco") return "eco";
+  if (mode === "cheapest" && avoidFees) return "eco";
+  return "fastest";
 }
 
 /** Pris may look a bit farther for a cheaper stall. */
