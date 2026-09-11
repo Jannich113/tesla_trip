@@ -110,17 +110,28 @@ export function detourSavings(base: { kr: number; tollKr: number; driveMin: numb
 
 export type AbSide = "a" | "b" | "tie";
 
+/** Eco (or any alt) is penalized when drive time is 2× the faster road. */
+export const SLOW_TIME_FACTOR = 2;
+
+export function timePenalized(fastMin: number, altMin: number) {
+  return fastMin > 0 && altMin >= fastMin * SLOW_TIME_FACTOR;
+}
+
 export function routeAb(
   a: { kr: number; tollKr: number; driveMin: number; mi: number },
   b: { kr: number; tollKr: number; driveMin: number; mi: number },
 ) {
   const save = detourSavings(a, b);
+  const bSlow = timePenalized(a.driveMin, b.driveMin);
+  const aSlow = timePenalized(b.driveMin, a.driveMin);
   const time: AbSide =
     Math.abs(a.driveMin - b.driveMin) < 5 ? "tie" : a.driveMin < b.driveMin ? "a" : "b";
   const cost: AbSide = Math.abs(a.kr - b.kr) < MIN_SAVE_KR ? "tie" : a.kr < b.kr ? "a" : "b";
-  const overall: AbSide =
+  let overall: AbSide =
     save.significant && b.kr < a.kr ? "b" : save.significant && a.kr < b.kr ? "a" : time === "tie" ? cost : cost === "tie" ? time : time;
-  return { save, time, cost, overall };
+  if (bSlow && !aSlow) overall = "a";
+  if (aSlow && !bSlow) overall = "b";
+  return { save, time, cost, overall, aSlow, bSlow };
 }
 
 /** Eco is off the motorway — look farther toward services. Cheapest hunts a wider band. */

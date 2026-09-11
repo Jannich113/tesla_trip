@@ -71,6 +71,7 @@ export {
   DEFAULT_MODE_FOCUS,
   pathMode,
   routeAb,
+  timePenalized,
   stallKw,
   cheapDetourKm,
   detourPays,

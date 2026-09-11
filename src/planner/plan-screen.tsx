@@ -38,6 +38,7 @@ import {
   pricePlan,
   remainingHours,
   routeAb,
+  timePenalized,
   SPEED_KMH,
   splitDateTime,
 } from "./engine";
@@ -807,6 +808,7 @@ export function PlanScreen() {
             const t = row.totals;
             const fastest = optionRows.find((r) => r.mode === "fastest")?.totals;
             const save = t && fastest && row.mode !== "fastest" ? detourSavings(fastest, t) : null;
+            const slow = Boolean(t && fastest && row.mode === "eco" && timePenalized(fastest.driveMin, t.driveMin));
             return (
               <li key={row.mode}>
                 <div className={cn("px-3 py-3", on && "bg-background/40")}>
@@ -832,6 +834,7 @@ export function PlanScreen() {
                           {minutesToHm(t.driveMin)} drive
                           <span className="text-subtle"> · </span>
                           avg {formatNumber(row.kmh, 0)} km/t
+                          {slow ? " · 2× slower" : ""}
                           {row.mode === "cheapest"
                             ? cheapAvoidFees
                               ? " · no motorways / tolls"
@@ -934,11 +937,15 @@ export function PlanScreen() {
                     {ab.overall === "tie"
                       ? "Tie — pick either."
                       : `${ab.overall === "a" ? modeLabel(abA) : modeLabel(abB)} wins${
-                          ab.save.significant && ab.overall === "b"
-                            ? ` · saves ${formatKrValue(ab.save.net, 0)} kr`
-                            : ab.overall === "a"
-                              ? " · faster"
-                              : ""
+                          ab.bSlow
+                            ? " · B is 2× slower"
+                            : ab.aSlow
+                              ? " · A is 2× slower"
+                              : ab.save.significant && ab.overall === "b"
+                                ? ` · saves ${formatKrValue(ab.save.net, 0)} kr`
+                                : ab.overall === "a"
+                                  ? " · faster"
+                                  : ""
                         }.`}
                   </p>
                   <div className="mt-2 flex gap-2">

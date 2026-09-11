@@ -23,6 +23,7 @@ import {
   pathMode,
   routeAb,
   stallKw,
+  timePenalized,
 } from "./modes.ts";
 import { rateForNetwork, networkIdFor, roamExtra, EU_NETWORKS, EU_REGIONS, regionalOwn, regionalRoam } from "./networks.ts";
 import { pickRouted } from "./pick-route.ts";
@@ -90,6 +91,16 @@ describe("leg modes", () => {
     assert.equal(routeAb(fast, cheapWin).overall, "b");
     assert.equal(routeAb(fast, cheapLose).overall, "a");
     assert.equal(routeAb(fast, cheapWin).cost, "b");
+  });
+
+  it("penalizes a route 2× slower than fastest", () => {
+    const fast = { kr: 800, tollKr: 200, driveMin: 900, mi: 900 };
+    const eco = { kr: 200, tollKr: 0, driveMin: 1800, mi: 1100 };
+    assert.equal(timePenalized(900, 1800), true);
+    assert.equal(timePenalized(900, 1700), false);
+    const ab = routeAb(fast, eco);
+    assert.equal(ab.bSlow, true);
+    assert.equal(ab.overall, "a");
   });
 
   it("only detours when savings are significant", () => {
