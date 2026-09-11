@@ -366,13 +366,14 @@ describe("leg modes", () => {
     assert.equal(slim.at(-1)?.[0], path.at(-1)?.[0]);
   });
 
-  it("eco picks the no-toll road; fastest picks the quicker one", () => {
+  it("eco skips a 34 h crawl but keeps a quiet road within 4 hours", () => {
     const path = Array.from({ length: 12 }, (_, i) => [48.8 - i * 0.5, 2.3 + i * 0.8] as [number, number]);
     const highway = { miles: 890, seconds: 15 * 3600, path, source: "valhalla", tollKr: 400 };
-    const quiet = { miles: 1100, seconds: 34 * 3600, path, source: "osrm", tollKr: 0 };
-    assert.equal(pickRouted("fastest", [highway, quiet])?.seconds, highway.seconds);
-    assert.equal(pickRouted("eco", [highway, quiet])?.tollKr, 0);
-    assert.equal(pickRouted("cheapest", [highway, quiet])?.seconds, highway.seconds);
+    const quiet = { miles: 980, seconds: 17 * 3600, path, source: "osrm", tollKr: 0 };
+    const crawl = { miles: 1100, seconds: 34 * 3600, path, source: "osrm", tollKr: 0 };
+    assert.equal(pickRouted("fastest", [highway, quiet, crawl])?.seconds, highway.seconds);
+    assert.equal(pickRouted("eco", [highway, crawl])?.seconds, highway.seconds);
+    assert.equal(pickRouted("eco", [highway, quiet, crawl])?.seconds, quiet.seconds);
   });
 
   it("finds a via on the Paris–Rome corridor for every mode", () => {

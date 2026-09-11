@@ -40,7 +40,7 @@ export function modeLabel(mode: LegMode) {
  *  cheapest = lowest charging cost; optional avoid-fees uses eco roads
  */
 export function modeHint(mode: LegMode) {
-  if (mode === "eco") return "Avoids motorways, toll gates and road fees as much as possible.";
+  if (mode === "eco") return "Avoids motorways, toll gates and road fees. Drops a quiet road that adds more than 4 hours.";
   if (mode === "cheapest") return "Lowest charging cost. Optional: also skip motorways and tolls.";
   return "Motorways and tolls for earliest arrival.";
 }
