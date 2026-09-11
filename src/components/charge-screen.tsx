@@ -1,1 +1,1 @@
-@/workspace/tesla_trip/src/components/charge-screen.tsx
+agent-tools://c96d891f-9e3e-488c-9039-042340e57f0e
