@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { geo } from "@/lib/places";
 import { type LegMode, type LegWhen, type PlanStop } from "./engine";
+import { type SpeedEff } from "./modes";
 
 export type WhenKind = "depart" | "arrive";
 
@@ -15,6 +16,7 @@ export type SavedPlan = {
   when: string;
   legWhen: LegWhen[];
   whPerMi: number | null;
+  speedEff: SpeedEff | null;
   savedAt: string;
 };
 
@@ -40,6 +42,7 @@ type PlanState = {
   when: string;
   legWhen: LegWhen[];
   whPerMi: number | null;
+  speedEff: SpeedEff | null;
   saved: SavedPlan[];
   seq: number;
 };
@@ -56,6 +59,7 @@ type PlanStore = PlanState & {
   setWhen: (hhmm: string) => void;
   setLegWhen: (index: number, next: LegWhen) => void;
   setWhPerMi: (n: number | null) => void;
+  setSpeedEff: (next: SpeedEff | null) => void;
   insertStopAt: (index: number, stop: Omit<PlanStop, "id"> & { id?: string }) => void;
   savePlan: () => SavedPlan | null;
   loadPlan: (id: string) => void;
@@ -72,6 +76,7 @@ const empty = (): PlanState => ({
   when: "",
   legWhen: [],
   whPerMi: null,
+  speedEff: null,
   saved: [],
   seq: 0,
 });
@@ -85,6 +90,7 @@ export const usePlanStore = create<PlanStore>()(
       setWhenKind: (whenKind) => set({ whenKind }),
       setWhen: (when) => set({ when }),
       setWhPerMi: (whPerMi) => set({ whPerMi }),
+      setSpeedEff: (speedEff) => set({ speedEff, whPerMi: speedEff ? speedEff[80] : null }),
 
       addStop: (input) => {
         const stop: PlanStop = {
@@ -185,7 +191,7 @@ export const usePlanStore = create<PlanStore>()(
       },
 
       savePlan: () => {
-        const { name, stops, modes, detours, whenKind, when, legWhen, whPerMi, saved, seq } = get();
+        const { name, stops, modes, detours, whenKind, when, legWhen, whPerMi, speedEff, saved, seq } = get();
         if (stops.length < 2) return null;
         const label = name.trim() || stops.map((s) => s.name).join(" → ");
         const plan: SavedPlan = {
@@ -198,6 +204,7 @@ export const usePlanStore = create<PlanStore>()(
           when,
           legWhen,
           whPerMi,
+          speedEff,
           savedAt: new Date().toISOString(),
         };
         set({
@@ -220,6 +227,7 @@ export const usePlanStore = create<PlanStore>()(
           when: plan.when ?? "",
           legWhen: plan.legWhen ?? plan.stops.slice(1).map(() => autoWhen()),
           whPerMi: plan.whPerMi ?? null,
+          speedEff: plan.speedEff ?? null,
         });
       },
 
@@ -244,6 +252,7 @@ export const usePlanStore = create<PlanStore>()(
         when: s.when,
         legWhen: s.legWhen,
         whPerMi: s.whPerMi,
+        speedEff: s.speedEff,
         saved: s.saved,
         seq: s.seq,
       }),

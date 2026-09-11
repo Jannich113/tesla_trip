@@ -39,11 +39,45 @@ export function chargeSearchKm(mode: LegMode, detourKm: number) {
   return detourKm;
 }
 
-export function modeWhFactor(mode: LegMode) {
-  if (mode === "eco") return 0.88;
-  if (mode === "fastest") return 1.17;
-  if (mode === "cheapest") return 0.98;
-  return 1;
+export const SPEED_KMH = [50, 80, 110, 130] as const;
+export type SpeedKmh = (typeof SPEED_KMH)[number];
+/** Wh per mile at each posted speed. */
+export type SpeedEff = Record<SpeedKmh, number>;
+
+export function defaultSpeedEff(epaWhPerMi: number): SpeedEff {
+  const base = epaWhPerMi > 0 ? epaWhPerMi : 240;
+  return {
+    50: Math.round(base * 0.78),
+    80: Math.round(base * 0.95),
+    110: Math.round(base * 1.18),
+    130: Math.round(base * 1.42),
+  };
+}
+
+export function avgSpeedKmh(miles: number, seconds: number) {
+  if (!(miles > 0) || !(seconds > 0)) return 80;
+  return (miles * 1.609344) / (seconds / 3600);
+}
+
+export function interpolateWhPerMi(eff: SpeedEff, kmh: number) {
+  const pts = SPEED_KMH.map((k) => [k, eff[k]] as const);
+  if (kmh <= pts[0][0]) return pts[0][1];
+  const last = pts[pts.length - 1];
+  if (kmh >= last[0]) return last[1];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [k0, w0] = pts[i];
+    const [k1, w1] = pts[i + 1];
+    if (kmh <= k1) {
+      const t = (kmh - k0) / (k1 - k0);
+      return w0 + t * (w1 - w0);
+    }
+  }
+  return last[1];
+}
+
+export function driveKwhAtSpeed(miles: number, seconds: number, eff: SpeedEff) {
+  const kmh = avgSpeedKmh(miles, seconds);
+  return (miles * interpolateWhPerMi(eff, kmh)) / 1000;
 }
 
 export function epaWhPerMi(usableKwh: number, epaRangeMi: number) {

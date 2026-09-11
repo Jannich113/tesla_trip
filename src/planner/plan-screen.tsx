@@ -17,9 +17,12 @@ import {
   cheapestHour,
   DKK_PER_USD,
   dkNowHhmm,
+  defaultSpeedEff,
   epaWhPerMi,
   fetchRoute,
   formatDetour,
+  interpolateWhPerMi,
+  avgSpeedKmh,
   minutesToHm,
   modeColor,
   modeHint,
@@ -27,6 +30,7 @@ import {
   planTotals,
   pricePlan,
   remainingHours,
+  SPEED_KMH,
 } from "./engine";
 import { usePlanStore } from "./store";
 import { formatKrPerKwh, formatKrValue, type HourPrice } from "@/lib/elpris";
@@ -79,10 +83,11 @@ export function PlanScreen() {
   const when = usePlanStore((s) => s.when);
   const legWhen = usePlanStore((s) => s.legWhen);
   const whPerMiOverride = usePlanStore((s) => s.whPerMi);
+  const speedEffOverride = usePlanStore((s) => s.speedEff);
   const setWhenKind = usePlanStore((s) => s.setWhenKind);
   const setWhen = usePlanStore((s) => s.setWhen);
   const setLegWhen = usePlanStore((s) => s.setLegWhen);
-  const setWhPerMi = usePlanStore((s) => s.setWhPerMi);
+  const setSpeedEff = usePlanStore((s) => s.setSpeedEff);
   const savePlan = usePlanStore((s) => s.savePlan);
   const loadPlan = usePlanStore((s) => s.loadPlan);
   const deleteSaved = usePlanStore((s) => s.deleteSaved);
@@ -156,7 +161,7 @@ export function PlanScreen() {
   }, [stops, detours]);
 
   const carWhPerMi = epaWhPerMi(profile.usableKwh, profile.epaRangeMi);
-  const whPerMi = whPerMiOverride && whPerMiOverride > 0 ? whPerMiOverride : carWhPerMi;
+  const speedEff = speedEffOverride ?? defaultSpeedEff(whPerMiOverride && whPerMiOverride > 0 ? whPerMiOverride : carWhPerMi);
   const clock = when || dkNowHhmm();
 
   const hours = useMemo(() => {
@@ -201,7 +206,7 @@ export function PlanScreen() {
     hours,
     acKw: profile.acKw,
     acKr,
-    whPerMi,
+    speedEff,
     departHhmm,
     legWhen,
   };
@@ -213,7 +218,7 @@ export function PlanScreen() {
       modes: activeModes,
       routes: selectedRoutes,
     });
-  }, [stops, activeModes, detours, selectedRoutes, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, whPerMi, departHhmm, legWhen]);
+  }, [stops, activeModes, detours, selectedRoutes, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen]);
 
   const viewLegs = useMemo(() => {
     return legs.map((leg, i) => {
@@ -230,16 +235,24 @@ export function PlanScreen() {
     return LEG_MODES.map((mode) => {
       const optionRoutes = routesFor(mode);
       if (optionRoutes.length !== Math.max(0, stops.length - 1) || stops.length < 2) {
-        return { mode, totals: null as ReturnType<typeof planTotals> | null };
+        return { mode, totals: null as ReturnType<typeof planTotals> | null, kmh: 0, kwhPerMi: 0 };
       }
       const priced = pricePlan({
         ...planArgs,
         modes: stops.slice(1).map(() => mode),
         routes: optionRoutes,
       });
-      return { mode, totals: planTotals(priced) };
+      const miles = optionRoutes.reduce((n, r) => n + r.miles, 0);
+      const seconds = optionRoutes.reduce((n, r) => n + r.seconds, 0);
+      const kmh = avgSpeedKmh(miles, seconds);
+      return {
+        mode,
+        totals: planTotals(priced),
+        kmh,
+        kwhPerMi: interpolateWhPerMi(speedEff, kmh) / 1000,
+      };
     });
-  }, [routeMap, stops, detours, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, whPerMi, departHhmm, legWhen]);
+  }, [routeMap, stops, detours, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen]);
 
   function addStop(hit: AddressHit) {
     addStopToStore({ name: hit.label.split(",")[0] || hit.label, lat: hit.lat, lng: hit.lng });
@@ -384,25 +397,42 @@ export function PlanScreen() {
         </div>
 
         <p className="mt-4 text-xs text-muted">
-          {profile.usableKwh} kWh usable · {formatNumber(soc, 0)}% now · {formatEfficiency(whPerMi, units)}
+          {profile.usableKwh} kWh usable · {formatNumber(soc, 0)}% now
         </p>
-        <label className="mt-2 block text-xs text-muted">
-          Estimated Wh/{units === "km" ? "km" : "mi"}
-          <input
-            type="number"
-            min={80}
-            max={500}
-            value={Math.round(units === "km" ? whPerMi / 1.609344 : whPerMi)}
-            onChange={(e) => {
-              const n = Number(e.target.value);
-              if (!Number.isFinite(n) || n <= 0) return;
-              setWhPerMi(units === "km" ? n * 1.609344 : n);
-            }}
-            className="mt-1 h-11 w-full rounded-md bg-surface-2 px-3 text-sm text-foreground outline-none"
-          />
-        </label>
+        <p className="mt-3 text-[11px] font-medium uppercase tracking-wide text-muted">
+          kWh/mi at speed
+        </p>
+        <div className="mt-2 grid grid-cols-4 gap-2">
+          {SPEED_KMH.map((kmh) => (
+            <label key={kmh} className="text-[11px] text-muted">
+              {kmh} km/t
+              <input
+                type="number"
+                inputMode="decimal"
+                min={0.08}
+                max={0.6}
+                step={0.005}
+                value={(speedEff[kmh] / 1000).toFixed(3)}
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  if (!Number.isFinite(n) || n <= 0) return;
+                  setSpeedEff({ ...speedEff, [kmh]: n * 1000 });
+                }}
+                className="mt-1 h-11 w-full rounded-md bg-surface-2 px-2 text-center text-sm tabular-nums text-foreground outline-none"
+              />
+            </label>
+          ))}
+        </div>
         <p className="mt-1 text-[11px] text-subtle">
-          Car default {formatEfficiency(carWhPerMi, units)} from {profile.usableKwh} kWh / {formatNumber(profile.epaRangeMi, 0)} mi EPA
+          Interpolated from each leg’s average speed · car EPA {formatEfficiency(carWhPerMi, units)}
+          {speedEffOverride ? (
+            <>
+              {" · "}
+              <button type="button" className="text-muted underline" onClick={() => setSpeedEff(null)}>
+                Reset
+              </button>
+            </>
+          ) : null}
         </p>
 
         <p className="mt-5 text-[11px] font-medium uppercase tracking-wide text-muted">Route options</p>
@@ -429,6 +459,8 @@ export function PlanScreen() {
                       {t.chargeKwh > 0 ? `${formatNumber(t.chargeKwh, 1)} kWh` : "no charge"}
                       <span className="text-subtle"> · </span>
                       {minutesToHm(t.min)}
+                      <span className="text-subtle"> · </span>
+                      {formatNumber(row.kmh, 0)} km/t · {row.kwhPerMi.toFixed(3)} kWh/mi
                     </span>
                   ) : (
                     <span className="flex-1 text-xs text-subtle">{routing ? "Routing…" : "Add a stop"}</span>

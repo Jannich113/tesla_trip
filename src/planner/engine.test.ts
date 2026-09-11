@@ -4,8 +4,11 @@ import {
   addMinutesHhmm,
   chargeSearchKm,
   costingFor,
+  defaultSpeedEff,
+  driveKwhAtSpeed,
   epaWhPerMi,
   hoursFrom,
+  interpolateWhPerMi,
 } from "./modes.ts";
 
 describe("leg modes", () => {
@@ -59,5 +62,24 @@ describe("leg modes", () => {
 
   it("epaWhPerMi uses usable pack / rated range", () => {
     assert.equal(Math.round(epaWhPerMi(75, 327)), 229);
+  });
+
+  it("interpolates kWh/mi between 50, 80, 110 and 130 km/t", () => {
+    const eff = { 50: 180, 80: 220, 110: 280, 130: 340 };
+    assert.equal(interpolateWhPerMi(eff, 50), 180);
+    assert.equal(interpolateWhPerMi(eff, 130), 340);
+    assert.equal(interpolateWhPerMi(eff, 80), 220);
+    assert.equal(Math.round(interpolateWhPerMi(eff, 95)), 250);
+    assert.ok(interpolateWhPerMi(eff, 40) === 180);
+    assert.ok(interpolateWhPerMi(eff, 140) === 340);
+  });
+
+  it("faster average speed uses more kWh", () => {
+    const eff = defaultSpeedEff(240);
+    const miles = 50;
+    const slow = driveKwhAtSpeed(miles, (50 / 50) * 3600, eff); // 50 km/t-ish wait
+    const at50 = driveKwhAtSpeed(miles, (miles * 1.609344) / 50 * 3600, eff);
+    const at130 = driveKwhAtSpeed(miles, (miles * 1.609344) / 130 * 3600, eff);
+    assert.ok(at130 > at50);
   });
 });

@@ -1,20 +1,34 @@
 import { type ChargeLocation } from "@/lib/charge-locations";
 import { type HourPrice } from "@/lib/elpris";
 import { type Units } from "@/lib/vehicle";
-import { type LegMode, addMinutesHhmm, chargeSearchKm, hoursFrom, modeWhFactor } from "./modes";
+import {
+  type LegMode,
+  type SpeedEff,
+  addMinutesHhmm,
+  chargeSearchKm,
+  driveKwhAtSpeed,
+  hoursFrom,
+} from "./modes";
 
 export {
   DETOUR_KM,
   LEG_MODES,
+  SPEED_KMH,
   addMinutesHhmm,
   chargeSearchKm,
+  defaultSpeedEff,
+  driveKwhAtSpeed,
   epaWhPerMi,
   hoursFrom,
+  interpolateWhPerMi,
+  avgSpeedKmh,
   modeColor,
   modeHint,
   modeLabel,
   type DetourKm,
   type LegMode,
+  type SpeedEff,
+  type SpeedKmh,
 } from "./modes";
 
 export type ChargeAdvice = "required" | "suggested" | null;
@@ -122,8 +136,8 @@ export async function fetchRoute(from: PlanStop, to: PlanStop, mode: LegMode): P
   }
 }
 
-export function driveKwh(miles: number, mode: LegMode, baseWhPerMi = 240) {
-  return (miles * baseWhPerMi * modeWhFactor(mode)) / 1000;
+export function driveKwh(miles: number, seconds: number, speedEff: SpeedEff) {
+  return driveKwhAtSpeed(miles, seconds, speedEff);
 }
 
 export function dkNowHhmm() {
@@ -292,8 +306,9 @@ export function pickCharges(opts: {
   acKr: number;
   hours: HourPrice[];
   acKw: number;
+  speedEff: SpeedEff;
 }): { primary: PricedCharge; backup: PricedCharge | null } | null {
-  const { kwhNeed, path, detourKm, mode, locations, acKr, hours, acKw } = opts;
+  const { kwhNeed, path, detourKm, mode, locations, acKr, hours, acKw, speedEff } = opts;
   if (kwhNeed <= 0.05 || !locations.length) return null;
   const preferCheap = mode === "cheapest";
   const userBand = Math.max(detourKm * 1000, 80);
@@ -305,7 +320,11 @@ export function pickCharges(opts: {
     return { loc, distM, priced };
   });
 
-  const extraDriveKr = (distM: number) => driveKwh(distM / 1609.344, mode) * acKr;
+  const extraDriveKr = (distM: number) => {
+    const miles = distM / 1609.344;
+    const seconds = (miles * 1.609344) / 80 * 3600;
+    return driveKwh(miles, seconds, speedEff) * acKr;
+  };
 
   const byRank = (a: (typeof scored)[0], b: (typeof scored)[0]) => {
     if (preferCheap) {
@@ -347,11 +366,11 @@ export function pricePlan(opts: {
   hours: HourPrice[];
   acKw: number;
   acKr: number;
-  whPerMi: number;
+  speedEff: SpeedEff;
   departHhmm: string;
   legWhen?: LegWhen[];
 }): PricedLeg[] {
-  const { stops, modes, detours, routes, usableKwh, locations, hours, acKw, acKr, whPerMi } =
+  const { stops, modes, detours, routes, usableKwh, locations, hours, acKw, acKr, speedEff } =
     opts;
   const live = hours[0]?.krPerKwh ?? acKr;
   let soc = opts.soc;
@@ -365,7 +384,7 @@ export function pricePlan(opts: {
     if (when?.kind === "arrive" && when.hhmm) {
       clock = addMinutesHhmm(when.hhmm, -route.seconds / 60);
     }
-    const kwh = driveKwh(route.miles, mode, whPerMi);
+    const kwh = driveKwh(route.miles, route.seconds, speedEff);
     const socAfter = soc - (kwh / usableKwh) * 100;
     const required = socAfter < RESERVE_SOC;
     const legHours = hoursFrom(hours, clock);
@@ -388,6 +407,7 @@ export function pricePlan(opts: {
           acKr: legHours[0]?.krPerKwh ?? acKr,
           hours: legHours,
           acKw,
+          speedEff,
         })
       : null;
     const charge = pick?.primary ?? null;
