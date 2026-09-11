@@ -44,15 +44,14 @@ describe("leg modes", () => {
     assert.equal(c.use_tolls, 1);
   });
 
-  it("cheapest uses motorways but skips tolls", () => {
+  it("cheapest uses the same roads as fastest so it can hit cheap HPC", () => {
     const c = costingFor("cheapest");
-    assert.equal(c.use_highways, 1);
-    assert.equal(c.use_tolls, 0);
-    assert.notEqual(c.use_tolls, costingFor("fastest").use_tolls);
+    assert.equal(c.use_highways, costingFor("fastest").use_highways);
+    assert.equal(c.use_tolls, costingFor("fastest").use_tolls);
   });
 
   it("charge search is wider for eco and cheapest", () => {
-    assert.ok(chargeSearchKm("cheapest", 12) >= 25);
+    assert.ok(chargeSearchKm("cheapest", 12) >= 40);
     assert.ok(chargeSearchKm("eco", 8) >= 30);
     assert.ok(chargeSearchKm("fastest", 18) >= 18);
     assert.equal(formatWaitCap(0), "0");
@@ -69,7 +68,7 @@ describe("leg modes", () => {
   it("default focus matches the mode", () => {
     assert.equal(pathMode("eco"), "eco");
     assert.equal(pathMode("fastest"), "fastest");
-    assert.equal(pathMode("cheapest"), "cheapest");
+    assert.equal(pathMode("cheapest"), "fastest");
     assert.equal(pathMode("cheapest", true), "eco");
   });
 

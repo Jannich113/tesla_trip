@@ -36,7 +36,7 @@ export function modeLabel(mode: LegMode) {
 
 export function modeHint(mode: LegMode) {
   if (mode === "eco") return "Skips tolls and prefers slower roads. Uses a motorway only when it saves a lot of time.";
-  if (mode === "cheapest") return "Motorways ok. Skips tolls and hunts the lowest kWh.";
+  if (mode === "cheapest") return "Lowest charge bill. Motorways and tolls are fine if they reach cheaper stalls.";
   return "Motorways and tolls for earliest arrival. Road fees don't matter.";
 }
 
@@ -67,10 +67,10 @@ export const DEFAULT_MODE_FOCUS: Record<LegMode, ModeFocus> = {
   cheapest: "pris",
 };
 
-/** Eco: soft-avoid motorways. Cheapest: highways ok, skip tolls unless avoid-fees. */
+/** Eco: own corridor. Cheapest: same roads as fastest unless avoid-fees, then eco. */
 export function pathMode(mode: LegMode, avoidFees = false): LegMode {
   if (mode === "eco") return "eco";
-  if (mode === "cheapest") return avoidFees ? "eco" : "cheapest";
+  if (mode === "cheapest") return avoidFees ? "eco" : "fastest";
   return "fastest";
 }
 
@@ -78,7 +78,7 @@ export function pathMode(mode: LegMode, avoidFees = false): LegMode {
 export function chargeSearchKm(mode: LegMode, detourKm: number, focus?: ModeFocus) {
   const km = Math.max(8, detourKm);
   if (mode === "eco" || focus === "distance") return Math.max(30, Math.round(km * 2.2));
-  if (mode === "cheapest" || focus === "pris") return Math.max(25, Math.round(km * 1.8));
+  if (mode === "cheapest" || focus === "pris") return Math.max(40, Math.round(km * 2.5));
   return Math.max(18, km);
 }
 
@@ -95,7 +95,7 @@ export function chargeFitScore(
     const detourMin = (distKm / kmh) * 60;
     return detourMin + (opts.dc ? 0 : 14);
   }
-  if (focus === "pris") return kr + extra * 0.45 + distKm * 0.8;
+  if (focus === "pris") return kr * 4 + extra * 0.12 + distKm * 0.12;
   return distKm * 14 + (opts.dc ? 1.5 : 0) + kr * 0.04;
 }
 
@@ -309,20 +309,11 @@ export function costingFor(mode: LegMode): AutoCosting {
       top_speed: 110,
     };
   }
-  if (mode === "cheapest") {
-    return {
-      shortest: false,
-      use_highways: 1,
-      use_tolls: 0,
-      use_ferry: 0.2,
-      top_speed: 130,
-    };
-  }
   return {
     shortest: false,
     use_highways: 1,
     use_tolls: 1,
     use_ferry: 0.2,
-    top_speed: 140,
+    top_speed: mode === "cheapest" ? 130 : 140,
   };
 }

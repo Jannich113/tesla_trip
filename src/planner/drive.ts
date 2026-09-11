@@ -155,8 +155,7 @@ async function osrmOnce(from: Stop, to: Stop, mode: LegMode, extra: string): Pro
 }
 
 async function osrm(from: Stop, to: Stop, mode: LegMode): Promise<DriveRouteJson | null> {
-  const extras =
-    mode === "eco" || mode === "cheapest" ? ["&exclude=toll", ""] : [""];
+  const extras = mode === "eco" ? ["&exclude=toll", ""] : [""];
   for (const extra of extras) {
     const routed = await osrmOnce(from, to, mode, extra).catch(() => null);
     if (routed) return routed;
@@ -176,12 +175,7 @@ function pickRouted(mode: LegMode, routes: DriveRouteJson[]): DriveRouteJson | n
     });
   }
   if (mode === "cheapest") {
-    return list.reduce((best, r) => {
-      const rt = r.tollKr ?? 0;
-      const bt = best.tollKr ?? 0;
-      if (rt !== bt) return rt < bt ? r : best;
-      return r.seconds < best.seconds ? r : best;
-    });
+    return list.reduce((best, r) => (r.seconds < best.seconds ? r : best));
   }
   if (mode === "fastest") {
     return list.reduce((best, r) => (r.seconds < best.seconds ? r : best));

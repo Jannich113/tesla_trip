@@ -125,7 +125,8 @@ export function pickViaOnPath(opts: {
       extraDriveKr: (distM / 1000) * 1.2,
       extraKwh: distM / 1000 * 0.2,
     });
-    const score = energyTo * 6 - fit;
+    const along = focus === "pris" ? energyTo * 1.2 : energyTo * 6;
+    const score = along - fit;
     if (score > bestScore) {
       bestScore = score;
       best = loc;

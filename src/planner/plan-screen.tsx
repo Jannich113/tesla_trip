@@ -94,7 +94,7 @@ function routeKey(
   return `${from.lat.toFixed(4)},${from.lng.toFixed(4)}|${to.lat.toFixed(4)},${to.lng.toFixed(4)}|${mode}`;
 }
 
-const PATH_MODES: LegMode[] = ["eco", "fastest", "cheapest"];
+const PATH_MODES: LegMode[] = ["eco", "fastest"];
 
 export function PlanScreen() {
   const units = useVehicleStore((s) => s.units);
@@ -399,6 +399,7 @@ export function PlanScreen() {
         ...planArgs,
         modes: stops.slice(1).map(() => mode),
         focuses: stops.slice(1).map(() => (mode === "cheapest" ? "pris" : mode === "eco" ? "distance" : "time")),
+        detours: planArgs.detours.map((d) => (mode === "cheapest" ? Math.max(d, 30) : d)),
         routes: optionRoutes,
       });
       const miles = optionRoutes.reduce((n, r) => n + r.miles, 0);
@@ -833,7 +834,7 @@ export function PlanScreen() {
                           {row.mode === "cheapest"
                             ? cheapAvoidFees
                               ? " · no motorways / tolls"
-                              : " · motorways, no tolls"
+                              : " · cheapest stalls"
                             : sameCorridor
                               ? " · same corridor"
                               : ""}
