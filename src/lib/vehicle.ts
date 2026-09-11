@@ -1,6 +1,6 @@
 export type Units = "mi" | "km";
 export type DriveMode = "parked" | "driving" | "charging";
-export type Tab = "home" | "trips" | "costs" | "vehicle";
+export type Tab = "home" | "trips" | "costs" | "elpris" | "vehicle";
 
 export const VEHICLE = {
   name: "Juniper",

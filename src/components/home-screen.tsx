@@ -9,7 +9,13 @@ import {
   ratedRangeMi,
   relativeTime,
 } from "@/lib/vehicle";
-import { chargeTotalsFrom, formatUsd, tripTotals } from "@/lib/history";
+import {
+  chargeTotalsFrom,
+  estimateRegenKwh,
+  formatUsd,
+  petrolSavings,
+  tripTotals,
+} from "@/lib/history";
 import { cn } from "@/lib/utils";
 import { pricedSessions, useChargeStore } from "@/store/charge-store";
 import { useVehicleStore } from "@/store/vehicle-store";
@@ -26,12 +32,14 @@ export function HomeScreen() {
   const image = s.mode === "charging" ? "/vehicles/juniper-rear.jpg" : "/vehicles/juniper-front.jpg";
   const [now, setNow] = useState(0);
   const todayTrips = tripTotals("day");
+  const lifetimeTrips = tripTotals("total");
   const locations = useChargeStore((st) => st.locations);
   const logged = useChargeStore((st) => st.logged);
-  const todayCost = useMemo(
-    () => chargeTotalsFrom(pricedSessions(locations, logged), "day"),
-    [locations, logged],
-  );
+  const sessions = useMemo(() => pricedSessions(locations, logged), [locations, logged]);
+  const todayCost = useMemo(() => chargeTotalsFrom(sessions, "day"), [sessions]);
+  const lifetimeCharge = useMemo(() => chargeTotalsFrom(sessions, "total"), [sessions]);
+  const regenKwh = estimateRegenKwh(lifetimeTrips.kwh);
+  const savingsUsd = petrolSavings(lifetimeTrips.mi, lifetimeCharge.usd);
 
   useEffect(() => {
     setNow(Date.now());
@@ -86,6 +94,36 @@ export function HomeScreen() {
       </div>
 
       <div className="mt-6 space-y-3 px-4">
+        <section className="rounded-xl bg-surface px-4 py-4 shadow-[var(--shadow-border)]">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted">Vehicle</p>
+          <p className="mt-1 text-xl font-medium tracking-tight">{VEHICLE.name}</p>
+          <p className="mt-0.5 text-xs text-subtle">
+            {VEHICLE.year} {VEHICLE.model} · {VEHICLE.trim}
+          </p>
+        </section>
+
+        <div className="grid grid-cols-2 gap-3">
+          <StatTile
+            label="Odometer"
+            value={formatDistance(s.odometerMi, s.units, s.odometerMi >= 100 ? 0 : 1)}
+          />
+          <StatTile
+            label="Charged"
+            value={`${formatNumber(lifetimeCharge.kwh, lifetimeCharge.kwh >= 100 ? 0 : 1)} kWh`}
+            hint="Lifetime"
+          />
+          <StatTile
+            label="Regen"
+            value={`${formatNumber(regenKwh, regenKwh >= 100 ? 0 : 1)} kWh`}
+            hint="Est. recovered"
+          />
+          <StatTile
+            label="vs petrol"
+            value={formatUsd(Math.max(0, savingsUsd), savingsUsd >= 100 ? 0 : 2)}
+            hint="Benzin savings"
+          />
+        </div>
+
         <div className="flex gap-2">
           <StatusChip label={s.locked ? "Locked" : "Unlocked"} />
           <StatusChip label={s.climateOn ? `Climate ${s.climateSetF}°` : "Climate off"} />
@@ -108,6 +146,16 @@ export function HomeScreen() {
           </p>
         </div>
       </div>
+    </div>
+  );
+}
+
+function StatTile({ label, value, hint }: { label: string; value: string; hint?: string }) {
+  return (
+    <div className="rounded-xl bg-surface px-4 py-4 shadow-[var(--shadow-border)]">
+      <p className="text-xs text-muted">{label}</p>
+      <p className="mt-1 text-lg font-medium tabular-nums">{value}</p>
+      {hint ? <p className="mt-1 text-xs text-subtle">{hint}</p> : null}
     </div>
   );
 }
