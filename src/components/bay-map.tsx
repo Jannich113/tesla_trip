@@ -21,11 +21,12 @@ export type MapRoute = {
   color?: string;
 };
 
-function escapeHtml(s: string) {
-  return s.replace(/[<>&"]/g, "");
-}
+type Leaflet = typeof import("leaflet");
+type Polyline = import("leaflet").Polyline;
+type CircleMarker = import("leaflet").CircleMarker;
+type Circle = import("leaflet").Circle;
 
-function arc(a: [number, number], b: [number, number], steps = 12): [number, number][] {
+function arc(a: [number, number], b: [number, number], steps = 10): [number, number][] {
   const mx = (a[0] + b[0]) / 2;
   const my = (a[1] + b[1]) / 2;
   const dx = b[1] - a[1];
@@ -46,13 +47,17 @@ function arc(a: [number, number], b: [number, number], steps = 12): [number, num
   return pts;
 }
 
-function thin(path: [number, number][], max = 80): [number, number][] {
+function thin(path: [number, number][], max = 48): [number, number][] {
   if (path.length <= max) return path;
   const step = Math.ceil(path.length / max);
   const out = path.filter((_, i) => i % step === 0);
   const last = path[path.length - 1];
   if (out[out.length - 1] !== last) out.push(last);
   return out;
+}
+
+function routePts(route: MapRoute): [number, number][] {
+  return thin(route.path && route.path.length >= 2 ? route.path : arc(route.from, route.to), 48);
 }
 
 function overlayKey(
@@ -70,7 +75,7 @@ function overlayKey(
     .map((x) => {
       const a = x.path?.[0] ?? x.from;
       const b = x.path?.at(-1) ?? x.to;
-      return `${x.id}:${x.path?.length ?? 0}:${a[0].toFixed(3)},${a[1].toFixed(3)}>${b[0].toFixed(3)},${b[1].toFixed(3)}:${x.color ?? ""}`;
+      return `${x.id}:${x.path?.length ?? 0}:${a[0].toFixed(3)}>${b[0].toFixed(3)}:${x.color ?? ""}`;
     })
     .join("|");
   return `${sel}#${m}#${r}#${dropping ? 1 : 0}`;
@@ -82,6 +87,14 @@ function pinColor(kind: MapMarker["kind"], badge?: string) {
   if (kind === "home") return "#c8cdd4";
   if (kind === "charger") return "#e6b84d";
   return "#6ea8ff";
+}
+
+function prune<T extends { remove: () => void }>(store: Map<string, T>, keep: Set<string>) {
+  for (const [id, layer] of store) {
+    if (keep.has(id)) continue;
+    layer.remove();
+    store.delete(id);
+  }
 }
 
 export function BayMap({
@@ -109,8 +122,11 @@ export function BayMap({
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<import("leaflet").Map | null>(null);
-  const groupRef = useRef<import("leaflet").LayerGroup | null>(null);
-  const LRef = useRef<typeof import("leaflet") | null>(null);
+  const LRef = useRef<Leaflet | null>(null);
+  const canvasRef = useRef<import("leaflet").Renderer | null>(null);
+  const routesRef = useRef(new Map<string, Polyline>());
+  const dotsRef = useRef(new Map<string, CircleMarker>());
+  const ringsRef = useRef(new Map<string, Circle>());
   const onSelectRef = useRef(onSelect);
   const onDropRef = useRef(onDrop);
   const fitKeyRef = useRef("");
@@ -129,9 +145,11 @@ export function BayMap({
       void (async () => {
         const leaflet = await import("leaflet");
         if (cancelled || !hostRef.current) return;
-        const mod = leaflet as unknown as { default?: typeof leaflet } & typeof leaflet;
-        const L = (mod.default ?? mod) as typeof leaflet;
+        const mod = leaflet as unknown as { default?: Leaflet } & Leaflet;
+        const L = (mod.default ?? mod) as Leaflet;
         LRef.current = L;
+        const canvas = L.canvas({ padding: 0.12, tolerance: 12 });
+        canvasRef.current = canvas;
         const map = L.map(hostRef.current, {
           zoomControl: false,
           attributionControl: true,
@@ -139,24 +157,25 @@ export function BayMap({
           fadeAnimation: false,
           zoomAnimation: false,
           markerZoomAnimation: false,
-          renderer: L.canvas({ padding: 0.4 }),
+          inertia: false,
+          preferCanvas: true,
+          renderer: canvas,
         });
         L.control.zoom({ position: "bottomright" }).addTo(map);
         L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
           maxZoom: 18,
           updateWhenIdle: true,
-          keepBuffer: 1,
+          updateWhenZooming: false,
+          keepBuffer: 0,
           attribution:
             '&copy; <a href="https://www.openstreetmap.org/copyright" rel="noreferrer" target="_blank">OpenStreetMap</a>',
         }).addTo(map);
         map.attributionControl?.setPosition("bottomleft");
         map.setView([37.45, -122.15], 10);
-        groupRef.current = L.layerGroup().addTo(map);
         map.on("click", (e) => {
           onDropRef.current?.(e.latlng.lat, e.latlng.lng);
         });
         mapRef.current = map;
-        map.invalidateSize();
         if (!cancelled) setReady(true);
       })();
     }, 48);
@@ -165,10 +184,16 @@ export function BayMap({
       cancelled = true;
       window.clearTimeout(start);
       setReady(false);
+      routesRef.current.forEach((l) => l.remove());
+      dotsRef.current.forEach((l) => l.remove());
+      ringsRef.current.forEach((l) => l.remove());
+      routesRef.current.clear();
+      dotsRef.current.clear();
+      ringsRef.current.clear();
       mapRef.current?.remove();
       mapRef.current = null;
-      groupRef.current = null;
       LRef.current = null;
+      canvasRef.current = null;
       drawKeyRef.current = "";
       fitKeyRef.current = "";
     };
@@ -177,84 +202,124 @@ export function BayMap({
   useEffect(() => {
     if (!ready || hidden) return;
     const map = mapRef.current;
-    const group = groupRef.current;
-    const leaflet = LRef.current;
-    if (!map || !group || !leaflet) return;
+    const L = LRef.current;
+    const canvas = canvasRef.current;
+    if (!map || !L || !canvas) return;
     const key = overlayKey(markers, routes, selectedId, selectedIds, dropping);
     if (key === drawKeyRef.current) return;
 
     const raf = window.requestAnimationFrame(() => {
       if (mapRef.current !== map) return;
       drawKeyRef.current = key;
-      const L = leaflet;
-      group.clearLayers();
-      const bounds: [number, number][] = [];
       const selectedSet = new Set(
         [selectedId, ...(selectedIds ?? [])].filter((id): id is string => !!id),
       );
       const selectedRoutes = routes.filter((r) => selectedSet.has(r.id));
+      const pins =
+        markers.length > 14
+          ? markers.filter((m) => m.kind !== "charger").concat(markers.filter((m) => m.kind === "charger").slice(0, 8))
+          : markers;
 
+      const keepRoutes = new Set<string>();
       for (const route of routes) {
+        keepRoutes.add(route.id);
         const selected = selectedSet.has(route.id);
-        const pts = thin(route.path && route.path.length >= 2 ? route.path : arc(route.from, route.to), 72);
-        pts.forEach((p) => bounds.push(p));
-        L.polyline(pts, {
+        const pts = routePts(route);
+        const style = {
           color: route.color || "#1ecf8a",
-          opacity: selected ? 1 : selectedSet.size ? 0.45 : 0.85,
-          weight: selected ? 4 : 2.4,
-          lineCap: "round",
-          lineJoin: "round",
-          interactive: true,
-          renderer: map.options.renderer,
-        })
-          .on("click", (e: { target?: unknown }) => {
-            L.DomEvent.stopPropagation(e as import("leaflet").LeafletMouseEvent);
-            onSelectRef.current?.(route.id);
-          })
-          .addTo(group);
-      }
-
-      const pins = markers.length > 16 ? markers.filter((m) => m.kind !== "charger").concat(markers.filter((m) => m.kind === "charger").slice(0, 10)) : markers;
-      for (const marker of pins) {
-        bounds.push([marker.lat, marker.lng]);
-        const selected = selectedSet.has(marker.id);
-        if (marker.radiusM && marker.radiusM > 0 && (selected || dropping)) {
-          L.circle([marker.lat, marker.lng], {
-            radius: marker.radiusM,
-            color: "#1ecf8a",
-            weight: selected ? 1.4 : 1,
-            opacity: selected ? 0.8 : 0.25,
-            fillColor: "#1ecf8a",
-            fillOpacity: selected ? 0.14 : 0.04,
-            interactive: false,
-            renderer: map.options.renderer,
-          }).addTo(group);
-        }
-        const color = pinColor(marker.kind, marker.badge);
-        const dot = L.circleMarker([marker.lat, marker.lng], {
-          radius: selected ? 8 : 6,
-          color,
-          weight: selected ? 2 : 1,
-          opacity: 1,
-          fillColor: color,
-          fillOpacity: selected ? 1 : 0.85,
-          renderer: map.options.renderer,
-        }).addTo(group);
-        dot.on("click", (e: { target?: unknown }) => {
-          L.DomEvent.stopPropagation(e as import("leaflet").LeafletMouseEvent);
-          onSelectRef.current?.(marker.id);
-        });
-        if (selected || marker.kind !== "charger") {
-          dot.bindTooltip(escapeHtml(marker.label), {
-            permanent: marker.kind !== "charger",
-            direction: "right",
-            offset: [8, 0],
-            opacity: 0.92,
-            className: "map-pin-tip",
+          opacity: selected ? 1 : selectedSet.size ? 0.42 : 0.85,
+          weight: selected ? 4 : 2.2,
+        };
+        let line = routesRef.current.get(route.id);
+        if (!line) {
+          line = L.polyline(pts, {
+            ...style,
+            lineCap: "round",
+            lineJoin: "round",
+            interactive: true,
+            bubblingMouseEvents: false,
+            smoothFactor: 1.8,
+            renderer: canvas,
           });
-          if (marker.kind !== "charger") dot.openTooltip();
+          line.on("click", (e: import("leaflet").LeafletMouseEvent) => {
+            L.DomEvent.stopPropagation(e);
+            onSelectRef.current?.(route.id);
+          });
+          line.addTo(map);
+          routesRef.current.set(route.id, line);
+        } else {
+          line.setLatLngs(pts);
+          line.setStyle(style);
         }
       }
+      prune(routesRef.current, keepRoutes);
+
+      const keepDots = new Set<string>();
+      const keepRings = new Set<string>();
+      for (const marker of pins) {
+        keepDots.add(marker.id);
+        const selected = selectedSet.has(marker.id);
+        const color = pinColor(marker.kind, marker.badge);
+        let dot = dotsRef.current.get(marker.id);
+        if (!dot) {
+          dot = L.circleMarker([marker.lat, marker.lng], {
+            radius: selected ? 8 : 6,
+            color,
+            weight: selected ? 2 : 1,
+            opacity: 1,
+            fillColor: color,
+            fillOpacity: selected ? 1 : 0.88,
+            renderer: canvas,
+            bubblingMouseEvents: false,
+          });
+          dot.on("click", (e: import("leaflet").LeafletMouseEvent) => {
+            L.DomEvent.stopPropagation(e);
+            onSelectRef.current?.(marker.id);
+          });
+          dot.bindTooltip(marker.label, { sticky: true, opacity: 0.92, className: "map-pin-tip", direction: "top" });
+          dot.addTo(map);
+          dotsRef.current.set(marker.id, dot);
+        } else {
+          dot.setLatLng([marker.lat, marker.lng]);
+          dot.setStyle({
+            radius: selected ? 8 : 6,
+            color,
+            weight: selected ? 2 : 1,
+            fillColor: color,
+            fillOpacity: selected ? 1 : 0.88,
+          });
+        }
+
+        const showRing = Boolean(marker.radiusM && marker.radiusM > 0 && (selected || dropping));
+        if (showRing && marker.radiusM) {
+          keepRings.add(marker.id);
+          let ring = ringsRef.current.get(marker.id);
+          if (!ring) {
+            ring = L.circle([marker.lat, marker.lng], {
+              radius: marker.radiusM,
+              color: "#1ecf8a",
+              weight: selected ? 1.4 : 1,
+              opacity: selected ? 0.8 : 0.25,
+              fillColor: "#1ecf8a",
+              fillOpacity: selected ? 0.14 : 0.04,
+              interactive: false,
+              renderer: canvas,
+            });
+            ring.addTo(map);
+            ringsRef.current.set(marker.id, ring);
+          } else {
+            ring.setLatLng([marker.lat, marker.lng]);
+            ring.setRadius(marker.radiusM);
+            ring.setStyle({
+              weight: selected ? 1.4 : 1,
+              opacity: selected ? 0.8 : 0.25,
+              fillOpacity: selected ? 0.14 : 0.04,
+            });
+          }
+        }
+      }
+      prune(dotsRef.current, keepDots);
+      prune(ringsRef.current, keepRings);
 
       const focusKey = `${routes.map((r) => r.id).join(",")}:${selectedRoutes.map((r) => r.id).join(",")}`;
       const fitPts =
@@ -263,7 +328,7 @@ export function BayMap({
               const raw = r.path && r.path.length >= 2 ? r.path : [r.from, r.to];
               return [raw[0], raw[Math.floor(raw.length / 2)], raw[raw.length - 1]];
             })
-          : bounds;
+          : pins.map((m) => [m.lat, m.lng] as [number, number]);
       if (fitPts.length >= 2 && fitKeyRef.current !== focusKey) {
         fitKeyRef.current = focusKey;
         map.fitBounds(L.latLngBounds(fitPts), {
