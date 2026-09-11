@@ -484,9 +484,12 @@ export function PlanScreen() {
                               : ""}
                         </span>
                         <span className="mt-0.5 block text-xs text-muted">
-                          {t.chargeKwh > 0
-                            ? `${formatNumber(t.chargeKwh, 1)} kWh ${t.chargeLabel || "charge"} · ${t.waitMin > 0 ? `${minutesToHm(t.waitMin)} wait · ` : ""}${minutesToHm(t.chargeMin)} charge${row.mode === "cheapest" ? " · cheaper power" : ""}`
+                          {t.charges > 0
+                            ? `${t.charges} ${t.charges === 1 ? "charge" : "charges"}`
                             : "no charge"}
+                          {row.mode === "cheapest" || t.waitMin > 0
+                            ? ` · ${t.waitMin > 0 ? minutesToHm(t.waitMin) : "no"} wait`
+                            : ""}
                         </span>
                       </>
                     ) : (

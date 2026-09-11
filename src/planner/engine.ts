@@ -522,7 +522,7 @@ export function planTotals(legs: PricedLeg[]) {
       acc.min += leg.route.seconds / 60 + leg.chargeMin + leg.waitMin;
       acc.chargeKwh += leg.advice ? (leg.charge?.kwh ?? 0) : 0;
       acc.requiredKwh += leg.needed ? (leg.charge?.kwh ?? 0) : 0;
-      if (leg.advice && leg.charge && !acc.chargeLabel) acc.chargeLabel = leg.charge.label;
+      acc.charges += leg.advice && leg.charge ? 1 : 0;
       return acc;
     },
     {
@@ -535,7 +535,7 @@ export function planTotals(legs: PricedLeg[]) {
       waitMin: 0,
       chargeKwh: 0,
       requiredKwh: 0,
-      chargeLabel: "",
+      charges: 0,
     },
   );
 }
