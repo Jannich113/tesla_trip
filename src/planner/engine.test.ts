@@ -22,6 +22,7 @@ import { networkFromOsmTags, isDcStation, networkFromOperator } from "./osm-oper
 import { estimateTolls, gatesOnPath } from "./tolls.ts";
 import { seedsAlongPath } from "./seed-chargers.ts";
 import { toDkk, CATALOG_FX, NETWORK_NATIVE } from "./charge-fx.ts";
+import { encodePolyline, decodePolyline } from "./polyline.ts";
 import { countryProfile } from "./country-profiles.ts";
 
 describe("leg modes", () => {
@@ -249,5 +250,19 @@ describe("leg modes", () => {
     assert.equal(networkFromOperator("CLEVER"), "clever");
     assert.equal(networkFromOperator("Tesla Supercharger Kolding"), "tesla");
     assert.ok(hits.some((h) => /padborg/i.test(h.name)));
+  });
+
+  it("encodes a Google polyline that round-trips", () => {
+    const path: [number, number][] = [
+      [38.5, -120.2],
+      [40.7, -120.95],
+      [43.252, -126.453],
+    ];
+    const encoded = encodePolyline(path);
+    assert.equal(encoded, "_p~iF~ps|U_ulLnnqC_mqNvxq`@");
+    const back = decodePolyline(encoded);
+    assert.equal(back.length, 3);
+    assert.ok(Math.abs(back[0][0] - 38.5) < 1e-5);
+    assert.ok(Math.abs(back[2][1] + 126.453) < 1e-5);
   });
 });

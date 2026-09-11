@@ -4,6 +4,7 @@ import { haversineM } from "@/planner/insert";
 import { isDcStation, networkFromOperator, networkFromOsmTags } from "@/planner/osm-operator";
 import { rateForNetwork } from "@/planner/networks";
 import { seedsAlongPath } from "@/planner/seed-chargers";
+import { encodePolyline } from "@/planner/polyline";
 
 const DKK_PER_USD = 6.85;
 const OCM_KEY = env("OPENCHARGEMAP_KEY") ?? "d670b729-7bd0-40dd-8a17-4b881edf1a68";
@@ -174,6 +175,43 @@ function ocmToCharger(poi: OcmPoi): RouteCharger | null {
   };
 }
 
+async function fetchOcmPolyline(path: [number, number][], radiusKm: number): Promise<RouteCharger[]> {
+  const encoded = encodePolyline(path);
+  const dist = Math.max(8, Math.min(40, Math.round(radiusKm)));
+  const base =
+    `https://api.openchargemap.io/v3/poi/?output=json&compact=false&verbose=false` +
+    `&client=tesla-trip` +
+    `&key=${encodeURIComponent(OCM_KEY)}` +
+    `&polyline=${encodeURIComponent(encoded)}` +
+    `&distance=${dist}&distanceunit=KM` +
+    `&minpowerkw=50&levelid=3&statustypeid=50` +
+    `&maxresults=200`;
+  const urls = [
+    `${base}&connectiontypeid=33,30`,
+    base,
+  ];
+  for (const url of urls) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 10_000);
+    try {
+      const res = await fetch(url, {
+        headers: { Accept: "application/json", "X-API-Key": OCM_KEY },
+        signal: ctrl.signal,
+      });
+      if (!res.ok) continue;
+      const body = (await res.json()) as OcmPoi[];
+      if (!Array.isArray(body) || !body.length) continue;
+      const rows = body.map(ocmToCharger).filter((c): c is RouteCharger => Boolean(c));
+      if (rows.length) return rows;
+    } catch {
+      /* try looser filters */
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  return [];
+}
+
 async function fetchOcmAt(lat: number, lng: number, radiusKm: number): Promise<RouteCharger[]> {
   const url =
     `https://api.openchargemap.io/v3/poi/?output=json&compact=false&verbose=false` +
@@ -195,7 +233,9 @@ async function fetchOcmAt(lat: number, lng: number, radiusKm: number): Promise<R
   }
 }
 
-async function fetchOcm(samples: [number, number][], radiusKm: number) {
+async function fetchOcm(path: [number, number][], samples: [number, number][], radiusKm: number) {
+  const along = await fetchOcmPolyline(path, radiusKm);
+  if (along.length) return along;
   const chunks = await Promise.all(samples.slice(0, 6).map(([lat, lng]) => fetchOcmAt(lat, lng, radiusKm)));
   const byId = new Map<string, RouteCharger>();
   for (const row of chunks.flat()) byId.set(row.id, row);
@@ -225,7 +265,7 @@ export const Route = createFileRoute("/api/chargers")({
           const radiusM = Math.min(40_000, Math.max(12_000, (body.radiusKm ?? 28) * 1000));
           const seed = seedsAlongPath(path, radiusM);
           const samples = samplePath(path, 40_000, 8);
-          const ocm = await fetchOcm(samples, radiusM / 1000);
+          const ocm = await fetchOcm(path, samples, radiusM / 1000);
           const osm = ocm.length >= 8 ? [] : await fetchOverpass(samples, radiusM);
           const chargers = mergeChargers(seed, [...ocm, ...osm]);
           return Response.json({
@@ -235,6 +275,7 @@ export const Route = createFileRoute("/api/chargers")({
             live: ocm.length + osm.length,
             ocm: ocm.length,
             samples: samples.length,
+            polyline: true,
             updatedAt: new Date().toISOString(),
           });
         } catch (err) {
