@@ -87,6 +87,13 @@ export function cheapDetourKm(routeSeconds: number) {
   return Math.min(80, Math.max(12, Math.round(km)));
 }
 
+/** Leave the motorway only if net save is at least 20 kr and 2× the extra drive. */
+export function detourPays(opts: { baseKr: number; stallKr: number; extraKr: number; distM: number }) {
+  if (opts.distM <= 4000) return true;
+  const net = opts.baseKr - opts.stallKr - opts.extraKr;
+  return net >= 20 && net >= opts.extraKr * 2;
+}
+
 export function detourSavings(base: { kr: number; tollKr: number; driveMin: number; mi: number }, alt: { kr: number; tollKr: number; driveMin: number; mi: number }) {
   const extraMin = Math.max(0, alt.driveMin - base.driveMin);
   const extraMi = Math.max(0, alt.mi - base.mi);
@@ -120,7 +127,7 @@ export function chargeFitScore(
     const detourMin = (distKm / kmh) * 60;
     return detourMin + (opts.dc ? 0 : 14);
   }
-  if (focus === "pris") return kr * 8 + extra * 0.2 + distKm * 0.08;
+  if (focus === "pris") return kr * 8 + extra * 2.5 + distKm * 0.8;
   return distKm * 14 + (opts.dc ? 1.5 : 0) + kr * 0.04;
 }
 

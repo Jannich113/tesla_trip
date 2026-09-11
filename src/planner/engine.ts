@@ -11,6 +11,7 @@ import {
   asDateTime,
   chargeSearchKm,
   cheapDetourKm,
+  detourPays,
   chargeFitScore,
   defaultFocus,
   DEFAULT_DETOUR_KM,
@@ -71,6 +72,7 @@ export {
   pathMode,
   stallKw,
   cheapDetourKm,
+  detourPays,
   detourSavings,
   type DetourKm,
   type LegMode,
@@ -561,16 +563,30 @@ export function pickCharges(opts: {
     return as - bs || a.distM - b.distM;
   };
 
-  const nearestId = [...scored].sort((a, b) => a.distM - b.distM)[0]?.loc.id;
-  const cheapestId = [...scored].sort((a, b) => a.priced.kr - b.priced.kr)[0]?.loc.id;
+  const onPath = [...scored].filter((s) => s.distM <= 5000).sort((a, b) => a.priced.kr - b.priced.kr || a.distM - b.distM);
+  const baselineKr = onPath[0]?.priced.kr ?? [...scored].sort((a, b) => a.distM - b.distM)[0]?.priced.kr ?? 0;
+  const worth = preferCheap
+    ? scored.filter((s) =>
+        detourPays({
+          baseKr: baselineKr,
+          stallKr: s.priced.kr,
+          extraKr: extraDriveKr(s.distM),
+          distM: s.distM,
+        }),
+      )
+    : scored;
+  const rankedPool = worth.length ? worth : scored;
+
+  const nearestId = [...rankedPool].sort((a, b) => a.distM - b.distM)[0]?.loc.id;
+  const cheapestId = [...rankedPool].sort((a, b) => a.priced.kr - b.priced.kr)[0]?.loc.id;
   const tag = (priced: PricedCharge, locId: string): PricedCharge => ({
     ...priced,
     nearest: locId === nearestId,
     cheapest: locId === cheapestId,
   });
 
-  const inSearch = scored.filter((s) => s.distM <= searchBand).sort(byRank);
-  const outside = scored.filter((s) => s.distM > searchBand).sort(byRank);
+  const inSearch = rankedPool.filter((s) => s.distM <= searchBand).sort(byRank);
+  const outside = rankedPool.filter((s) => s.distM > searchBand).sort(byRank);
   const forced =
     preferId
       ? scored.find((s) => s.loc.id === preferId && s.distM <= Math.max(searchBand, 40_000))
@@ -586,7 +602,7 @@ export function pickCharges(opts: {
     outside.find((s) => s.loc.id !== primarySrc.loc.id) ??
     null;
 
-  const ranked = [...scored].sort(byRank);
+  const ranked = [...rankedPool].sort(byRank);
 
   return {
     primary: tag(primarySrc.priced, primarySrc.loc.id),

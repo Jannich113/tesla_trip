@@ -1,4 +1,4 @@
-import { chargeFitScore, chargeSearchKm, defaultFocus, type LegMode, type ModeFocus } from "./modes.ts";
+import { chargeFitScore, chargeSearchKm, defaultFocus, detourPays, type LegMode, type ModeFocus } from "./modes.ts";
 import { networkIdFor, rateForNetwork } from "./networks.ts";
 
 export type ViaLoc = {
@@ -113,6 +113,18 @@ export function pickViaOnPath(opts: {
   if (totalKwh <= 0 || budgetKwh <= 0 || path.length < 2) return null;
   const exclude = new Set(opts.excludeIds ?? []);
   const searchBand = Math.max(chargeSearchKm(mode, detourKm, focus) * 1000, 12_000);
+  const locRate = (loc: ViaLoc) => {
+    const netId = networkIdFor(loc.kind, loc.networkId);
+    return (netId ? rateForNetwork(netId, Boolean(memberships[netId])) : null) ?? loc.usdPerKwh * 6.85;
+  };
+  let baseRate = Infinity;
+  for (const loc of locations) {
+    if (exclude.has(loc.id) || loc.kind === "home") continue;
+    const distM = minDistToPathM(loc.lat, loc.lng, path);
+    const rate = locRate(loc);
+    if (distM <= 5000 && rate > 0.3) baseRate = Math.min(baseRate, rate);
+  }
+  if (!Number.isFinite(baseRate)) baseRate = 4;
   let best: ViaLoc | null = null;
   let bestScore = -Infinity;
   for (const loc of locations) {
@@ -123,16 +135,22 @@ export function pickViaOnPath(opts: {
     if (frac < 0.18 || frac > 0.82) continue;
     const energyTo = totalKwh * frac;
     if (energyTo > budgetKwh * 0.95) continue;
-    const netId = networkIdFor(loc.kind, loc.networkId);
-    const rate = (netId ? rateForNetwork(netId, Boolean(memberships[netId])) : null) ?? loc.usdPerKwh * 6.85;
+    const rate = locRate(loc);
     if (!(rate > 0.3)) continue;
     const extraMin = (distM / 1000 / 80) * 60;
     if (focus === "pris" && extraMin > Math.max(12, (detourKm / 80) * 60)) continue;
+    const extraKr = (distM / 1000) * 1.2;
+    if (
+      focus === "pris" &&
+      !detourPays({ baseKr: baseRate * 20, stallKr: rate * 20, extraKr, distM })
+    ) {
+      continue;
+    }
     const fit = chargeFitScore(focus, {
       distM,
       kr: rate * 20,
       dc: loc.kind === "supercharger",
-      extraDriveKr: (distM / 1000) * 1.2,
+      extraDriveKr: extraKr,
       extraKwh: (distM / 1000) * 0.2,
     });
     const along = energyTo * 6;
