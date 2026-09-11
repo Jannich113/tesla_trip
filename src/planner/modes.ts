@@ -40,44 +40,42 @@ export function modeColor(mode: LegMode) {
   return "#6ea8ff";
 }
 
-export const MODE_FOCUSES = ["distance", "kwh", "pris"] as const;
+export const MODE_FOCUSES = ["distance", "kwh", "time"] as const;
 export type ModeFocus = (typeof MODE_FOCUSES)[number];
 
 export function defaultFocus(mode: LegMode): ModeFocus {
-  if (mode === "cheapest") return "pris";
+  if (mode === "cheapest") return "time";
   if (mode === "fastest") return "kwh";
   return "distance";
 }
 
 export function normalizeFocus(focus: string | null | undefined, mode?: LegMode): ModeFocus {
-  if (focus === "distance" || focus === "kwh" || focus === "pris") return focus;
+  if (focus === "pris") return "time";
+  if (focus === "distance" || focus === "kwh" || focus === "time") return focus;
   return defaultFocus(mode ?? "fastest");
 }
 
 export function focusLabel(focus: ModeFocus) {
   if (focus === "kwh") return "kWh";
-  if (focus === "pris") return "Pris";
+  if (focus === "time") return "Time";
   return "Distance";
 }
 
 export function focusHint(focus: ModeFocus) {
   if (focus === "kwh") return "Lowest energy, including the detour";
-  if (focus === "pris") return "Lowest kr for the charge plus extra drive";
+  if (focus === "time") return "Least extra minutes — highway DC, small detour";
   return "Closest stall on this road";
 }
 
 export const DEFAULT_MODE_FOCUS: Record<LegMode, ModeFocus> = {
   eco: "distance",
   fastest: "kwh",
-  cheapest: "pris",
+  cheapest: "time",
 };
 
-/** Detour pill is the search radius. Pris-focus may look a bit farther for a cheaper stall. */
-export function chargeSearchKm(mode: LegMode, detourKm: number, focus?: ModeFocus) {
-  const km = Math.max(0, detourKm);
-  const f = focus ?? defaultFocus(mode);
-  if (f === "pris") return Math.max(km, Math.round(km * 1.25));
-  return km;
+/** Detour pill is the search radius for every focus. */
+export function chargeSearchKm(_mode: LegMode, detourKm: number, _focus?: ModeFocus) {
+  return Math.max(0, detourKm);
 }
 
 /** Lower is a better fit for this focus. */
@@ -89,7 +87,10 @@ export function chargeFitScore(
   const kr = Math.max(0, opts.kr);
   const extra = opts.extraDriveKr ?? 0;
   const kwh = opts.extraKwh ?? distKm * 0.2;
-  if (focus === "pris") return kr + extra * 0.45 + distKm * 0.8;
+  if (focus === "time") {
+    const detourMin = distKm / 1.2;
+    return detourMin + (opts.dc ? 0 : 12) + extra * 0.02;
+  }
   if (focus === "kwh") return kwh * 50 + distKm * 1.2 + (opts.dc ? 0 : 0.4);
   return distKm * 14 + (opts.dc ? 1.5 : 0) + kr * 0.04;
 }

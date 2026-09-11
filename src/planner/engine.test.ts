@@ -47,8 +47,8 @@ describe("leg modes", () => {
   });
 
   it("charge search radius equals the detour for every mode", () => {
-    assert.equal(chargeSearchKm("cheapest", 12), 15);
-    assert.equal(chargeSearchKm("cheapest", 30), 38);
+    assert.equal(chargeSearchKm("cheapest", 12), 12);
+    assert.equal(chargeSearchKm("cheapest", 30), 30);
     assert.equal(chargeSearchKm("eco", 8), 8);
     assert.equal(chargeSearchKm("fastest", 18), 18);
     assert.equal(formatWaitCap(0), "0");
@@ -63,9 +63,9 @@ describe("leg modes", () => {
     const highwayDc = chargeFitScore("kwh", { distM: 1200, kr: 90, dc: true, extraKwh: 0.3 });
     const roadsideAc = chargeFitScore("kwh", { distM: 400, kr: 50, dc: false, extraKwh: 2.4 });
     assert.ok(highwayDc < roadsideAc);
-    const cheapFar = chargeFitScore("pris", { distM: 8000, kr: 20, extraDriveKr: 6, dc: false });
-    const dearNear = chargeFitScore("pris", { distM: 400, kr: 90, extraDriveKr: 0.4, dc: true });
-    assert.ok(cheapFar < dearNear);
+    const closeDc = chargeFitScore("time", { distM: 800, kr: 90, dc: true });
+    const farCheap = chargeFitScore("time", { distM: 8000, kr: 20, dc: false });
+    assert.ok(closeDc < farCheap);
   });
 
   it("hoursFrom starts pricing at the planned clock", () => {
