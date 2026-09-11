@@ -21,6 +21,15 @@ import {
   waitMinUntilDated,
 } from "./modes";
 import { networkIdFor, networkLabel, rateForNetwork } from "./networks";
+import {
+  alongFraction,
+  haversineM,
+  minDistToPathM,
+  pickViaOnPath,
+  splitRoutedLeg,
+} from "./insert";
+
+export { alongFraction, haversineM, minDistToPathM, pathMeters, pickViaOnPath, splitRoutedLeg } from "./insert";
 
 export {
   DETOUR_KM,
@@ -109,6 +118,10 @@ export type PricedLeg = {
   autoStartSoc: number;
   extraKr: number;
   chargeOptions: PricedCharge[];
+  /** Original user-leg index (accept / charge-to / backup). */
+  userIndex: number;
+  /** `to` was auto-inserted because the user leg was longer than range. */
+  via: boolean;
 };
 
 export const DKK_PER_USD = 6.85;
@@ -116,16 +129,6 @@ const RESERVE_SOC = 15;
 const TARGET_SOC = 70;
 const SUGGEST_SOC = 45;
 const CHEAP_VS_LIVE = 0.85;
-
-export function haversineM(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
-  const R = 6371000;
-  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
-  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
-  const s =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((a.lat * Math.PI) / 180) * Math.cos((b.lat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
-}
 
 export function airRoute(from: PlanStop, to: PlanStop): RoutedLeg {
   const m = haversineM(from, to) * 1.22;
@@ -170,19 +173,6 @@ export function dkNowHhmm() {
 }
 
 export type DatedHour = HourPrice & { ymd: string; estimated?: boolean };
-
-export function minDistToPathM(lat: number, lng: number, path: [number, number][]) {
-  if (path.length === 0) return Infinity;
-  const step = Math.max(1, Math.floor(path.length / 40));
-  let best = Infinity;
-  for (let i = 0; i < path.length; i += step) {
-    const d = haversineM({ lat, lng }, { lat: path[i][0], lng: path[i][1] });
-    if (d < best) best = d;
-  }
-  const last = path[path.length - 1];
-  best = Math.min(best, haversineM({ lat, lng }, { lat: last[0], lng: last[1] }));
-  return best;
-}
 
 function usdToKr(usd: number) {
   return usd * DKK_PER_USD;
@@ -529,17 +519,82 @@ export function pricePlan(opts: {
   let soc = opts.soc;
   let plannedStart = asDateTime(opts.departHhmm || now);
   let readyAt = minutesBetweenDateTime(now, plannedStart) > 0 ? now : plannedStart;
+  type Job = {
+    from: PlanStop;
+    to: PlanStop;
+    mode: LegMode;
+    detourKm: number;
+    route: RoutedLeg;
+    userIndex: number;
+    via: boolean;
+    depth: number;
+  };
+  const jobs: Job[] = routes.map((route, i) => ({
+    from: stops[i],
+    to: stops[i + 1],
+    mode: modes[i] ?? "standard",
+    detourKm: detours[i] ?? 10,
+    route,
+    userIndex: i,
+    via: false,
+    depth: 0,
+  }));
+  const usedVias = new Set<string>(stops.map((s) => s.id));
   const out: PricedLeg[] = [];
-  for (let i = 0; i < routes.length; i++) {
-    const mode = modes[i] ?? "standard";
-    const route = routes[i];
-    const when = opts.legWhen?.[i];
+  while (jobs.length && out.length < 24) {
+    const job = jobs.shift()!;
+    const { mode, route, userIndex, via } = job;
+    const kwh = driveKwh(route.miles, route.seconds, speedEff);
+    const fullArrive = 100 - (kwh / Math.max(usableKwh, 1)) * 100;
+    if (fullArrive < RESERVE_SOC && job.depth < 4) {
+      const budgetKwh = ((100 - RESERVE_SOC) / 100) * usableKwh * 0.9;
+      const viaLoc = pickViaOnPath({
+        path: route.path,
+        locations,
+        budgetKwh,
+        totalKwh: kwh,
+        mode,
+        detourKm: job.detourKm,
+        excludeIds: usedVias,
+      });
+      const split = viaLoc ? splitRoutedLeg(route, viaLoc.lat, viaLoc.lng) : null;
+      if (viaLoc && split) {
+        usedVias.add(viaLoc.id);
+        const viaStop: PlanStop = {
+          id: `via-${viaLoc.id}`,
+          name: viaLoc.short || viaLoc.name || viaLoc.id,
+          lat: viaLoc.lat,
+          lng: viaLoc.lng,
+        };
+        jobs.unshift({
+          from: viaStop,
+          to: job.to,
+          mode,
+          detourKm: job.detourKm,
+          route: split.after,
+          userIndex,
+          via: job.via,
+          depth: job.depth + 1,
+        });
+        jobs.unshift({
+          from: job.from,
+          to: viaStop,
+          mode,
+          detourKm: job.detourKm,
+          route: split.before,
+          userIndex,
+          via: true,
+          depth: job.depth + 1,
+        });
+        continue;
+      }
+    }
+    const when = opts.legWhen?.[userIndex];
     const whenAt = when && when.kind !== "auto" ? asDateTime(when.at || when.hhmm) : "";
     if (when?.kind === "depart" && whenAt) plannedStart = whenAt;
     if (when?.kind === "arrive" && whenAt) {
       plannedStart = addMinutesDateTime(whenAt, -route.seconds / 60);
     }
-    const kwh = driveKwh(route.miles, route.seconds, speedEff);
     const socAfter = soc - (kwh / usableKwh) * 100;
     const required = socAfter < RESERVE_SOC;
     const searchHours = hoursFrom(hours, readyAt);
@@ -554,7 +609,7 @@ export function pricePlan(opts: {
     const minTarget = required
       ? Math.min(100, Math.max(soc + 1, RESERVE_SOC + (kwh / usableKwh) * 100))
       : soc;
-    const rawTarget = opts.chargeToSoc?.[i];
+    const rawTarget = via ? null : opts.chargeToSoc?.[userIndex];
     const userTarget =
       rawTarget != null && Number.isFinite(rawTarget)
         ? Math.min(100, Math.max(minTarget, rawTarget))
@@ -564,7 +619,8 @@ export function pricePlan(opts: {
     const kwhNeed = Math.max((target - soc) / 100, 0) * usableKwh;
     const autoKwh = Math.max((autoTarget - soc) / 100, 0) * usableKwh;
     const chargeMinEst = (Math.max(kwhNeed, 5) / Math.max(acKw, 1)) * 60;
-    const restDriveMin = routes.slice(i).reduce((n, r) => n + r.seconds / 60, 0);
+    const restDriveMin =
+      route.seconds / 60 + jobs.reduce((n, j) => n + j.route.seconds / 60, 0);
     const slack = minutesBetweenDateTime(readyAt, plannedStart);
     const maxNoDelay = Math.max(0, slack - chargeMinEst);
     const maxWaitMin = opts.arriveHhmm
@@ -578,7 +634,7 @@ export function pricePlan(opts: {
       ? pickCharges({
           kwhNeed: Math.max(kwhNeed, 5),
           path: route.path,
-          detourKm: detours[i] ?? 10,
+          detourKm: job.detourKm,
           mode,
           locations,
           acKr: searchHours[0]?.krPerKwh ?? acKr,
@@ -587,7 +643,7 @@ export function pricePlan(opts: {
           speedEff,
           clockHhmm: readyAt,
           maxWaitMin,
-          backupId: opts.backupIds?.[i] ?? null,
+          backupId: via ? job.to.id.replace(/^via-/, "") : opts.backupIds?.[userIndex] ?? null,
           memberships: opts.memberships,
         })
       : null;
@@ -601,7 +657,7 @@ export function pricePlan(opts: {
     const accepted =
       required ||
       Boolean(userTarget != null) ||
-      (suggested && Boolean(opts.acceptCharge?.[i]));
+      (suggested && Boolean(opts.acceptCharge?.[userIndex]));
     const billed = accepted && charge !== null;
     const chargeMin = billed && charge ? (charge.kwh / Math.max(acKw, 1)) * 60 : 0;
     const rawWait = billed && charge && charge.cheapWindow ? charge.waitMin : 0;
@@ -628,10 +684,10 @@ export function pricePlan(opts: {
           ? { ...charge, waitMin }
           : null;
     out.push({
-      from: stops[i],
-      to: stops[i + 1],
+      from: job.from,
+      to: job.to,
       mode,
-      detourKm: detours[i] ?? 10,
+      detourKm: job.detourKm,
       route,
       kwh,
       arriveSoc,
@@ -650,6 +706,8 @@ export function pricePlan(opts: {
       autoStartSoc: autoTarget,
       extraKr,
       chargeOptions: pick?.options ?? [],
+      userIndex,
+      via,
     });
     soc = arriveSoc;
     readyAt = arriveAt;

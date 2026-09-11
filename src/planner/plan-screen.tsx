@@ -277,6 +277,37 @@ export function PlanScreen() {
     });
   }, [legs, prefer]);
 
+  const timeline = useMemo(() => {
+    if (!viewLegs.length) {
+      return stops.map((stop, index) => ({
+        stop,
+        inbound: null as (typeof viewLegs)[number] | null,
+        outbound: null as (typeof viewLegs)[number] | null,
+        via: false,
+        index,
+      }));
+    }
+    const rows = [
+      {
+        stop: viewLegs[0].from,
+        inbound: null as (typeof viewLegs)[number] | null,
+        outbound: viewLegs[0],
+        via: false,
+        index: 0,
+      },
+    ];
+    viewLegs.forEach((leg, i) => {
+      rows.push({
+        stop: leg.to,
+        inbound: leg,
+        outbound: viewLegs[i + 1] ?? null,
+        via: leg.via,
+        index: i + 1,
+      });
+    });
+    return rows;
+  }, [viewLegs, stops]);
+
   const totals = useMemo(() => planTotals(viewLegs), [viewLegs]);
 
   const optionRows = useMemo(() => {
@@ -454,6 +485,16 @@ export function PlanScreen() {
       kind: (s.id === "home" || s.name === "Home" ? "home" : "place") as MapMarker["kind"],
       badge: String(i + 1),
     })),
+    ...viewLegs
+      .filter((leg) => leg.via)
+      .map((leg) => ({
+        id: leg.to.id,
+        lat: leg.to.lat,
+        lng: leg.to.lng,
+        label: `via ${leg.to.name}`,
+        kind: "charger" as MapMarker["kind"],
+        badge: "⚡",
+      })),
     ...chargerMarkers,
   ];
 
@@ -770,25 +811,25 @@ export function PlanScreen() {
       <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
         <p className="text-sm font-medium">Stops</p>
         <ol className="mt-2">
-          {stops.map((stop, i) => {
-            const inbound = i > 0 ? viewLegs[i - 1] : null;
-            const outbound = viewLegs[i] ?? null;
+          {timeline.map(({ stop, inbound, outbound, via, index: i }) => {
+            const userI = outbound?.userIndex ?? inbound?.userIndex ?? Math.max(0, i - 1);
             const leg = inbound;
             const open = Boolean(openStops[stop.id]);
             const selectedHere =
               selected === stop.id ||
-              selected === `leg-${i - 1}` ||
-              Boolean(selected?.startsWith(`chg-${i - 1}-`));
+              selected === `leg-${userI}` ||
+              Boolean(selected?.startsWith(`chg-${userI}-`));
             const leftPct = inbound ? inbound.arriveSoc : soc;
             const chargeLeg = outbound;
             const chargeTo =
-              chargeLeg?.charge && (chargeLeg.needed || chargeLeg.suggested || chargeToSoc[i] != null)
+              chargeLeg?.charge && (chargeLeg.needed || chargeLeg.suggested || (!via && chargeToSoc[userI] != null))
                 ? chargeLeg.accepted
                   ? chargeLeg.startSoc
                   : chargeLeg.autoStartSoc
                 : null;
             const extraKr = chargeLeg?.accepted ? chargeLeg.extraKr : 0;
             const chargeRequired = Boolean(chargeLeg?.needed);
+            const inStore = stops.some((s) => s.id === stop.id);
             return (
               <li
                 key={stop.id}
@@ -802,15 +843,18 @@ export function PlanScreen() {
                     type="button"
                     className="flex min-w-0 flex-1 items-center gap-3 text-left"
                     onClick={() => {
-                      setSelected(i > 0 ? `leg-${i - 1}` : stop.id);
-                      if (i > 0) setOpenStops((cur) => ({ ...cur, [stop.id]: !cur[stop.id] }));
+                      setSelected(inbound ? `leg-${userI}` : stop.id);
+                      if (inbound) setOpenStops((cur) => ({ ...cur, [stop.id]: !cur[stop.id] }));
                     }}
                   >
                     <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-surface-2 text-xs tabular-nums text-muted">
                       {i + 1}
                     </span>
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm">{stop.name}</p>
+                      <p className="truncate text-sm">
+                        {via ? <span className="mr-1 text-[11px] font-medium uppercase tracking-wide text-amber-300">via</span> : null}
+                        {stop.name}
+                      </p>
                       <p className="text-xs text-muted">
                         <span className="tabular-nums">
                           {formatNumber(leftPct, 0)}%{i === 0 ? " now" : " left"}
@@ -839,7 +883,7 @@ export function PlanScreen() {
                         <p className="truncate text-[11px] text-subtle">{outbound.charge.name}</p>
                       ) : null}
                     </div>
-                    {i > 0 ? (
+                    {inbound ? (
                       <ChevronDown className={cn("size-4 shrink-0 text-muted transition", open && "rotate-180")} />
                     ) : null}
                   </button>
@@ -860,8 +904,8 @@ export function PlanScreen() {
                           const n = Number(e.target.value);
                           if (!Number.isFinite(n)) return;
                           const v = Math.max(1, Math.min(100, Math.round(n)));
-                          setChargeToSoc((cur) => ({ ...cur, [i]: v }));
-                          setAcceptCharge((cur) => ({ ...cur, [i]: true }));
+                          setChargeToSoc((cur) => ({ ...cur, [userI]: v }));
+                          setAcceptCharge((cur) => ({ ...cur, [userI]: true }));
                         }}
                         className="h-6 w-10 bg-transparent text-center text-xs tabular-nums text-foreground outline-none"
                       />
@@ -871,7 +915,7 @@ export function PlanScreen() {
                   {chargeTo != null && !chargeRequired ? (
                     <button
                       type="button"
-                      onClick={() => setAcceptCharge((cur) => ({ ...cur, [i]: !cur[i] }))}
+                      onClick={() => setAcceptCharge((cur) => ({ ...cur, [userI]: !cur[userI] }))}
                       className={cn(
                         "h-8 shrink-0 rounded-full px-3 text-[11px] font-medium",
                         chargeLeg?.accepted
@@ -882,25 +926,27 @@ export function PlanScreen() {
                       {chargeLeg?.accepted ? "Accepted" : "Accept"}
                     </button>
                   ) : null}
-                  <button
-                    type="button"
-                    onClick={() => removeStop(stop.id)}
-                    className="flex size-9 shrink-0 items-center justify-center rounded-full text-muted"
-                    aria-label={`Remove ${stop.name}`}
-                  >
-                    <Trash2 className="size-4" />
-                  </button>
+                  {inStore ? (
+                    <button
+                      type="button"
+                      onClick={() => removeStop(stop.id)}
+                      className="flex size-9 shrink-0 items-center justify-center rounded-full text-muted"
+                      aria-label={`Remove ${stop.name}`}
+                    >
+                      <Trash2 className="size-4" />
+                    </button>
+                  ) : null}
                 </div>
-                {i > 0 ? (
+                {inbound && !via ? (
                   <div className="mt-2 pl-10">
                     <div className="flex rounded-full bg-surface-2 p-1">
                       {LEG_MODES.map((mode) => {
-                        const on = (modes[i - 1] ?? "standard") === mode;
+                        const on = (modes[userI] ?? "standard") === mode;
                         return (
                           <button
                             key={mode}
                             type="button"
-                            onClick={() => setLegMode(i - 1, mode)}
+                            onClick={() => setLegMode(userI, mode)}
                             className={cn(
                               "h-8 flex-1 rounded-full text-[10px] font-medium",
                               on ? "bg-foreground text-background" : "text-muted",
@@ -914,13 +960,13 @@ export function PlanScreen() {
                     {open ? (
                       <div className="mt-3">
                     <p className="text-[11px] text-subtle">
-                      {modeHint((modes[i - 1] ?? "standard") as LegMode)}
+                      {modeHint((modes[userI] ?? "standard") as LegMode)}
                     </p>
                     <div className="mt-3 flex gap-1">
                       <button
                         type="button"
                         onClick={() => moveStop(stop.id, -1)}
-                        disabled={i <= 1}
+                        disabled={stops.findIndex((s) => s.id === stop.id) <= 0}
                         className="flex h-8 flex-1 items-center justify-center rounded-full bg-surface-2 text-muted disabled:opacity-30"
                         aria-label={`Move ${stop.name} up`}
                       >
@@ -929,7 +975,10 @@ export function PlanScreen() {
                       <button
                         type="button"
                         onClick={() => moveStop(stop.id, 1)}
-                        disabled={i >= stops.length - 1}
+                        disabled={(() => {
+                          const idx = stops.findIndex((s) => s.id === stop.id);
+                          return idx < 0 || idx >= stops.length - 1;
+                        })()}
                         className="flex h-8 flex-1 items-center justify-center rounded-full bg-surface-2 text-muted disabled:opacity-30"
                         aria-label={`Move ${stop.name} down`}
                       >
@@ -939,16 +988,16 @@ export function PlanScreen() {
                     <div className="mt-3 grid grid-cols-2 gap-2">
                       <div className="flex rounded-full bg-surface-2 p-1">
                         {(["auto", "depart", "arrive"] as const).map((kind) => {
-                          const on = (legWhen[i - 1]?.kind ?? "auto") === kind;
+                          const on = (legWhen[userI]?.kind ?? "auto") === kind;
                           return (
                             <button
                               key={kind}
                               type="button"
                               onClick={() =>
-                                setLegWhen(i - 1, {
+                                setLegWhen(userI, {
                                   kind,
-                                  hhmm: kind === "auto" ? "" : asDateTime(legWhen[i - 1]?.at || legWhen[i - 1]?.hhmm || leg?.departAt || clock),
-                                  at: kind === "auto" ? "" : asDateTime(legWhen[i - 1]?.at || legWhen[i - 1]?.hhmm || leg?.departAt || clock),
+                                  hhmm: kind === "auto" ? "" : asDateTime(legWhen[userI]?.at || legWhen[userI]?.hhmm || leg?.departAt || clock),
+                                  at: kind === "auto" ? "" : asDateTime(legWhen[userI]?.at || legWhen[userI]?.hhmm || leg?.departAt || clock),
                                 })
                               }
                               className={cn(
@@ -961,13 +1010,13 @@ export function PlanScreen() {
                           );
                         })}
                       </div>
-                      {(legWhen[i - 1]?.kind ?? "auto") !== "auto" ? (
+                      {(legWhen[userI]?.kind ?? "auto") !== "auto" ? (
                         <input
                           type="datetime-local"
-                          value={asDateTime(legWhen[i - 1]?.at || legWhen[i - 1]?.hhmm || leg?.departAt || clock)}
+                          value={asDateTime(legWhen[userI]?.at || legWhen[userI]?.hhmm || leg?.departAt || clock)}
                           onChange={(e) =>
-                            setLegWhen(i - 1, {
-                              kind: legWhen[i - 1]?.kind === "arrive" ? "arrive" : "depart",
+                            setLegWhen(userI, {
+                              kind: legWhen[userI]?.kind === "arrive" ? "arrive" : "depart",
                               hhmm: e.target.value,
                               at: e.target.value,
                             })
@@ -981,18 +1030,18 @@ export function PlanScreen() {
                       )}
                     </div>
                     <p className="mt-3 text-[11px] font-medium uppercase tracking-wide text-muted">
-                      {(modes[i - 1] ?? "standard") === "cheapest"
-                        ? `Charge search · up to ${chargeSearchKm("cheapest", detours[i - 1] ?? 10)} km`
+                      {(modes[userI] ?? "standard") === "cheapest"
+                        ? `Charge search · up to ${chargeSearchKm("cheapest", detours[userI] ?? 10)} km`
                         : "Max charge detour"}
                     </p>
                     <div className="mt-1 flex gap-1">
                       {DETOUR_KM.map((km) => {
-                        const on = (detours[i - 1] ?? 10) === km;
+                        const on = (detours[userI] ?? 10) === km;
                         return (
                           <button
                             key={km}
                             type="button"
-                            onClick={() => setLegDetour(i - 1, km)}
+                            onClick={() => setLegDetour(userI, km)}
                             className={cn(
                               "h-8 flex-1 rounded-full text-[11px] font-medium",
                               on ? "bg-foreground text-background" : "bg-surface-2 text-muted",
@@ -1026,14 +1075,14 @@ export function PlanScreen() {
                               min={1}
                               max={100}
                               value={Math.round(
-                                chargeToSoc[i - 1] ?? (leg.accepted ? leg.startSoc : leg.autoStartSoc),
+                                chargeToSoc[userI] ?? (leg.accepted ? leg.startSoc : leg.autoStartSoc),
                               )}
                               onChange={(e) => {
                                 const n = Number(e.target.value);
                                 if (!Number.isFinite(n)) return;
                                 const v = Math.max(1, Math.min(100, Math.round(n)));
-                                setChargeToSoc((cur) => ({ ...cur, [i - 1]: v }));
-                                setAcceptCharge((cur) => ({ ...cur, [i - 1]: true }));
+                                setChargeToSoc((cur) => ({ ...cur, [userI]: v }));
+                                setAcceptCharge((cur) => ({ ...cur, [userI]: true }));
                               }}
                               className="h-8 w-14 rounded-md bg-background text-center text-sm tabular-nums outline-none"
                             />
@@ -1053,7 +1102,7 @@ export function PlanScreen() {
                         ) : null}
                         <button
                           type="button"
-                          onClick={() => insertCharge(i - 1, leg.charge!)}
+                          onClick={() => insertCharge(userI, leg.charge!)}
                           className="h-9 w-full rounded-full bg-surface-2 text-xs font-medium text-muted"
                         >
                           Add charger as stop
@@ -1071,7 +1120,7 @@ export function PlanScreen() {
                           <button
                             type="button"
                             onClick={() =>
-                              setAcceptCharge((cur) => ({ ...cur, [i - 1]: !cur[i - 1] }))
+                              setAcceptCharge((cur) => ({ ...cur, [userI]: !cur[userI] }))
                             }
                             className={cn(
                               "h-9 w-full rounded-full text-xs font-medium",
@@ -1087,12 +1136,12 @@ export function PlanScreen() {
                           <button
                             type="button"
                             onClick={() =>
-                              setPrefer((cur) => ({ ...cur, [i - 1]: leg.backup!.locationId }))
+                              setPrefer((cur) => ({ ...cur, [userI]: leg.backup!.locationId }))
                             }
                             className="block w-full text-left"
                           >
                             <ChargeChoice
-                              title={backupLoc[i - 1] ? "Backup · manual" : "Backup"}
+                              title={backupLoc[userI] ? "Backup · manual" : "Backup"}
                               spot={leg.backup}
                               active={false}
                             />
@@ -1103,12 +1152,12 @@ export function PlanScreen() {
                         <BackupPicks
                           options={leg.chargeOptions}
                           primaryId={leg.charge?.locationId}
-                          selectedId={backupLoc[i - 1]}
+                          selectedId={backupLoc[userI]}
                           onPick={(id) =>
                             setBackupLoc((cur) => {
                               const next = { ...cur };
-                              if (!id) delete next[i - 1];
-                              else next[i - 1] = id;
+                              if (!id) delete next[userI];
+                              else next[userI] = id;
                               return next;
                             })
                           }

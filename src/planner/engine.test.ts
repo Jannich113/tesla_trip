@@ -17,6 +17,7 @@ import {
   waitDelayMin,
 } from "./modes.ts";
 import { rateForNetwork, networkIdFor, roamExtra, EU_NETWORKS, EU_REGIONS, regionalOwn, regionalRoam } from "./networks.ts";
+import { alongFraction, pickViaOnPath, splitRoutedLeg } from "./insert.ts";
 import { toDkk, CATALOG_FX, NETWORK_NATIVE } from "./charge-fx.ts";
 import { countryProfile } from "./country-profiles.ts";
 
@@ -182,5 +183,33 @@ describe("leg modes", () => {
     for (const r of EU_REGIONS) {
       assert.ok(countryProfile(r.id), r.id);
     }
+  });
+
+  it("inserts a via charger when the pack cannot finish the leg", () => {
+    const from = { id: "a", name: "A", lat: 37.4, lng: -122.2 };
+    const mid = { id: "loc-mid", name: "Mid SC", short: "Mid", usdPerKwh: 0.4, lat: 37.0, lng: -121.8, kind: "supercharger" as const, preset: true, radiusM: 250 };
+    const to = { id: "b", name: "B", lat: 36.5, lng: -121.4 };
+    const path: [number, number][] = [
+      [from.lat, from.lng],
+      [mid.lat, mid.lng],
+      [to.lat, to.lng],
+    ];
+    const route = { miles: 220, seconds: 4 * 3600, path, source: "air" as const };
+    const frac = alongFraction(path, mid.lat, mid.lng);
+    assert.ok(frac > 0.2 && frac < 0.8);
+    const via = pickViaOnPath({
+      path,
+      locations: [mid],
+      budgetKwh: 40,
+      totalKwh: 80,
+      mode: "standard",
+      detourKm: 10,
+    });
+    assert.equal(via?.id, "loc-mid");
+    const split = splitRoutedLeg(route, mid.lat, mid.lng);
+    assert.ok(split);
+    assert.ok(split!.before.miles < route.miles);
+    assert.ok(split!.after.miles < route.miles);
+    assert.ok(Math.abs(split!.before.miles + split!.after.miles - route.miles) < 0.01);
   });
 });
