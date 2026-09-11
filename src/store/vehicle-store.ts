@@ -185,36 +185,6 @@ export const useVehicleStore = create<VehicleStore>()(
           });
           return;
         }
-
-        let soc = s.soc;
-        let cabin = s.cabinTempF;
-        if (s.climateOn) {
-          const hvacKwh = 0.35 * dtHr;
-          soc = clamp(soc - (hvacKwh / VEHICLE.usableKwh) * 100, 1, 100);
-          cabin = cabin + (s.climateSetF - cabin) * 0.06;
-        } else {
-          cabin = cabin + (72 - cabin) * 0.01;
-        }
-
-        if (
-          Math.abs(s.soc - soc) < 0.08 &&
-          Math.abs(s.cabinTempF - cabin) < 0.25 &&
-          s.todayDate === day &&
-          s.milesToday === milesToday &&
-          s.speedMph === 0 &&
-          s.chargeKw === 0
-        ) {
-          return;
-        }
-
-        set({
-          soc,
-          cabinTempF: cabin,
-          chargeKw: 0,
-          speedMph: 0,
-          todayDate: day,
-          milesToday,
-        });
       },
 
       wake: async () => {
