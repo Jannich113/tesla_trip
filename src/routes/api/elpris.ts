@@ -13,8 +13,10 @@ export type HourPrice = {
   orePerKwh: number;
 };
 
+export type PriceArea = "DK1" | "DK2";
+
 export type ElprisResponse = {
-  area: "DK1";
+  area: PriceArea;
   source: "Energi Data Service";
   updatedAt: string;
   current: HourPrice | null;
@@ -22,10 +24,17 @@ export type ElprisResponse = {
   tomorrow: HourPrice[];
 };
 
-const EDS_URL =
-  "https://api.energidataservice.dk/dataset/DayAheadPrices" +
-  "?start=StartOfDay&end=StartOfDay%2BP2D" +
-  '&filter={"PriceArea":["DK1"]}&sort=TimeDK&limit=200';
+function edsUrl(area: PriceArea) {
+  return (
+    "https://api.energidataservice.dk/dataset/DayAheadPrices" +
+    "?start=StartOfDay&end=StartOfDay%2BP2D" +
+    `&filter={"PriceArea":["${area}"]}&sort=TimeDK&limit=200`
+  );
+}
+
+function parseArea(raw: string | null): PriceArea {
+  return raw === "DK2" ? "DK2" : "DK1";
+}
 
 function pad2(n: number) {
   return n.toString().padStart(2, "0");
@@ -107,7 +116,7 @@ function toHourPrices(records: EdsRecord[]): HourPrice[] {
     });
 }
 
-function buildPayload(records: EdsRecord[]): ElprisResponse {
+function buildPayload(records: EdsRecord[], area: PriceArea): ElprisResponse {
   const hours = toHourPrices(records);
   const { date: todayDate, hour: currentHour } = dkNowParts();
   const tomorrowDate = nextDkDate(todayDate);
@@ -120,7 +129,7 @@ function buildPayload(records: EdsRecord[]): ElprisResponse {
     null;
 
   return {
-    area: "DK1",
+    area,
     source: "Energi Data Service",
     updatedAt: new Date().toISOString(),
     current,
@@ -132,9 +141,11 @@ function buildPayload(records: EdsRecord[]): ElprisResponse {
 export const Route = createFileRoute("/api/elpris")({
   server: {
     handlers: {
-      GET: async () => {
+      GET: async ({ request }) => {
         try {
-          const res = await fetch(EDS_URL, {
+          const url = new URL(request.url);
+          const area = parseArea(url.searchParams.get("area"));
+          const res = await fetch(edsUrl(area), {
             headers: { Accept: "application/json" },
           });
           if (!res.ok) {
@@ -145,7 +156,7 @@ export const Route = createFileRoute("/api/elpris")({
           }
           const body = (await res.json()) as { records?: EdsRecord[] };
           const records = Array.isArray(body.records) ? body.records : [];
-          return Response.json(buildPayload(records), {
+          return Response.json(buildPayload(records, area), {
             headers: {
               "Cache-Control": "public, max-age=60",
             },

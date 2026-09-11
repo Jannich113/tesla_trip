@@ -1,6 +1,10 @@
+import { ConfirmStrip } from "@/components/confirm-strip";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { VEHICLE, formatNumber, formatVin } from "@/lib/vehicle";
+import { formatNumber, formatVin } from "@/lib/vehicle";
+import { TESLA_MODELS, type TeslaModelId } from "@/lib/tesla-models";
+import { useVehicleProfile } from "@/hooks/use-vehicle-profile";
+import { ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   beginTeslaOwnerLink,
@@ -13,29 +17,26 @@ import { useChargeStore } from "@/store/charge-store";
 import { useTripStore } from "@/store/trip-store";
 import { useVehicleStore } from "@/store/vehicle-store";
 
-const SPECS: { label: string; value: string }[] = [
-  { label: "Vehicle", value: `${VEHICLE.year} ${VEHICLE.model}` },
-  { label: "Trim", value: VEHICLE.trim },
-  { label: "Paint", value: VEHICLE.color },
-  { label: "Interior", value: VEHICLE.interior },
-  { label: "Wheels", value: VEHICLE.wheels },
-  { label: "Drivetrain", value: VEHICLE.motors },
-  { label: "Peak power", value: `${VEHICLE.powerHp} hp` },
-  { label: "Acceleration", value: VEHICLE.accel },
-  { label: "EPA range", value: `${VEHICLE.epaRangeMi} mi` },
-  { label: "Usable battery", value: `${VEHICLE.usableKwh} kWh` },
-  { label: "DC charge", value: `${VEHICLE.peakDcKw} kW` },
-  { label: "AC charge", value: `${VEHICLE.acKw} kW` },
-  { label: "Architecture", value: VEHICLE.architecture },
-  { label: "Connector", value: VEHICLE.connector },
-  { label: "Drag", value: `Cd ${VEHICLE.dragCd}` },
-  { label: "Seats", value: String(VEHICLE.seats) },
-];
-
 export function VehicleScreen() {
   const s = useVehicleStore();
+  const setModelId = useVehicleStore((st) => st.setModelId);
+  const setPaintId = useVehicleStore((st) => st.setPaintId);
+  const { profile, heroes, paints } = useVehicleProfile();
   const [owner, setOwner] = useState<TeslaOwnerStatus | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const specs: { label: string; value: string }[] = [
+    { label: "Vehicle", value: `${profile.year} ${profile.model}` },
+    { label: "Trim", value: profile.trim },
+    { label: "Paint", value: profile.color },
+    { label: "Drivetrain", value: profile.motors },
+    { label: "Peak power", value: `${profile.powerHp} hp` },
+    { label: "Acceleration", value: profile.accel },
+    { label: "EPA range", value: `${profile.epaRangeMi} mi` },
+    { label: "Usable battery", value: `${profile.usableKwh} kWh` },
+    { label: "AC charge", value: `${profile.acKw} kW` },
+    { label: "Seats", value: String(profile.seats) },
+  ];
 
   useEffect(() => {
     let alive = true;
@@ -80,47 +81,93 @@ export function VehicleScreen() {
     <div className="space-y-5 px-4 pb-6">
       <section className="overflow-hidden rounded-xl bg-surface shadow-[var(--shadow-border)]">
         <img
-          src="/vehicles/juniper-front.jpg"
-          alt="Juniper in Stealth Grey"
+          src={heroes.front}
+          alt={`${profile.year} ${profile.model} in ${profile.color}`}
           className="h-44 w-full object-cover object-[center_60%]"
+          loading="lazy"
         />
         <div className="space-y-1 px-5 py-4">
           <div className="flex items-center gap-2">
             <p className="text-xs font-medium uppercase tracking-wide text-muted">
-              Named in the Tesla app
+              Your vehicle
             </p>
-            {VEHICLE.isDemo ? (
+            {profile.isDemo ? (
               <span className="rounded-full bg-surface-2 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted">
                 Demo data
               </span>
             ) : null}
           </div>
-          <h2 className="text-2xl font-medium tracking-tight">{VEHICLE.name}</h2>
+          <h2 className="text-2xl font-medium tracking-tight">{profile.name}</h2>
           <p className="text-sm text-muted">
-            {VEHICLE.year} {VEHICLE.model} {VEHICLE.trim}
+            {profile.year} {profile.model} {profile.trim}
           </p>
         </div>
       </section>
 
-      <OwnerAccess owner={owner} busy={busy} onConnect={connect} onDisconnect={disconnect} />
-
-      <PrivacyCard />
+      <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
+        <p className="text-sm font-medium">Model</p>
+        <p className="mt-1 text-xs text-muted">
+          Sets the profile tab label, header, and Start hero to this model. Images are bundled in the app.
+        </p>
+        <label className="relative mt-3 block">
+          <span className="sr-only">Tesla model</span>
+          <select
+            value={profile.id}
+            onChange={(e) => setModelId(e.target.value as TeslaModelId)}
+            className="h-11 w-full appearance-none rounded-xl bg-surface-2 py-2 pl-3 pr-9 text-sm font-medium outline-none shadow-[var(--shadow-border)]"
+          >
+            {TESLA_MODELS.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name}
+              </option>
+            ))}
+          </select>
+          <ChevronDown
+            className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted"
+            aria-hidden
+          />
+        </label>
+      </section>
 
       <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
-        <p className="text-sm font-medium">Vehicle state</p>
-        <p className="mt-1 text-xs text-muted">Read from Juniper · not controlled here</p>
-        <p className="mt-4 text-sm">
-          {s.mode === "charging"
-            ? `Charging · ${formatNumber(s.chargeKw, 1)} kW`
-            : s.mode === "driving"
-              ? "Driving"
-              : "Parked"}
-          <span className="text-subtle"> · </span>
-          {s.locked ? "Locked" : "Unlocked"}
-          <span className="text-subtle"> · </span>
-          {s.pluggedIn ? "Plugged in" : "Unplugged"}
+        <p className="text-sm font-medium">Paint</p>
+        <p className="mt-1 text-xs text-muted">
+          Factory colors Tesla offers for this model. {profile.paint.name}
         </p>
+        <div className="mt-3 flex flex-wrap gap-2" role="listbox" aria-label="Paint color">
+          {paints.map((p) => {
+            const selected = p.id === profile.paint.id;
+            return (
+              <button
+                key={p.id}
+                type="button"
+                role="option"
+                aria-selected={selected}
+                title={p.name}
+                onClick={() => setPaintId(p.id)}
+                className={cn(
+                  "flex size-11 items-center justify-center rounded-full transition-[scale,box-shadow] duration-150 ease-[var(--ease-out)] active:scale-[0.96]",
+                  selected
+                    ? "ring-2 ring-foreground ring-offset-2 ring-offset-surface"
+                    : "shadow-[var(--shadow-border)]",
+                )}
+              >
+                <span
+                  className="size-9 rounded-full border border-border"
+                  style={{ backgroundColor: p.swatch }}
+                  aria-hidden
+                />
+                <span className="sr-only">{p.name}</span>
+              </button>
+            );
+          })}
+        </div>
       </section>
+
+      <OwnerAccess owner={owner} busy={busy} vin={profile.vin} onConnect={connect} onDisconnect={disconnect} />
+
+      <PrivacyCard vehicleName={profile.name} />
+
 
       <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
         <div className="flex items-center justify-between">
@@ -151,30 +198,30 @@ export function VehicleScreen() {
       <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
         <div className="flex items-center gap-2">
           <p className="text-sm font-medium">Identity</p>
-          {VEHICLE.isDemo ? (
+          {profile.isDemo ? (
             <span className="rounded-full bg-surface-2 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted">
               Sample
             </span>
           ) : null}
         </div>
         <dl className="mt-3 space-y-3">
-          <Row label="VIN" value={formatVin(VEHICLE.vin, s.maskVin)} mono />
+          <Row label="VIN" value={formatVin(profile.vin, s.maskVin)} mono />
           <Row label="Access" value="Owner only" />
-          <Row label="Software" value={VEHICLE.software} />
-          <Row label="Autopilot" value={VEHICLE.fsd} />
-          <Row label="Factory" value={VEHICLE.plant} />
-          <Row label="Delivered" value={VEHICLE.delivered} />
+          <Row label="Software" value={profile.software} />
+          <Row label="Autopilot" value={profile.fsd} />
+          <Row label="Factory" value={profile.plant} />
+          <Row label="Delivered" value={profile.delivered} />
           <Row
             label="Battery health"
-            value={`${formatNumber(VEHICLE.batteryHealth * 100, 1)}%`}
+            value={`${formatNumber(profile.batteryHealth * 100, 1)}%`}
           />
         </dl>
       </section>
 
       <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
-        <p className="text-sm font-medium">Juniper specs</p>
+        <p className="text-sm font-medium">{profile.name} specs</p>
         <dl className="mt-3 divide-y divide-border">
-          {SPECS.map((row) => (
+          {specs.map((row) => (
             <Row key={row.label} label={row.label} value={row.value} />
           ))}
         </dl>
@@ -186,11 +233,13 @@ export function VehicleScreen() {
 function OwnerAccess({
   owner,
   busy,
+  vin,
   onConnect,
   onDisconnect,
 }: {
   owner: TeslaOwnerStatus | null;
   busy: boolean;
+  vin: string;
   onConnect: () => void;
   onDisconnect: () => void;
 }) {
@@ -206,7 +255,7 @@ function OwnerAccess({
       <p className="mt-3 text-sm">
         {linked ? "Owner linked" : configured ? "Not linked" : "Waiting on Tesla app credentials"}
         <span className="text-subtle"> · </span>
-        <span className="tabular-nums tracking-wide">{VEHICLE.vin}</span>
+        <span className="tabular-nums tracking-wide">{vin}</span>
       </p>
       <div className="mt-4">
         {linked ? (
@@ -233,7 +282,7 @@ function OwnerAccess({
   );
 }
 
-function PrivacyCard() {
+function PrivacyCard({ vehicleName }: { vehicleName: string }) {
   const maskVin = useVehicleStore((s) => s.maskVin);
   const shareLocation = useVehicleStore((s) => s.shareLocation);
   const setMaskVin = useVehicleStore((s) => s.setMaskVin);
@@ -256,12 +305,12 @@ function PrivacyCard() {
     <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
       <p className="text-sm font-medium">Vehicle data privacy</p>
       <p className="mt-1 text-xs leading-relaxed text-muted">
-        Tesla does not keep a linked history of where Juniper drives. This app is the controller
-        for data it holds: you, the owner, on this device. Lawful basis is consent (GDPR Art. 6(1)(a))
-        for location, charge geofences, and optional address lookup. Data is not sold, not profiled,
-        and not sent to our servers. Address Find queries OpenStreetMap Nominatim only when you tap
-        it; the query is not stored. You can export a copy (Art. 20) or erase it (Art. 17) below.
-        Revoke Tesla access in your Tesla account at any time.
+        Tesla does not keep a linked history of where {vehicleName} drives. This app is the
+        controller for data it holds: you, the owner, on this device. Lawful basis is consent
+        (GDPR Art. 6(1)(a)) for location, charge geofences, and optional address lookup. Data is
+        not sold, not profiled, and not sent to our servers. Address Find queries OpenStreetMap
+        Nominatim only when you tap it; the query is not stored. You can export a copy (Art. 20)
+        or erase it (Art. 17) below. Revoke Tesla access in your Tesla account at any time.
       </p>
       <ul className="mt-3 space-y-1 text-xs text-subtle">
         <li>On this phone: trip groups, charge sites, catch radii, last known state</li>
@@ -285,22 +334,15 @@ function PrivacyCard() {
       </div>
 
       {confirm ? (
-        <div className="mt-4 flex gap-2">
-          <button
-            type="button"
-            onClick={() => void wipe()}
-            className="h-11 flex-1 rounded-full bg-foreground text-sm font-medium text-background"
-          >
-            Clear now
-          </button>
-          <button
-            type="button"
-            onClick={() => setConfirm(false)}
-            className="h-11 flex-1 rounded-full bg-surface-2 text-sm font-medium"
-          >
-            Keep
-          </button>
-        </div>
+        <ConfirmStrip
+          className="mt-4"
+          title="Clear all local data?"
+          body="Trip groups, charge sites, and vehicle prefs on this device are erased. Tesla account access is disconnected."
+          confirmLabel="Clear now"
+          cancelLabel="Keep"
+          onConfirm={() => void wipe()}
+          onCancel={() => setConfirm(false)}
+        />
       ) : (
         <div className="mt-4 flex gap-2">
           <button

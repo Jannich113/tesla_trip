@@ -1,6 +1,13 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { todayKey, type DriveMode, type Units, VEHICLE } from "@/lib/vehicle";
+import {
+  DEFAULT_MODEL_ID,
+  type TeslaModelId,
+  isPaintForModel,
+  isTeslaModelId,
+  modelById,
+} from "@/lib/tesla-models";
 import { useChargeStore } from "@/store/charge-store";
 
 export type VehicleSnapshot = {
@@ -29,6 +36,8 @@ export type VehicleSnapshot = {
   tirePsi: [number, number, number, number];
   maskVin: boolean;
   shareLocation: boolean;
+  modelId: TeslaModelId;
+  paintId: string;
 };
 
 type VehicleStore = VehicleSnapshot & {
@@ -46,6 +55,8 @@ type VehicleStore = VehicleSnapshot & {
   resetTripA: () => void;
   resetTripB: () => void;
   clearOwnerData: () => void;
+  setModelId: (id: TeslaModelId) => void;
+  setPaintId: (id: string) => void;
 };
 
 const DEFAULTS: VehicleSnapshot = {
@@ -74,6 +85,8 @@ const DEFAULTS: VehicleSnapshot = {
   tirePsi: [42, 42, 41, 42],
   maskVin: false,
   shareLocation: true,
+  modelId: DEFAULT_MODEL_ID,
+  paintId: modelById(DEFAULT_MODEL_ID).defaultPaintId,
 };
 
 function clamp(n: number, min: number, max: number) {
@@ -266,6 +279,24 @@ export const useVehicleStore = create<VehicleStore>()(
       setUnits: (u) => set({ units: u }),
       setMaskVin: (on) => set({ maskVin: on }),
       setShareLocation: (on) => set({ shareLocation: on }),
+      setModelId: (id) => {
+        const next = isTeslaModelId(id) ? id : DEFAULT_MODEL_ID;
+        const profile = modelById(next);
+        const paintId = isPaintForModel(profile, get().paintId)
+          ? get().paintId
+          : profile.defaultPaintId;
+        set({
+          modelId: next,
+          paintId,
+          locationLabel: profile.home.label,
+          lastSync: Date.now(),
+        });
+      },
+      setPaintId: (id) => {
+        const profile = modelById(get().modelId);
+        const paintId = isPaintForModel(profile, id) ? id : profile.defaultPaintId;
+        set({ paintId, lastSync: Date.now() });
+      },
       resetTripA: () => set({ tripAMi: 0, tripAWh: 0 }),
       resetTripB: () => set({ tripBMi: 0, tripBWh: 0 }),
       clearOwnerData: () =>
@@ -274,6 +305,8 @@ export const useVehicleStore = create<VehicleStore>()(
           units: get().units,
           maskVin: get().maskVin,
           shareLocation: get().shareLocation,
+          modelId: get().modelId,
+          paintId: get().paintId,
           lastSync: Date.now(),
         }),
     }),
@@ -303,15 +336,24 @@ export const useVehicleStore = create<VehicleStore>()(
         tirePsi: s.tirePsi,
         maskVin: s.maskVin,
         shareLocation: s.shareLocation,
+        modelId: s.modelId,
+        paintId: s.paintId,
       }),
       onRehydrateStorage: () => (state) => {
         if (!state) return;
         state.lastSync = Date.now();
         state.waking = false;
         state.speedMph = 0;
+        if (!state.modelId || !isTeslaModelId(state.modelId)) {
+          state.modelId = DEFAULT_MODEL_ID;
+        }
+        const profile = modelById(state.modelId);
+        if (!state.paintId || !isPaintForModel(profile, state.paintId)) {
+          state.paintId = profile.defaultPaintId;
+        }
         if (state.mode === "driving") {
           state.mode = "parked";
-          state.locationLabel = VEHICLE.home.label;
+          state.locationLabel = modelById(state.modelId).home.label;
           state.locked = true;
         }
       },

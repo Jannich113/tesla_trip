@@ -3,7 +3,7 @@ import { AuthProvider } from "@/lib/auth/provider";
 import { PreviewHostBridge } from "@/components/preview-host-bridge";
 import appCss from "../styles.css?url";
 
-const APP_NAME = "Juniper";
+const APP_NAME = "tesla_trip";
 
 export const Route = createRootRoute({
   head: () => ({
@@ -13,7 +13,7 @@ export const Route = createRootRoute({
       { title: APP_NAME },
       {
         name: "description",
-        content: "Live stats and mileage for a 2025 Tesla Model Y Juniper.",
+        content: "Live stats, trips, and charging for your Tesla.",
       },
       { name: "theme-color", content: "#070708" },
     ],

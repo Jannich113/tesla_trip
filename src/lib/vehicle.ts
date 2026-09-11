@@ -117,3 +117,6 @@ export function timeToLimitMin(soc: number, limit: number, kw: number) {
   return (kwh / kw) * 60;
 }
 
+
+
+/** @deprecated Prefer modelById(modelId) from store — static Juniper defaults. */
