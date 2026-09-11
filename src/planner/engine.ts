@@ -151,6 +151,7 @@ export type PricedLeg = {
 
 export const DKK_PER_USD = 6.85;
 const RESERVE_SOC = 15;
+const ARRIVE_MIN_SOC = 5;
 const TARGET_SOC = 70;
 const SUGGEST_SOC = 45;
 const CHEAP_VS_LIVE = 0.85;
@@ -680,7 +681,8 @@ export function pricePlan(opts: {
       plannedStart = addMinutesDateTime(whenAt, -route.seconds / 60);
     }
     const socAfter = soc - (kwh / usableKwh) * 100;
-    const required = socAfter < RESERVE_SOC;
+    const minArrive = via ? RESERVE_SOC : ARRIVE_MIN_SOC;
+    const required = socAfter < minArrive;
     const searchHours = hoursFrom(hours, readyAt);
     const cheap = cheapestHour(searchHours);
     const goodPrice = Boolean(cheap && cheap.krPerKwh <= live * CHEAP_VS_LIVE);
@@ -688,11 +690,11 @@ export function pricePlan(opts: {
     const deep = socAfter < SUGGEST_SOC;
     const suggested = !required && ((goodPrice && lowEnough) || (deep && focus !== "time"));
     const autoNeedSoc = required
-      ? Math.max(TARGET_SOC - soc, RESERVE_SOC + (kwh / usableKwh) * 100 - soc)
+      ? Math.max(TARGET_SOC - soc, minArrive + (kwh / usableKwh) * 100 - soc)
       : Math.min(TARGET_SOC - soc, Math.max((kwh / usableKwh) * 100, 12));
     const autoTarget = Math.min(100, Math.max(soc, soc + autoNeedSoc));
     const minTarget = required
-      ? Math.min(100, Math.max(soc + 1, RESERVE_SOC + (kwh / usableKwh) * 100))
+      ? Math.min(100, Math.max(soc + 1, minArrive + (kwh / usableKwh) * 100))
       : soc;
     const rawTarget = via ? null : opts.chargeToSoc?.[userIndex];
     const userTarget =
@@ -764,14 +766,13 @@ export function pricePlan(opts: {
     const chargeDone = billed ? addMinutesDateTime(windowStart, chargeMin) : readyAt;
     const departAt = maxDateTime(plannedStart, billed ? chargeDone : readyAt);
     const arriveAt = addMinutesDateTime(departAt, route.seconds / 60);
-    const startSoc = billed && charge ? Math.min(100, soc + (charge.kwh / usableKwh) * 100) : soc;
-    const arriveSoc = Math.max(1, startSoc - (kwh / usableKwh) * 100);
+    const packKwh = billed ? kwhNeed : 0;
+    const startSoc = billed && charge ? Math.min(100, soc + (packKwh / usableKwh) * 100) : soc;
+    const arriveSoc = Math.max(minArrive, startSoc - (kwh / usableKwh) * 100);
     const extraKr =
-      billed && charge && autoKwh > 0
-        ? (charge.kwh - autoKwh) * charge.rateKr
-        : billed && charge
-          ? charge.kr
-          : 0;
+      billed && charge && userTarget != null
+        ? Math.max(0, userTarget - autoTarget) * 0.01 * usableKwh * charge.rateKr
+        : 0;
     const pricedCharge =
       charge && waitMin === 0 && charge.waitMin > 0
         ? { ...charge, waitMin: 0, windowLabel: charge.windowLabel.replace(/ · wait .+$/, "") }

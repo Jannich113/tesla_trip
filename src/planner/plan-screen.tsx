@@ -1139,8 +1139,8 @@ export function PlanScreen() {
                             )}
                           >
                             {chargeRequired ? " · required" : chargedLeg.accepted ? " · accepted" : " · recommended"}
-                            {chargedLeg.accepted && Math.abs(extraKr) >= 0.5
-                              ? ` · ${extraKr > 0 ? "+" : ""}${formatKrValue(extraKr, 0)} kr`
+                            {!chargeRequired && extraKr >= 0.5
+                              ? ` · +${formatKrValue(extraKr, 0)} kr extra`
                               : ""}
                           </span>
                         ) : null}
@@ -1177,7 +1177,7 @@ export function PlanScreen() {
                         onChange={(e) => {
                           const n = Number(e.target.value);
                           if (!Number.isFinite(n)) return;
-                          const v = Math.max(1, Math.min(100, Math.round(n)));
+                          const v = Math.max(5, Math.min(100, Math.round(n)));
                           setChargeToSoc((cur) => ({ ...cur, [userI]: v }));
                           setAcceptCharge((cur) => ({ ...cur, [userI]: true }));
                         }}
@@ -1391,7 +1391,7 @@ export function PlanScreen() {
                               onChange={(e) => {
                                 const n = Number(e.target.value);
                                 if (!Number.isFinite(n)) return;
-                                const v = Math.max(1, Math.min(100, Math.round(n)));
+                                const v = Math.max(5, Math.min(100, Math.round(n)));
                                 setChargeToSoc((cur) => ({ ...cur, [userI]: v }));
                                 setAcceptCharge((cur) => ({ ...cur, [userI]: true }));
                               }}
@@ -1408,7 +1408,7 @@ export function PlanScreen() {
                             )}
                           >
                             {chargedLeg.extraKr > 0 ? "+" : ""}
-                            {formatKrValue(chargedLeg.extraKr, 0)} kr vs {formatNumber(chargedLeg.autoStartSoc, 0)}% plan
+                            {formatKrValue(chargedLeg.extraKr, 0)} kr extra vs auto {formatNumber(chargedLeg.autoStartSoc, 0)}%
                           </p>
                         ) : null}
                         <button
@@ -1456,7 +1456,7 @@ export function PlanScreen() {
                             onChange={(e) => {
                               const n = Number(e.target.value);
                               if (!Number.isFinite(n)) return;
-                              const v = Math.max(1, Math.min(100, Math.round(n)));
+                              const v = Math.max(5, Math.min(100, Math.round(n)));
                               setChargeToSoc((cur) => ({ ...cur, [userI]: v }));
                               setAcceptCharge((cur) => ({ ...cur, [userI]: true }));
                             }}
