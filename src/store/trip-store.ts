@@ -7,6 +7,7 @@ import {
   type ChargeSession,
   type Trip,
   formatDayLabel,
+  tripsInRange,
 } from "@/lib/history";
 import { geo } from "@/lib/places";
 
@@ -80,6 +81,52 @@ type TripStore = TripState & {
 
 function uniqueIds(ids: string[]) {
   return [...new Set(ids.filter((id) => TRIPS.some((t) => t.id === id)))];
+}
+
+/** Safe storage for SSR / private mode — never throws on get/set. */
+function safeLocalStorage(): Storage {
+  const noop: Storage = {
+    get length() {
+      return 0;
+    },
+    clear() {},
+    getItem() {
+      return null;
+    },
+    key() {
+      return null;
+    },
+    removeItem() {},
+    setItem() {},
+  };
+  if (typeof window === "undefined") return noop;
+  try {
+    const k = "__juniper_trip_albums_probe__";
+    window.localStorage.setItem(k, "1");
+    window.localStorage.removeItem(k);
+    return window.localStorage;
+  } catch {
+    return noop;
+  }
+}
+
+/**
+ * Remap album tripIds after content-hash ID migration.
+ * Prefer keeping IDs that still exist; if none remain and the album has a
+ * date range, rebuild from trips in that range.
+ */
+function migrateAlbum(album: TripAlbum): TripAlbum | null {
+  let tripIds = uniqueIds(album.tripIds ?? []);
+  if (tripIds.length === 0 && album.startDay && album.endDay) {
+    tripIds = tripsInRange(album.startDay, album.endDay).map((t) => t.id);
+  }
+  if (tripIds.length === 0) return null;
+  return { ...album, tripIds };
+}
+
+function migrateAlbums(albums: TripAlbum[] | undefined): TripAlbum[] {
+  if (!albums?.length) return [];
+  return albums.map(migrateAlbum).filter((a): a is TripAlbum => a != null);
 }
 
 function tokens(s: string) {
@@ -260,8 +307,24 @@ export const useTripStore = create<TripStore>()(
     }),
     {
       name: "juniper-trip-albums",
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(() => safeLocalStorage()),
       skipHydration: true,
+      version: 2,
+      migrate: (persisted, _fromVersion) => {
+        const saved = (persisted ?? {}) as Partial<TripState>;
+        return {
+          albums: migrateAlbums(saved.albums),
+          seq: typeof saved.seq === "number" ? saved.seq : 0,
+        };
+      },
+      merge: (persisted, current) => {
+        const saved = persisted as Partial<TripState> | undefined;
+        return {
+          ...current,
+          albums: migrateAlbums(saved?.albums ?? current.albums),
+          seq: typeof saved?.seq === "number" ? saved.seq : current.seq,
+        };
+      },
       partialize: (s) => ({ albums: s.albums, seq: s.seq }),
     },
   ),

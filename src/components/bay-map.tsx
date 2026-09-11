@@ -88,14 +88,17 @@ export function BayMap({
 
       const map = L.map(hostRef.current, {
         zoomControl: false,
-        attributionControl: false,
+        attributionControl: true,
         scrollWheelZoom: false,
       });
       L.control.zoom({ position: "bottomright" }).addTo(map);
-      L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-        subdomains: "abcd",
-        maxZoom: 18,
+      // No API key: public OSM raster tiles + CSS invert for a dark UI.
+      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution:
+          '&copy; <a href="https://www.openstreetmap.org/copyright" rel="noreferrer" target="_blank">OpenStreetMap</a>',
       }).addTo(map);
+      map.attributionControl?.setPosition("bottomleft");
       map.setView([37.45, -122.15], 10);
       groupRef.current = L.layerGroup().addTo(map);
       map.on("click", (e) => {

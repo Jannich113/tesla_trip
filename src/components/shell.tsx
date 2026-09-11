@@ -33,6 +33,7 @@ function LightBar() {
 const TAB_IDS: Tab[] = ["home", "trips", "costs", "elpris", "vehicle"];
 
 function readTabFromLocation(): Tab {
+  if (typeof window === "undefined") return "home";
   const params = new URLSearchParams(window.location.search);
   const raw = params.get("tab");
   if (raw && (TAB_IDS as string[]).includes(raw)) return raw as Tab;
@@ -59,9 +60,13 @@ export function Dashboard() {
   };
 
   useEffect(() => {
-    void useVehicleStore.persist.rehydrate();
-    void useChargeStore.persist.rehydrate();
-    void useTripStore.persist.rehydrate();
+    void Promise.all([
+      useVehicleStore.persist.rehydrate(),
+      useChargeStore.persist.rehydrate(),
+      useTripStore.persist.rehydrate(),
+    ]).catch(() => {
+      /* localStorage may be unavailable; stores keep defaults */
+    });
     const params = new URLSearchParams(window.location.search);
     const tesla = params.get("tesla");
     if (!tesla) return;
