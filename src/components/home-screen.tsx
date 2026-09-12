@@ -10,10 +10,7 @@ import {
   relativeTime,
 } from "@/lib/vehicle";
 import {
-  type ChargeTotals,
-  type TripTotals,
   chargeTotalsFrom,
-  emptyChargeTotals,
   estimateRegenKwh,
   formatUsd,
   petrolSavings,
@@ -36,13 +33,13 @@ export function HomeScreen() {
   const range = ratedRangeMi(s.soc);
   const image = s.mode === "charging" ? heroes.rear || heroes.front : heroes.front;
   const [now, setNow] = useState(0);
-  const todayTrips = useMemo(() => tripTotals("day"), []);
-  const [lifetimeTrips, setLifetimeTrips] = useState<TripTotals>({ count: 0, mi: 0, kwh: 0, min: 0 });
+  const todayTrips = tripTotals("day");
+  const lifetimeTrips = tripTotals("total");
   const locations = useChargeStore((st) => st.locations);
   const logged = useChargeStore((st) => st.logged);
-  const sessions = useMemo(() => pricedSessions(locations, logged, "day"), [locations, logged]);
+  const sessions = useMemo(() => pricedSessions(locations, logged), [locations, logged]);
   const todayCost = useMemo(() => chargeTotalsFrom(sessions, "day"), [sessions]);
-  const [lifetimeCharge, setLifetimeCharge] = useState<ChargeTotals>(() => emptyChargeTotals());
+  const lifetimeCharge = useMemo(() => chargeTotalsFrom(sessions, "total"), [sessions]);
   const regenKwh = estimateRegenKwh(lifetimeTrips.kwh);
   const savingsUsd = petrolSavings(lifetimeTrips.mi, lifetimeCharge.usd);
 
@@ -51,19 +48,6 @@ export function HomeScreen() {
     const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
   }, []);
-
-  useEffect(() => {
-    const run = () => {
-      setLifetimeTrips(tripTotals("total"));
-      setLifetimeCharge(chargeTotalsFrom(pricedSessions(locations, logged, "total"), "total"));
-    };
-    if (typeof requestIdleCallback === "function") {
-      const idle = requestIdleCallback(run, { timeout: 1500 });
-      return () => cancelIdleCallback(idle);
-    }
-    const t = window.setTimeout(run, 200);
-    return () => window.clearTimeout(t);
-  }, [locations, logged]);
 
   const updated = relativeTime(s.lastSync, now || 0);
 
