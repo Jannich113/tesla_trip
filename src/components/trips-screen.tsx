@@ -7,7 +7,7 @@ import {
   type EnergyDay,
   type Period,
   DELIVERED_DAY,
-  TRIPS,
+  getTrips,
   dailyEnergy,
   formatDayRange,
   formatUsd,
@@ -98,7 +98,7 @@ export function TripsScreen() {
   const corridors = useMemo(() => tripCorridors(period, today), [period, today]);
   const album = albums.find((a) => a.id === albumId) ?? null;
   const albumItems = useMemo(() => (album ? albumTrips(album) : []), [album]);
-  const pickedItems = useMemo(() => TRIPS.filter((t) => picked.includes(t.id)), [picked]);
+  const pickedItems = useMemo(() => getTrips().filter((t) => picked.includes(t.id)), [picked]);
 
   const focusTrips: Trip[] | null = picking && pickedItems.length
     ? pickedItems

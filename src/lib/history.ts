@@ -311,31 +311,34 @@ function buildHistory() {
   return { trips, charges };
 }
 
-const HISTORY = buildHistory();
-export const TRIPS = HISTORY.trips;
-export const CHARGES = HISTORY.charges;
+let CACHE: { trips: Trip[]; charges: ChargeSession[] } | null = null;
+
+function loadHistory() {
+  if (!CACHE) CACHE = buildHistory();
+  return CACHE;
+}
 
 export function getTrips() {
-  return TRIPS;
+  return loadHistory().trips;
 }
 
 export function getCharges() {
-  return CHARGES;
+  return loadHistory().charges;
 }
 
 export function tripsIn(period: Period, today = laDayString()) {
-  return TRIPS.filter((t) => inPeriod(t.day, period, today));
+  return getTrips().filter((t) => inPeriod(t.day, period, today));
 }
 
 export function tripsInRange(start: string, end: string) {
   const a = start <= end ? start : end;
   const b = start <= end ? end : start;
-  return TRIPS.filter((t) => t.day >= a && t.day <= b);
+  return getTrips().filter((t) => t.day >= a && t.day <= b);
 }
 
 export function tripsByIds(ids: string[]) {
   const set = new Set(ids);
-  return TRIPS.filter((t) => set.has(t.id));
+  return getTrips().filter((t) => set.has(t.id));
 }
 
 export type EnergyDay = {
@@ -503,7 +506,7 @@ export function chargesInFrom(sessions: ChargeSession[], period: Period, today =
 }
 
 export function chargesIn(period: Period, today = laDayString()) {
-  return chargesInFrom(CHARGES, period, today);
+  return chargesInFrom(getCharges(), period, today);
 }
 
 export function emptyChargeTotals(): ChargeTotals {
@@ -542,7 +545,7 @@ export function chargeTotalsFrom(sessions: ChargeSession[], period: Period, toda
 }
 
 export function chargeTotals(period: Period, today = laDayString()): ChargeTotals {
-  return chargeTotalsFrom(CHARGES, period, today);
+  return chargeTotalsFrom(getCharges(), period, today);
 }
 
 export function tripTotals(period: Period, today = laDayString()): TripTotals {
@@ -835,7 +838,7 @@ export function chargeRanksFrom(sessions: ChargeSession[], period: Period, today
 }
 
 export function chargeRanks(period: Period, today = laDayString()): ChargeRank[] {
-  return chargeRanksFrom(CHARGES, period, today);
+  return chargeRanksFrom(getCharges(), period, today);
 }
 
 

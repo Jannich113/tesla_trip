@@ -1,14 +1,14 @@
-import { lazy, startTransition, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { toast, Toaster } from "sonner";
 import { Car, CircleDollarSign, House, RotateCw, Route, Zap } from "lucide-react";
-import { HomeScreen } from "@/components/home-screen";
 import { type Tab, VEHICLE } from "@/lib/vehicle";
 import { cn } from "@/lib/utils";
 import { useVehicleProfile } from "@/hooks/use-vehicle-profile";
-import { useChargeStore } from "@/store/charge-store";
-import { useTripStore } from "@/store/trip-store";
 import { useVehicleStore } from "@/store/vehicle-store";
 
+const HomeScreen = lazy(() =>
+  import("@/components/home-screen").then((m) => ({ default: m.HomeScreen })),
+);
 const TripsScreen = lazy(() =>
   import("@/components/trips-screen").then((m) => ({ default: m.TripsScreen })),
 );
@@ -41,12 +41,7 @@ function saveDataOn() {
 function warmTab(id: Exclude<Tab, "home">) {
   if (warmed.has(id)) return Promise.resolve();
   warmed.add(id);
-  const extra =
-    id === "trips" || id === "costs"
-      ? import("@/components/bay-map").then(() => undefined)
-      : Promise.resolve();
   return TAB_LOADERS[id]()
-    .then(() => extra)
     .then(() => undefined)
     .catch(() => {
       warmed.delete(id);
@@ -63,7 +58,7 @@ function warmTabsInIdle(first?: Tab) {
 
   const step = (deadline?: { didTimeout: boolean; timeRemaining: () => number }) => {
     if (stopped || i >= order.length) return;
-    const busy = deadline && !deadline.didTimeout && deadline.timeRemaining() < 10;
+    const busy = deadline && !deadline.didTimeout && deadline.timeRemaining() < 12;
     if (busy) {
       schedule();
       return;
@@ -78,13 +73,13 @@ function warmTabsInIdle(first?: Tab) {
   const schedule = () => {
     if (stopped || i >= order.length) return;
     if (typeof requestIdleCallback === "function") {
-      idleId = requestIdleCallback((d) => step(d), { timeout: 1800 });
+      idleId = requestIdleCallback((d) => step(d), { timeout: 4000 });
     } else {
-      timer = window.setTimeout(() => step(), 120);
+      timer = window.setTimeout(() => step(), 240);
     }
   };
 
-  schedule();
+  timer = window.setTimeout(schedule, 2800);
   return () => {
     stopped = true;
     if (idleId && typeof cancelIdleCallback === "function") cancelIdleCallback(idleId);
@@ -124,41 +119,35 @@ function readTabFromLocation(): Tab {
   return "home";
 }
 
+function tabHref(id: Tab) {
+  return id === "home" ? "/" : `/?tab=${id}`;
+}
+
 function writeTabToLocation(next: Tab) {
   const url = new URL(window.location.href);
   if (next === "home") url.searchParams.delete("tab");
   else url.searchParams.set("tab", next);
-  // Keep other query params (e.g. tesla=) until the toast effect clears them.
   window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
 export function Dashboard() {
   const [tab, setTab] = useState<Tab>("home");
-  const [active, setActive] = useState<Tab>("home");
   const wake = useVehicleStore((s) => s.wake);
   const waking = useVehicleStore((s) => s.waking);
   const tick = useVehicleStore((s) => s.tick);
   const { profile } = useVehicleProfile();
 
   const selectTab = (next: Tab) => {
-    setActive(next);
-    startTransition(() => {
-      setTab(next);
-      writeTabToLocation(next);
-    });
+    if (next !== "home") void warmTab(next);
+    setTab(next);
+    writeTabToLocation(next);
   };
 
   useEffect(() => {
-    const initial = readTabFromLocation();
-    setTab(initial);
-    setActive(initial);
-    const onPop = () => {
-      const next = readTabFromLocation();
-      setActive(next);
-      setTab(next);
-    };
+    setTab(readTabFromLocation());
+    const onPop = () => setTab(readTabFromLocation());
     window.addEventListener("popstate", onPop);
-    const stopWarm = warmTabsInIdle(initial);
+    const stopWarm = warmTabsInIdle(tab);
     return () => {
       window.removeEventListener("popstate", onPop);
       stopWarm();
@@ -166,28 +155,32 @@ export function Dashboard() {
   }, []);
 
   useEffect(() => {
-    void Promise.all([
-      useVehicleStore.persist.rehydrate(),
-      useChargeStore.persist.rehydrate(),
-      useTripStore.persist.rehydrate(),
-    ]).catch(() => {
-      /* localStorage may be unavailable; stores keep defaults */
-    });
+    void Promise.resolve(useVehicleStore.persist.rehydrate()).catch(() => {});
+    const later = window.setTimeout(() => {
+      void import("@/store/charge-store")
+        .then((m) => Promise.resolve(m.useChargeStore.persist.rehydrate()))
+        .catch(() => {});
+      void import("@/store/trip-store")
+        .then((m) => Promise.resolve(m.useTripStore.persist.rehydrate()))
+        .catch(() => {});
+    }, 400);
     const params = new URLSearchParams(window.location.search);
     const tesla = params.get("tesla");
-    if (!tesla) return;
-    const messages: Record<string, string> = {
-      ok: "Juniper linked to the owner Tesla account",
-      not_owner: "That Tesla account does not own Juniper",
-      driver: "Driver access is blocked — owner only",
-      denied: "Tesla sign-in was cancelled",
-      error: "Tesla owner sign-in failed",
-      not_configured: "Tesla owner credentials are not on this app yet",
-    };
-    toast(messages[tesla] ?? "Tesla owner sign-in did not complete");
-    params.delete("tesla");
-    const qs = params.toString();
-    window.history.replaceState({}, "", qs ? `/?${qs}` : "/");
+    if (tesla) {
+      const messages: Record<string, string> = {
+        ok: "Juniper linked to the owner Tesla account",
+        not_owner: "That Tesla account does not own Juniper",
+        driver: "Driver access is blocked — owner only",
+        denied: "Tesla sign-in was cancelled",
+        error: "Tesla owner sign-in failed",
+        not_configured: "Tesla owner credentials are not on this app yet",
+      };
+      toast(messages[tesla] ?? "Tesla owner sign-in did not complete");
+      params.delete("tesla");
+      const qs = params.toString();
+      window.history.replaceState({}, "", qs ? `/?${qs}` : "/");
+    }
+    return () => window.clearTimeout(later);
   }, []);
 
   useEffect(() => {
@@ -225,44 +218,34 @@ export function Dashboard() {
         </header>
 
         <main className="flex-1 overflow-y-auto pb-32">
-          {tab === "home" && <HomeScreen />}
-          {tab !== "home" ? (
-            <Suspense fallback={<TabFallback />}>
-              {tab === "trips" && <TripsScreen />}
-              {tab === "costs" && <ChargeScreen />}
-              {tab === "elpris" && <ElprisScreen />}
-              {tab === "vehicle" && <VehicleScreen />}
-            </Suspense>
-          ) : null}
+          <Suspense fallback={<TabFallback />}>
+            {tab === "home" && <HomeScreen />}
+            {tab === "trips" && <TripsScreen />}
+            {tab === "costs" && <ChargeScreen />}
+            {tab === "elpris" && <ElprisScreen />}
+            {tab === "vehicle" && <VehicleScreen />}
+          </Suspense>
         </main>
 
         <nav
-          className="fixed inset-x-0 bottom-0 z-50 mx-auto max-w-lg border-t border-border bg-background/95 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-1 backdrop-blur-sm"
+          className="fixed inset-x-0 bottom-0 z-[100] mx-auto max-w-lg border-t border-border bg-background/95 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-1 backdrop-blur-sm"
           aria-label="Primary"
         >
           <ul className="grid grid-cols-5">
             {TABS.map((item) => {
               const Icon = item.icon;
-              const current = active === item.id;
+              const current = tab === item.id;
               const label = item.id === "vehicle" ? profile.name : item.label!;
               return (
                 <li key={item.id}>
-                  <button
-                    type="button"
-                    onPointerDown={(e) => {
-                      if (e.button !== 0) return;
-                      if (item.id !== "home") void warmTab(item.id);
+                  <a
+                    href={tabHref(item.id)}
+                    onClick={(e) => {
+                      e.preventDefault();
                       selectTab(item.id);
                     }}
                     onPointerEnter={() => {
                       if (item.id !== "home") void warmTab(item.id);
-                    }}
-                    onFocus={() => {
-                      if (item.id !== "home") void warmTab(item.id);
-                    }}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      selectTab(item.id);
                     }}
                     className={cn(
                       "flex h-14 w-full touch-manipulation flex-col items-center justify-center gap-0.5 text-[10px] font-medium",
@@ -274,7 +257,7 @@ export function Dashboard() {
                   >
                     <Icon className="size-5" strokeWidth={current ? 2.2 : 1.8} />
                     <span className="max-w-full truncate px-0.5">{label}</span>
-                  </button>
+                  </a>
                 </li>
               );
             })}
