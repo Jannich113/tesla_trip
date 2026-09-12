@@ -1267,84 +1267,6 @@ export function PlanScreen() {
       <>
 
       <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
-        <p className="text-sm font-medium">Stops</p>
-        <label className="mt-2 block text-xs text-muted">
-          Add stop
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Address or place"
-            className="mt-1 h-11 w-full rounded-md bg-surface-2 px-3 text-sm outline-none"
-          />
-        </label>
-        {hits.length ? (
-          <ul className="mt-2 divide-y divide-border rounded-xl bg-surface-2">
-            {hits.map((hit) => (
-              <li key={`${hit.lat},${hit.lng}`}>
-                <button
-                  type="button"
-                  onClick={() => addStop(hit)}
-                  className="flex w-full items-center gap-3 px-3 py-3 text-left"
-                >
-                  <Plus className="size-4 shrink-0 text-muted" />
-                  <span className="truncate text-sm">{hit.label}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <ul className="mt-2 flex flex-wrap gap-2">
-            {Object.entries(PLACES)
-              .filter(([name]) => {
-                if (name.includes("Supercharger") || name.includes("Wall")) return false;
-                if (name === "Home" && stops.some((s) => s.id === "home" || s.name === "Home")) return false;
-                return true;
-              })
-              .slice(0, 8)
-              .map(([name, g]) => (
-                <li key={name}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (name === "Home") {
-                        addStopToStore({ id: "home", name: "Home", lat: g.lat, lng: g.lng });
-                        return;
-                      }
-                      addStop({ label: name, lat: g.lat, lng: g.lng });
-                    }}
-                    className="h-9 rounded-full bg-surface-2 px-3 text-xs font-medium text-muted"
-                  >
-                    {g.short}
-                  </button>
-                </li>
-              ))}
-          </ul>
-        )}
-        {stops.length ? (
-          <ol className="mt-3">
-            {stops.map((stop, i) => (
-              <li key={stop.id} className="flex items-center gap-3 border-b border-border py-2 last:border-0">
-                <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-surface-2 text-xs tabular-nums text-muted">
-                  {i + 1}
-                </span>
-                <p className="min-w-0 flex-1 truncate text-sm">{stop.name}</p>
-                <button
-                  type="button"
-                  onClick={() => removeStop(stop.id)}
-                  className="flex size-9 shrink-0 items-center justify-center rounded-full text-muted"
-                  aria-label={`Remove ${stop.name}`}
-                >
-                  <Trash2 className="size-4" />
-                </button>
-              </li>
-            ))}
-          </ol>
-        ) : (
-          <p className="mt-3 text-sm text-muted">Add a start, then a destination.</p>
-        )}
-      </section>
-
-      <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -1358,7 +1280,7 @@ export function PlanScreen() {
               type="button"
               onClick={() => setWhenKind(kind)}
               className={cn(
-                "h-8 flex-1 rounded-full text-[11px] font-medium",
+                "h-9 flex-1 rounded-full text-xs font-medium",
                 whenKind === kind ? "bg-foreground text-background" : "text-muted",
               )}
             >
@@ -1383,6 +1305,54 @@ export function PlanScreen() {
         <p className="mt-2 text-xs text-muted">
           {profile.usableKwh} kWh usable · {formatNumber(soc, 0)}% now
         </p>
+
+        <ol className="relative mt-4">
+          {stops.map((stop, i) => (
+            <li key={stop.id} className="relative flex items-center gap-3 py-2">
+              <span className="absolute bottom-0 left-[13px] top-8 w-px bg-border" aria-hidden />
+              <span className="relative z-[1] flex size-7 shrink-0 items-center justify-center rounded-full bg-surface-2 text-xs tabular-nums text-muted">
+                {i + 1}
+              </span>
+              <p className="min-w-0 flex-1 truncate text-sm">{stop.name}</p>
+              <button
+                type="button"
+                onClick={() => removeStop(stop.id)}
+                className="relative z-[1] flex size-9 shrink-0 items-center justify-center rounded-full text-muted"
+                aria-label={`Remove ${stop.name}`}
+              >
+                <Trash2 className="size-4" />
+              </button>
+            </li>
+          ))}
+          <li className="relative flex items-start gap-3 py-2">
+            <span className="relative z-[1] mt-2 flex size-7 shrink-0 items-center justify-center rounded-full bg-surface-2 text-muted">
+              <Plus className="size-3.5" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={stops.length === 0 ? "Add a start" : stops.length === 1 ? "Add a destination" : "Add a stop"}
+                className="h-11 w-full rounded-xl bg-surface-2 px-3 text-sm outline-none placeholder:text-subtle"
+              />
+              {hits.length ? (
+                <ul className="mt-1 overflow-hidden rounded-xl bg-surface-2">
+                  {hits.map((hit) => (
+                    <li key={`${hit.lat},${hit.lng}`} className="border-t border-border first:border-0">
+                      <button
+                        type="button"
+                        onClick={() => addStop(hit)}
+                        className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm"
+                      >
+                        <span className="truncate">{hit.label}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          </li>
+        </ol>
 
         <p className="mt-5 text-[11px] font-medium uppercase tracking-wide text-muted">Route options</p>
         <p className="mt-1 text-[11px] text-subtle">
