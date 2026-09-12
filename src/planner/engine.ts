@@ -171,8 +171,12 @@ const REQUIRE_SOC = 25;
 const SUGGEST_SOC_MIN = 26;
 const SUGGEST_SOC_MAX = 45;
 const TARGET_SOC = 80;
+/** Charge this high to skip an extra stop rather than drip 8% hops. */
+const STRETCH_SOC = 95;
 /** Every charge session adds at least this much SOC. */
 const MIN_ADD_SOC = 20;
+/** Remaining energy may exceed one hop by this fraction before we insert another via. */
+const SKIP_STOP_FRAC = 1.22;
 const CHEAP_VS_LIVE = 0.85;
 
 export function airRoute(from: PlanStop, to: PlanStop): RoutedLeg {
@@ -720,7 +724,13 @@ export function pricePlan(opts: {
     const packSoc = soc < REQUIRE_SOC ? Math.max(soc, TARGET_SOC) : soc;
     const floorKwh = Math.max(4, ((packSoc - FLOOR_SOC) / 100) * usableKwh);
     const bandKwh = Math.max(0, ((packSoc - REQUIRE_SOC) / 100) * usableKwh);
-    if (kwh > floorKwh * 0.98 && job.depth < 12) {
+    const stretchSoc = Math.min(
+      STRETCH_SOC,
+      Math.max(packSoc, FLOOR_SOC + (kwh / usableKwh) * 100 + 5),
+    );
+    const stretchKwh = Math.max(4, ((stretchSoc - FLOOR_SOC) / 100) * usableKwh);
+    const coverWithStretch = kwh > floorKwh * 0.98 && kwh <= stretchKwh * 0.99 && stretchSoc <= STRETCH_SOC;
+    if (kwh > floorKwh * 0.98 && !coverWithStretch && job.depth < 8) {
       const viaOpts = {
         path: route.path,
         locations,
@@ -781,7 +791,10 @@ export function pricePlan(opts: {
     }
     const socAfter = soc - (kwh / usableKwh) * 100;
     const minArrive = FLOOR_SOC;
-    const required = socAfter < FLOOR_SOC || (soc < REQUIRE_SOC && (jobs.length > 0 || kwh > floorKwh * 0.5));
+    const required =
+      socAfter < FLOOR_SOC ||
+      coverWithStretch ||
+      (soc < REQUIRE_SOC && (jobs.length > 0 || kwh > floorKwh * 0.5));
     const searchHours = hoursFrom(hours, readyAt);
     const cheap = cheapestHour(searchHours);
     const goodPrice = Boolean(cheap && cheap.krPerKwh <= live * CHEAP_VS_LIVE);
@@ -792,7 +805,7 @@ export function pricePlan(opts: {
       100,
       Math.max(
         soc + MIN_ADD_SOC,
-        required ? Math.max(TARGET_SOC, needForHop) : soc + MIN_ADD_SOC,
+        required ? Math.max(coverWithStretch ? stretchSoc : TARGET_SOC, needForHop) : soc + MIN_ADD_SOC,
       ),
     );
     const minTarget = Math.min(100, soc + MIN_ADD_SOC);

@@ -200,8 +200,9 @@ export function pickViaOnPath(opts: {
       extraDriveKr: extraKr,
       extraKwh: (distM / 1000) * 0.2,
     });
-    const along = energyTo * 12;
-    const score = along - fit;
+    const along = energyTo * 24;
+    const unused = (budgetKwh - energyTo) * 10;
+    const score = along - unused - fit;
     if (score > bestScore) {
       bestScore = score;
       best = loc;
@@ -210,7 +211,7 @@ export function pickViaOnPath(opts: {
   return best;
 }
 
-/** If nothing sits in the energy window, take the stall nearest the remaining-range point. */
+/** If nothing sits in the energy window, take a stall in-band near remaining range — never snap backward. */
 export function pickViaAtRange(opts: Parameters<typeof pickViaOnPath>[0]): ViaLoc | null {
   const hit = pickViaOnPath(opts);
   if (hit) return hit;
@@ -223,6 +224,8 @@ export function pickViaAtRange(opts: Parameters<typeof pickViaOnPath>[0]): ViaLo
   let bestD = 80_000;
   for (const loc of opts.locations) {
     if (exclude.has(loc.id) || loc.kind === "home") continue;
+    const energyTo = opts.totalKwh * alongFraction(opts.path, loc.lat, loc.lng);
+    if (energyTo < minEnergy * 0.9 || energyTo > opts.budgetKwh * 1.02) continue;
     const d = haversineM({ lat, lng }, loc);
     if (d < bestD) {
       bestD = d;

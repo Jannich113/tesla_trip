@@ -531,6 +531,41 @@ describe("leg modes", () => {
     assert.ok(arrive <= 25, `arrive ${arrive} above 25%`);
   });
 
+  it("via fallback stays in the 8–25% band instead of snapping backward", () => {
+    const path: [number, number][] = [
+      [55.4, 10.4],
+      [54.0, 10.0],
+      [52.0, 9.0],
+      [50.0, 8.0],
+      [48.0, 9.0],
+      [46.0, 10.0],
+      [44.0, 11.0],
+      [42.0, 12.0],
+    ];
+    const early = {
+      id: "early",
+      lat: 55.38,
+      lng: 10.38,
+      kind: "supercharger" as const,
+      usdPerKwh: 0.4,
+      name: "Early",
+      short: "Early",
+    };
+    const via = pickViaAtRange({
+      path,
+      locations: [early],
+      budgetKwh: 46,
+      minKwh: 34,
+      totalKwh: 280,
+      mode: "fastest",
+      detourKm: 18,
+    });
+    assert.ok(via);
+    assert.notEqual(via!.id, "early", "should not snap to a charger behind the window");
+    const energy = 280 * alongFraction(path, via!.lat, via!.lng);
+    assert.ok(energy >= 34 * 0.8, `fallback energy ${energy} snapped behind the window`);
+  });
+
   it("1200 mile trip inserts several charge vias", () => {
     const from = { lat: 55.4, lng: 10.4 };
     const to = { lat: 41.9, lng: 12.5 };
@@ -563,6 +598,9 @@ describe("leg modes", () => {
       const pack = soc < 25 ? 80 : soc;
       const floorKwh = Math.max(4, ((pack - 8) / 100) * 75);
       if (kwh <= floorKwh * 0.98) break;
+      const stretchSoc = Math.min(95, Math.max(pack, 8 + (kwh / 75) * 100 + 5));
+      const stretchKwh = ((stretchSoc - 8) / 100) * 75;
+      if (kwh <= stretchKwh * 0.99) break;
       const via = pickViaAtRange({
         path: route.path,
         locations,
