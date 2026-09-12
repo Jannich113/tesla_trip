@@ -380,12 +380,27 @@ describe("leg modes", () => {
       [45.75, 4.85],
       [43.3, 5.4],
     ];
-    const fast = estimateTolls(path, 480, false, "fastest");
-    const cheap = estimateTolls(path, 480, false, "cheapest");
+    const free = estimateTolls(path, 480, false, "fastest");
+    const fast = estimateTolls(path, 480, true, "fastest");
+    const cheap = estimateTolls(path, 480, true, "cheapest");
     const eco = estimateTolls(path, 480, true, "eco");
+    assert.ok(free.roadKr < 1, "free roads must not pick up FR/IT €/km");
     assert.ok(fast.kr > 200);
     assert.equal(cheap.kr, fast.kr);
     assert.equal(eco.kr, 0);
+  });
+
+  it("a longer skip is rejected if the toll bill goes up", () => {
+    const italy: [number, number][] = [
+      [45.0, 9.0],
+      [43.0, 11.0],
+      [41.9, 12.5],
+    ];
+    const fast = { miles: 1273, seconds: 21 * 3600, path: italy, source: "osrm", hasToll: true };
+    const detour = { miles: 1310, seconds: 22.4 * 3600, path: italy, source: "valhalla", hasToll: true };
+    const skip = { miles: 1310, seconds: 22.4 * 3600, path: italy, source: "valhalla", hasToll: false };
+    assert.equal(pickCheapAvoidRoute(fast, [detour], { tolls: true })?.source, "osrm");
+    assert.equal(pickCheapAvoidRoute(fast, [skip], { tolls: true })?.hasToll, false);
   });
 
   it("seeds IONITY and Tesla on a Kolding–Padborg corridor", () => {

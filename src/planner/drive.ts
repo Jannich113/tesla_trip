@@ -288,8 +288,15 @@ export async function routeDrive(from: Stop, to: Stop, mode: LegMode): Promise<D
       if (os && okRoute(os, from, to)) return withTolls(os, "cheapest", Boolean(os.hasToll));
     }
     if (km > 1300) {
-      const long = await routeChunked(from, to, "cheapest");
-      if (long) return withTolls(long, "cheapest", Boolean(long.hasToll));
+      const [fastLong, skipLong] = await Promise.all([
+        routeChunked(from, to, "fastest"),
+        routeChunked(from, to, "cheapest"),
+      ]);
+      const fastOk = fastLong ? withTolls(fastLong, "fastest", Boolean(fastLong.hasToll)) : null;
+      const skip = skipLong ? withTolls(skipLong, "cheapest", Boolean(skipLong.hasToll)) : null;
+      const picked = pickCheapAvoidRoute(fastOk, skip ? [skip] : [], { tolls: true, roadFees: true });
+      if (picked) return withTolls(picked, "cheapest", Boolean(picked.hasToll));
+      if (fastOk) return fastOk;
     }
     const [fastPool, skipVal, skipOsrm] = await Promise.all([
       fastestPool(from, to),

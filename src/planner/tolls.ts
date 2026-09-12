@@ -50,8 +50,11 @@ export function estimateTolls(
       ? path.reduce((n, [lat, lng]) => n + kmRateAt(lat, lng), 0) / path.length
       : 0;
   const km = miles * 1.609344;
-  const roadKr = (hasToll || rate > 0) && mode !== "eco" ? km * rate : 0;
-  const rawRoadKr = hasToll || rate > 0 ? km * rate : 0;
+  // km motorway rate only when the router marked the road as tolled.
+  // A free detour through Italy must not pick up IT €/km — that's why
+  // "Avoid toll gates" was showing a *higher* toll than Fastest.
+  const roadKr = hasToll && mode !== "eco" ? km * rate : 0;
+  const rawRoadKr = hasToll && mode !== "eco" ? km * rate : 0;
   const kr = Math.round((gateKr + roadKr) * 10) / 10;
   const label = gates.length ? gates.map((g) => g.name).join(" · ") : roadKr > 1 ? "Road toll" : "";
   return {
@@ -73,5 +76,7 @@ export function avoidableFeeKr(
 ) {
   const a = asCheapAvoid(avoid);
   const t = estimateTolls(path, miles, hasToll, "fastest");
-  return (a.tolls ? t.gateKr : 0) + (a.roadFees ? t.roadKr : 0);
+  if (a.tolls) return t.gateKr + t.roadKr;
+  if (a.roadFees) return t.roadKr;
+  return 0;
 }

@@ -1037,21 +1037,14 @@ export function PlanScreen() {
                           avg {formatNumber(row.kmh, 0)} km/t
                           {slow ? " · 2× slower" : ""}
                           {row.mode === "cheapest"
-                            ? [
-                                cheapAvoid.motorways && "no motorways",
-                                cheapAvoid.tolls && "no toll gates",
-                                cheapAvoid.roadFees && "no road fees",
-                              ]
-                                .filter(Boolean)
-                                .join(" · ")
-                                ? ` · ${[
-                                    cheapAvoid.motorways && "no motorways",
-                                    cheapAvoid.tolls && "no toll gates",
-                                    cheapAvoid.roadFees && "no road fees",
-                                  ]
-                                    .filter(Boolean)
-                                    .join(" · ")}`
-                                : " · cheapest stalls"
+                            ? (() => {
+                                const bits = [
+                                  cheapAvoid.motorways && "no motorways",
+                                  cheapAvoid.tolls && t.tollKr < 1 && "no toll gates",
+                                  cheapAvoid.roadFees && "no road fees",
+                                ].filter(Boolean);
+                                return bits.length ? ` · ${bits.join(" · ")}` : " · cheapest stalls";
+                              })()
                             : ""}
                         </span>
                         <span className="mt-0.5 block text-xs text-muted">

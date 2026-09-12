@@ -1,5 +1,5 @@
 import { CHEAP_AVOID_FRAC, SLOW_TIME_FACTOR, type CheapAvoid, type LegMode } from "./modes.ts";
-import { avoidableFeeKr } from "./tolls.ts";
+import { avoidableFeeKr, estimateTolls } from "./tolls.ts";
 
 export type DriveCandidate = {
   miles: number;
@@ -47,16 +47,19 @@ export function pickCheapAvoidRoute<T extends DriveCandidate>(
   const a = { tolls: Boolean(avoid.tolls), roadFees: Boolean(avoid.roadFees) };
   if (!a.tolls && !a.roadFees) return fast ?? pickRouted("fastest", cands);
   const fee = (r: T) => avoidableFeeKr(r.path, r.miles, Boolean(r.hasToll), a);
+  const bill = (r: T) => estimateTolls(r.path, r.miles, Boolean(r.hasToll), "fastest").kr;
   if (!fast || fast.seconds <= 0 || fast.path.length < 3) {
     const ok = cands.filter((r) => r.path.length >= 3 && r.miles > 0);
     return ok.sort((x, y) => fee(x) - fee(y) || x.seconds - y.seconds)[0] ?? null;
   }
   const cap = fast.seconds * (1 + frac);
+  const fastBill = bill(fast);
   let best = fast;
   let bestFee = fee(fast);
   for (const r of cands) {
     if (r.path.length < 3 || r.seconds <= 0 || r.seconds > cap) continue;
     if (r.seconds + 30 < fast.seconds) continue;
+    if (bill(r) > fastBill + 1) continue;
     const f = fee(r);
     if (f < bestFee - 15) {
       best = r;
