@@ -22,12 +22,75 @@ const VehicleScreen = lazy(() =>
   import("@/components/vehicle-screen").then((m) => ({ default: m.VehicleScreen })),
 );
 
-const PRELOAD = [
-  () => import("@/components/trips-screen"),
-  () => import("@/components/charge-screen"),
-  () => import("@/components/elpris-screen"),
-  () => import("@/components/vehicle-screen"),
-];
+const TAB_LOADERS: Record<Exclude<Tab, "home">, () => Promise<unknown>> = {
+  trips: () => import("@/components/trips-screen"),
+  costs: () => import("@/components/charge-screen"),
+  elpris: () => import("@/components/elpris-screen"),
+  vehicle: () => import("@/components/vehicle-screen"),
+};
+
+const WARM_ORDER: Exclude<Tab, "home">[] = ["trips", "costs", "elpris", "vehicle"];
+const warmed = new Set<string>();
+
+function saveDataOn() {
+  const conn = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } })
+    .connection;
+  return Boolean(conn?.saveData) || conn?.effectiveType === "slow-2g" || conn?.effectiveType === "2g";
+}
+
+function warmTab(id: Exclude<Tab, "home">) {
+  if (warmed.has(id)) return Promise.resolve();
+  warmed.add(id);
+  const extra =
+    id === "trips" || id === "costs"
+      ? import("@/components/bay-map").then(() => undefined)
+      : Promise.resolve();
+  return TAB_LOADERS[id]()
+    .then(() => extra)
+    .then(() => undefined)
+    .catch(() => {
+      warmed.delete(id);
+    });
+}
+
+function warmTabsInIdle(first?: Tab) {
+  if (typeof window === "undefined" || saveDataOn()) return () => {};
+  const order = first && first !== "home" ? [first, ...WARM_ORDER.filter((id) => id !== first)] : [...WARM_ORDER];
+  let i = 0;
+  let idleId = 0;
+  let timer = 0;
+  let stopped = false;
+
+  const step = (deadline?: { didTimeout: boolean; timeRemaining: () => number }) => {
+    if (stopped || i >= order.length) return;
+    const busy = deadline && !deadline.didTimeout && deadline.timeRemaining() < 10;
+    if (busy) {
+      schedule();
+      return;
+    }
+    const id = order[i];
+    i += 1;
+    void warmTab(id).then(() => {
+      if (!stopped) schedule();
+    });
+  };
+
+  const schedule = () => {
+    if (stopped || i >= order.length) return;
+    if (typeof requestIdleCallback === "function") {
+      idleId = requestIdleCallback((d) => step(d), { timeout: 1800 });
+    } else {
+      timer = window.setTimeout(() => step(), 120);
+    }
+  };
+
+  schedule();
+  return () => {
+    stopped = true;
+    if (idleId && typeof cancelIdleCallback === "function") cancelIdleCallback(idleId);
+    if (timer) window.clearTimeout(timer);
+  };
+}
 
 function TabFallback() {
   return <div className="mx-4 mt-4 h-72 rounded-xl bg-surface" />;
@@ -95,12 +158,10 @@ export function Dashboard() {
       setTab(next);
     };
     window.addEventListener("popstate", onPop);
-    const warm = window.setTimeout(() => {
-      for (const load of PRELOAD) void load();
-    }, 0);
+    const stopWarm = warmTabsInIdle(initial);
     return () => {
       window.removeEventListener("popstate", onPop);
-      window.clearTimeout(warm);
+      stopWarm();
     };
   }, []);
 
@@ -190,7 +251,14 @@ export function Dashboard() {
                     type="button"
                     onPointerDown={(e) => {
                       if (e.button !== 0) return;
+                      if (item.id !== "home") void warmTab(item.id);
                       selectTab(item.id);
+                    }}
+                    onPointerEnter={() => {
+                      if (item.id !== "home") void warmTab(item.id);
+                    }}
+                    onFocus={() => {
+                      if (item.id !== "home") void warmTab(item.id);
                     }}
                     onClick={(e) => {
                       e.preventDefault();
