@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { BatteryBar } from "@/components/battery-bar";
-import { BayMap, type MapMarker } from "@/components/bay-map";
+import type { MapMarker } from "@/components/bay-map";
 import { PeriodPills } from "@/components/period-pills";
 import { HOME_LOCATION_ID, clampRadius, defaultRadius } from "@/lib/charge-locations";
 import { searchAddress, type AddressHit } from "@/lib/geocode";
@@ -18,6 +18,8 @@ import { VEHICLE, energyKwh, formatNumber, minutesToHm, timeToLimitMin } from "@
 import { cn } from "@/lib/utils";
 import { ranksFor, totalsFor, useChargeStore } from "@/store/charge-store";
 import { useVehicleStore } from "@/store/vehicle-store";
+
+const BayMap = lazy(() => import("@/components/bay-map").then((m) => ({ default: m.BayMap })));
 
 type Draft = {
   name: string;
@@ -195,26 +197,28 @@ export function ChargeScreen() {
         </p>
       </section>
 
-      <BayMap
-        markers={markers}
-        selectedId={draft ? "draft" : activeId}
-        onSelect={(id) => {
-          if (id === "draft") return;
-          setSelected(id);
-          setChargeAt(id);
-        }}
-        onDrop={draft ? (lat, lng) => setDraft({ ...draft, lat, lng, hits: [] }) : undefined}
-        dropping={!!draft}
-        hidden={!s.shareLocation}
-        focus={mapFocus}
-        caption={
-          draft
-            ? "Tap map to place the pin · circle is the catch radius"
-            : activeRank
-              ? `${activeRank.short} · ${formatCents(activeRank.usdPerKwh)} · ${activeRank.radiusM} m`
-              : `${ranks.length} locations`
-        }
-      />
+      <Suspense fallback={<div className="h-52 rounded-xl bg-surface shadow-[var(--shadow-border)]" />}>
+        <BayMap
+          markers={markers}
+          selectedId={draft ? "draft" : activeId}
+          onSelect={(id) => {
+            if (id === "draft") return;
+            setSelected(id);
+            setChargeAt(id);
+          }}
+          onDrop={draft ? (lat, lng) => setDraft({ ...draft, lat, lng, hits: [] }) : undefined}
+          dropping={!!draft}
+          hidden={!s.shareLocation}
+          focus={mapFocus}
+          caption={
+            draft
+              ? "Tap map to place the pin · circle is the catch radius"
+              : activeRank
+                ? `${activeRank.short} · ${formatCents(activeRank.usdPerKwh)} · ${activeRank.radiusM} m`
+                : `${ranks.length} locations`
+          }
+        />
+      </Suspense>
 
       <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
         <div className="flex items-center justify-between gap-3">

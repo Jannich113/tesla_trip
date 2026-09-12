@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import { ChevronDown, MapPinned } from "lucide-react";
 import { Link } from "@tanstack/react-router";
-import { BayMap, type MapMarker, type MapRoute } from "@/components/bay-map";
+import type { MapMarker, MapRoute } from "@/components/bay-map";
 import { PeriodPills } from "@/components/period-pills";
 import {
   type EnergyDay,
@@ -37,6 +37,8 @@ import {
   type TripAlbum,
 } from "@/store/trip-store";
 import { useVehicleStore } from "@/store/vehicle-store";
+
+const BayMap = lazy(() => import("@/components/bay-map").then((m) => ({ default: m.BayMap })));
 
 function routesFromTrips(trips: Trip[]): { routes: MapRoute[]; markers: MapMarker[]; keys: string[] } {
   const corridors = new Map<string, MapRoute>();
@@ -468,15 +470,17 @@ export function TripsScreen() {
         ) : null}
       </section>
 
-      <BayMap
-        markers={mapMarkers}
-        routes={mapRoutes}
-        selectedId={active}
-        selectedIds={selectedIds}
-        onSelect={selectOnMap}
-        caption={caption}
-        hidden={!shareLocation}
-      />
+      <Suspense fallback={<div className="h-52 rounded-xl bg-surface shadow-[var(--shadow-border)]" />}>
+        <BayMap
+          markers={mapMarkers}
+          routes={mapRoutes}
+          selectedId={active}
+          selectedIds={selectedIds}
+          onSelect={selectOnMap}
+          caption={caption}
+          hidden={!shareLocation}
+        />
+      </Suspense>
 
       <EnergyDays
         days={energyDays}

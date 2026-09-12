@@ -1,17 +1,37 @@
-import { useEffect, useState } from "react";
+import { lazy, startTransition, Suspense, useEffect, useState } from "react";
 import { toast, Toaster } from "sonner";
 import { Car, CircleDollarSign, House, RotateCw, Route, Zap } from "lucide-react";
 import { HomeScreen } from "@/components/home-screen";
-import { TripsScreen } from "@/components/trips-screen";
-import { ChargeScreen } from "@/components/charge-screen";
-import { VehicleScreen } from "@/components/vehicle-screen";
-import { ElprisScreen } from "@/components/elpris-screen";
 import { type Tab, VEHICLE } from "@/lib/vehicle";
 import { cn } from "@/lib/utils";
 import { useVehicleProfile } from "@/hooks/use-vehicle-profile";
 import { useChargeStore } from "@/store/charge-store";
 import { useTripStore } from "@/store/trip-store";
 import { useVehicleStore } from "@/store/vehicle-store";
+
+const TripsScreen = lazy(() =>
+  import("@/components/trips-screen").then((m) => ({ default: m.TripsScreen })),
+);
+const ChargeScreen = lazy(() =>
+  import("@/components/charge-screen").then((m) => ({ default: m.ChargeScreen })),
+);
+const ElprisScreen = lazy(() =>
+  import("@/components/elpris-screen").then((m) => ({ default: m.ElprisScreen })),
+);
+const VehicleScreen = lazy(() =>
+  import("@/components/vehicle-screen").then((m) => ({ default: m.VehicleScreen })),
+);
+
+const PRELOAD = [
+  () => import("@/components/trips-screen"),
+  () => import("@/components/charge-screen"),
+  () => import("@/components/elpris-screen"),
+  () => import("@/components/vehicle-screen"),
+];
+
+function TabFallback() {
+  return <div className="mx-4 mt-4 h-72 rounded-xl bg-surface" />;
+}
 
 const TABS: { id: Tab; label?: string; icon: typeof House }[] = [
   { id: "home", label: "Home", icon: House },
@@ -51,21 +71,37 @@ function writeTabToLocation(next: Tab) {
 
 export function Dashboard() {
   const [tab, setTab] = useState<Tab>("home");
+  const [active, setActive] = useState<Tab>("home");
   const wake = useVehicleStore((s) => s.wake);
   const waking = useVehicleStore((s) => s.waking);
   const tick = useVehicleStore((s) => s.tick);
   const { profile } = useVehicleProfile();
 
   const selectTab = (next: Tab) => {
-    setTab(next);
-    writeTabToLocation(next);
+    setActive(next);
+    startTransition(() => {
+      setTab(next);
+      writeTabToLocation(next);
+    });
   };
 
   useEffect(() => {
-    setTab(readTabFromLocation());
-    const onPop = () => setTab(readTabFromLocation());
+    const initial = readTabFromLocation();
+    setTab(initial);
+    setActive(initial);
+    const onPop = () => {
+      const next = readTabFromLocation();
+      setActive(next);
+      setTab(next);
+    };
     window.addEventListener("popstate", onPop);
-    return () => window.removeEventListener("popstate", onPop);
+    const warm = window.setTimeout(() => {
+      for (const load of PRELOAD) void load();
+    }, 0);
+    return () => {
+      window.removeEventListener("popstate", onPop);
+      window.clearTimeout(warm);
+    };
   }, []);
 
   useEffect(() => {
@@ -129,10 +165,14 @@ export function Dashboard() {
 
         <main className="flex-1 overflow-y-auto pb-32">
           {tab === "home" && <HomeScreen />}
-          {tab === "trips" && <TripsScreen />}
-          {tab === "costs" && <ChargeScreen />}
-          {tab === "elpris" && <ElprisScreen />}
-          {tab === "vehicle" && <VehicleScreen />}
+          {tab !== "home" ? (
+            <Suspense fallback={<TabFallback />}>
+              {tab === "trips" && <TripsScreen />}
+              {tab === "costs" && <ChargeScreen />}
+              {tab === "elpris" && <ElprisScreen />}
+              {tab === "vehicle" && <VehicleScreen />}
+            </Suspense>
+          ) : null}
         </main>
 
         <nav
@@ -142,7 +182,7 @@ export function Dashboard() {
           <ul className="grid grid-cols-5">
             {TABS.map((item) => {
               const Icon = item.icon;
-              const active = tab === item.id;
+              const current = active === item.id;
               const label = item.id === "vehicle" ? profile.name : item.label!;
               return (
                 <li key={item.id}>
@@ -159,12 +199,12 @@ export function Dashboard() {
                     className={cn(
                       "flex h-14 w-full touch-manipulation flex-col items-center justify-center gap-0.5 text-[10px] font-medium",
                       "transition-[color,scale] duration-150 ease-[var(--ease-out)] active:scale-[0.96]",
-                      active ? "text-foreground" : "text-muted",
+                      current ? "text-foreground" : "text-muted",
                     )}
-                    aria-current={active ? "page" : undefined}
+                    aria-current={current ? "page" : undefined}
                     aria-label={label}
                   >
-                    <Icon className="size-5" strokeWidth={active ? 2.2 : 1.8} />
+                    <Icon className="size-5" strokeWidth={current ? 2.2 : 1.8} />
                     <span className="max-w-full truncate px-0.5">{label}</span>
                   </button>
                 </li>
