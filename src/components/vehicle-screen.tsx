@@ -85,6 +85,7 @@ export function VehicleScreen() {
           alt={`${profile.year} ${profile.model} in ${profile.color}`}
           className="h-44 w-full object-cover object-[center_60%]"
           loading="lazy"
+          decoding="async"
         />
         <div className="space-y-1 px-5 py-4">
           <div className="flex items-center gap-2">

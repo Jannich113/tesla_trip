@@ -66,6 +66,7 @@ export function HomeScreen() {
         <img
           src={image}
           loading="eager"
+          decoding="async"
           alt={`${profile.year} ${profile.model} in ${profile.color}`}
           className={cn(
             "car-hero h-full w-full object-cover object-center transition-[opacity,filter] duration-500 ease-[var(--ease-out)]",
@@ -130,6 +131,9 @@ export function HomeScreen() {
         <Link
           to="/plan"
           onPointerEnter={() => {
+            void import("@/planner/plan-screen");
+          }}
+          onFocus={() => {
             void import("@/planner/plan-screen");
           }}
           className="flex items-center gap-3 rounded-xl bg-surface px-4 py-4 shadow-[var(--shadow-border)]"

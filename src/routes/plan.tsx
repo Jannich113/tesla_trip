@@ -1,9 +1,24 @@
+import { lazy, Suspense } from "react";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
 import { Toaster } from "sonner";
-import { PlanScreen } from "@/planner/plan-screen";
+
+const PlanScreen = lazy(() =>
+  import("@/planner/plan-screen").then((m) => ({ default: m.PlanScreen })),
+);
 
 export const Route = createFileRoute("/plan")({ component: PlanPage });
+
+function PlanFallback() {
+  return (
+    <div className="space-y-5 px-4 pb-6">
+      <div className="h-10 rounded-full bg-surface-2" />
+      <div className="h-44 rounded-xl bg-surface shadow-[var(--shadow-border)]" />
+      <div className="h-52 rounded-xl bg-surface shadow-[var(--shadow-border)]" />
+      <div className="h-40 rounded-xl bg-surface shadow-[var(--shadow-border)]" />
+    </div>
+  );
+}
 
 function PlanPage() {
   return (
@@ -23,7 +38,9 @@ function PlanPage() {
           </div>
         </header>
         <main className="flex-1 overflow-y-auto pb-8">
-          <PlanScreen />
+          <Suspense fallback={<PlanFallback />}>
+            <PlanScreen />
+          </Suspense>
         </main>
       </div>
       <Toaster
