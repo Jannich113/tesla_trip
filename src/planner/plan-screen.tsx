@@ -1350,40 +1350,25 @@ export function PlanScreen() {
                   at: asDateTime(legWhen[i - 1]?.at || legWhen[i - 1]?.hhmm || clock),
                 };
             return (
-              <li key={stop.id} className="relative flex items-start gap-3 py-2">
+              <li key={stop.id} className="relative flex items-center gap-3 py-1.5">
                 <span className="absolute bottom-0 left-[13px] top-8 w-px bg-border" aria-hidden />
-                <span className="relative z-[1] mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-surface-2 text-xs tabular-nums text-muted">
+                <span className="relative z-[1] flex size-7 shrink-0 items-center justify-center rounded-full bg-surface-2 text-xs tabular-nums text-muted">
                   {i + 1}
                 </span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <p className="min-w-0 flex-1 truncate text-sm">{stop.name}</p>
-                    <button
-                      type="button"
-                      onClick={() => removeStop(stop.id)}
-                      className="flex size-9 shrink-0 items-center justify-center rounded-full text-muted"
-                      aria-label={`Remove ${stop.name}`}
-                    >
-                      <Trash2 className="size-4" />
-                    </button>
-                  </div>
-                  <WhenFields
-                    kind={w.kind}
-                    at={w.at}
-                    onKind={(k) => {
-                      if (i === 0) setWhenKind(k);
-                      else setLegWhen(i - 1, { kind: k, hhmm: w.at, at: w.at });
-                    }}
-                    onAt={(dt) => {
-                      if (i === 0) {
-                        setWhen(dt);
-                        setWhenKind(w.kind);
-                      } else {
-                        setLegWhen(i - 1, { kind: w.kind, hhmm: dt, at: dt });
-                      }
-                    }}
-                  />
+                <div className="relative z-[1] flex min-w-0 flex-1 items-center gap-2 rounded-full bg-surface-2 px-3 h-11">
+                  <p className="min-w-0 truncate text-sm">{stop.name}</p>
+                  <p className="ml-auto shrink-0 text-xs tabular-nums text-muted">
+                    {w.kind === "arrive" ? "Arrive" : "Leave"} {formatDateTime(w.at)}
+                  </p>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => removeStop(stop.id)}
+                  className="relative z-[1] flex size-9 shrink-0 items-center justify-center rounded-full text-muted"
+                  aria-label={`Remove ${stop.name}`}
+                >
+                  <Trash2 className="size-4" />
+                </button>
               </li>
             );
           })}
