@@ -322,14 +322,14 @@ function BayMapImpl({
       prune(dotsRef.current, keepDots);
       prune(ringsRef.current, keepRings);
 
-      const focusKey = `${routes.map((r) => r.id).join(",")}:${selectedRoutes.map((r) => r.id).join(",")}`;
-      const fitPts =
-        selectedRoutes.length > 0
-          ? selectedRoutes.flatMap((r) => {
-              const raw = r.path && r.path.length >= 2 ? r.path : [r.from, r.to];
-              return [raw[0], raw[Math.floor(raw.length / 2)], raw[raw.length - 1]];
-            })
-          : pins.map((m) => [m.lat, m.lng] as [number, number]);
+      const focusKey = `${routes.map((r) => r.id).join(",")}:${routes.length}`;
+      const fitPts = routes.flatMap((r) => {
+        const raw = r.path && r.path.length >= 2 ? r.path : [r.from, r.to];
+        return [raw[0], raw[Math.floor(raw.length / 2)], raw[raw.length - 1]];
+      });
+      if (fitPts.length < 2) {
+        for (const m of pins) fitPts.push([m.lat, m.lng]);
+      }
       if (fitPts.length >= 2 && fitKeyRef.current !== focusKey) {
         fitKeyRef.current = focusKey;
         map.fitBounds(L.latLngBounds(fitPts), {

@@ -39,7 +39,7 @@ describe("leg modes", () => {
   it("eco avoids highways and tolls", () => {
     const c = costingFor("eco");
     assert.equal(c.shortest, false);
-    assert.equal(c.use_highways, 0);
+    assert.equal(c.use_highways, 0.25);
     assert.equal(c.use_tolls, 0);
   });
 

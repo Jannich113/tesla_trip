@@ -95,7 +95,7 @@ function routeKey(
   to: { lat: number; lng: number },
   mode: LegMode,
 ) {
-  return `${from.lat.toFixed(4)},${from.lng.toFixed(4)}|${to.lat.toFixed(4)},${to.lng.toFixed(4)}|${mode}|r3`;
+  return `${from.lat.toFixed(4)},${from.lng.toFixed(4)}|${to.lat.toFixed(4)},${to.lng.toFixed(4)}|${mode}|r4`;
 }
 
 const PATH_MODES: LegMode[] = ["eco", "fastest"];
@@ -455,6 +455,7 @@ export function PlanScreen() {
         seen.add(key);
         const hit = routeMap[key] ?? routeMap[routeKey(leg.from, leg.to, row.mode)];
         if (hit && hit.source !== "air" && hit.path.length >= 3) continue;
+        if (!leg.via && leg.route.path.length >= 8 && leg.route.miles > 80) continue;
         jobs.push({ from: leg.from, to: leg.to, mode: m, key });
       }
     }
@@ -462,7 +463,7 @@ export function PlanScreen() {
     void Promise.all(
       jobs.map(async (job) => {
         const route = await fetchRoute(job.from, job.to, job.mode);
-        if (!cancelled) setRouteCache({ [job.key]: route });
+        if (!cancelled && route.source !== "air" && route.path.length >= 3) setRouteCache({ [job.key]: route });
       }),
     );
     return () => {
@@ -682,10 +683,13 @@ export function PlanScreen() {
         ? row.legs.map((leg) => ({
             from: leg.from,
             to: leg.to,
-            path: (routeMap[routeKey(leg.from, leg.to, pathMode(mode, cheapAvoidFees))] ??
-              routeMap[routeKey(leg.from, leg.to, mode)] ??
-              leg.route
-            ).path,
+            path: (() => {
+              const live =
+                routeMap[routeKey(leg.from, leg.to, pathMode(mode, cheapAvoidFees))] ??
+                routeMap[routeKey(leg.from, leg.to, mode)];
+              if (live && live.source !== "air" && live.path.length >= 3) return live.path;
+              return leg.route.path;
+            })(),
           }))
         : stops.slice(0, -1).map((_, i) => {
             const hit =

@@ -366,7 +366,7 @@ export function costingFor(mode: LegMode): AutoCosting {
   if (mode === "eco") {
     return {
       shortest: false,
-      use_highways: 0,
+      use_highways: 0.25,
       use_tolls: 0,
       use_ferry: 0.2,
     };

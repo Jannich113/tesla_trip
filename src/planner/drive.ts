@@ -63,51 +63,60 @@ function anchored(path: [number, number][], from: Stop, to: Stop) {
 
 async function valhalla(from: Stop, to: Stop, mode: LegMode): Promise<DriveRouteJson | null> {
   const costing = costingFor(mode);
-  const res = await fetch("https://valhalla1.openstreetmap.de/route", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({
-      locations: [
-        { lat: from.lat, lon: from.lng },
-        { lat: to.lat, lon: to.lng },
-      ],
-      costing: "auto",
-      costing_options: { auto: costing },
-      directions_options: { units: "miles" },
-      shape_format: "polyline6",
-      alternates: 0,
-    }),
-  });
-  if (!res.ok) return null;
-  const body = (await res.json()) as {
-    trip?: {
-      summary?: { length?: number; time?: number; has_toll?: boolean };
-      legs?: Array<{ shape?: { coordinates?: [number, number][] } | string }>;
-    };
-    alternates?: Array<{
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 22_000);
+  try {
+    const res = await fetch("https://valhalla1.openstreetmap.de/route", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        locations: [
+          { lat: from.lat, lon: from.lng },
+          { lat: to.lat, lon: to.lng },
+        ],
+        costing: "auto",
+        costing_options: { auto: costing },
+        directions_options: { units: "miles" },
+        shape_format: "polyline6",
+        alternates: 0,
+      }),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as {
       trip?: {
         summary?: { length?: number; time?: number; has_toll?: boolean };
         legs?: Array<{ shape?: { coordinates?: [number, number][] } | string }>;
       };
-    }>;
-  };
-  const trips = [body.trip, ...(body.alternates ?? []).map((alt) => alt.trip)].filter(
-    (trip): trip is NonNullable<typeof trip> => Boolean(trip),
-  );
-  const trip = pickValhallaTrip(trips);
-  const summary = trip?.summary;
-  const path = pathFromShape(trip?.legs?.[0]?.shape);
-  if (!summary || path.length < 3) return null;
-  return withTolls(
-    {
-      miles: Number(summary.length) || 0,
-      seconds: Number(summary.time) || 0,
-      path: simplifyPath(path, 160),
-      source: "valhalla",
-    },
-    mode,
-    Boolean(summary.has_toll),
-  );
+      alternates?: Array<{
+        trip?: {
+          summary?: { length?: number; time?: number; has_toll?: boolean };
+          legs?: Array<{ shape?: { coordinates?: [number, number][] } | string }>;
+        };
+      }>;
+    };
+    const trips = [body.trip, ...(body.alternates ?? []).map((alt) => alt.trip)].filter(
+      (trip): trip is NonNullable<typeof trip> => Boolean(trip),
+    );
+    const trip = pickValhallaTrip(trips);
+    const summary = trip?.summary;
+    const path = pathFromShape(trip?.legs?.[0]?.shape);
+    if (!summary || path.length < 3) return null;
+    return withTolls(
+      {
+        miles: Number(summary.length) || 0,
+        seconds: Number(summary.time) || 0,
+        path: simplifyPath(path, 160),
+        source: "valhalla",
+      },
+      mode,
+      Boolean(summary.has_toll),
+    );
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 type OsrmRoute = {
@@ -127,38 +136,104 @@ async function osrm(from: Stop, to: Stop, extra = ""): Promise<DriveRouteJson | 
   const url =
     `https://router.project-osrm.org/route/v1/driving/` +
     `${from.lng},${from.lat};${to.lng},${to.lat}` +
-    `?overview=simplified&geometries=geojson&alternatives=true${extra}`;
-  const res = await fetch(url, { headers: { Accept: "application/json" } });
-  if (!res.ok) return null;
-  const body = (await res.json()) as { routes?: OsrmRoute[] };
-  const route = pickOsrm(body.routes ?? []);
-  const path: [number, number][] = [];
-  for (const pt of route?.geometry?.coordinates ?? []) {
-    const [lng, lat] = pt;
-    if (Number.isFinite(lat) && Number.isFinite(lng)) path.push([lat, lng]);
+    `?overview=full&geometries=geojson${extra}`;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 25_000);
+  try {
+    const res = await fetch(url, { headers: { Accept: "application/json" }, signal: ctrl.signal });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { routes?: OsrmRoute[]; code?: string };
+    if (body.code && body.code !== "Ok") return null;
+    const route = pickOsrm(body.routes ?? []);
+    const path: [number, number][] = [];
+    for (const pt of route?.geometry?.coordinates ?? []) {
+      const [lng, lat] = pt;
+      if (Number.isFinite(lat) && Number.isFinite(lng)) path.push([lat, lng]);
+    }
+    if (!route || path.length < 3) return null;
+    return withTolls(
+      {
+        miles: (Number(route.distance) || 0) / 1609.344,
+        seconds: Number(route.duration) || 0,
+        path: simplifyPath(path, 220),
+        source: "osrm",
+      },
+      extra.includes("motorway") || extra.includes("toll") ? "eco" : "fastest",
+      false,
+    );
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
   }
-  if (!route || path.length < 3) return null;
+}
+
+function hopStops(from: Stop, to: Stop, maxKm = 900): Stop[] {
+  const km = haversineM(from, to) / 1000;
+  const n = Math.max(1, Math.ceil(km / maxKm));
+  if (n <= 1) return [from, to];
+  const out: Stop[] = [from];
+  for (let i = 1; i < n; i++) {
+    const t = i / n;
+    out.push({ lat: from.lat + (to.lat - from.lat) * t, lng: from.lng + (to.lng - from.lng) * t });
+  }
+  out.push(to);
+  return out;
+}
+
+function stitch(parts: DriveRouteJson[], mode: LegMode): DriveRouteJson | null {
+  const ok = parts.filter((p) => p.path.length >= 2 && p.miles > 0);
+  if (!ok.length) return null;
+  const path: [number, number][] = [];
+  for (const part of ok) {
+    for (const pt of part.path) {
+      const last = path[path.length - 1];
+      if (last && Math.abs(last[0] - pt[0]) < 1e-5 && Math.abs(last[1] - pt[1]) < 1e-5) continue;
+      path.push(pt);
+    }
+  }
+  if (path.length < 3) return null;
   return withTolls(
     {
-      miles: (Number(route.distance) || 0) / 1609.344,
-      seconds: Number(route.duration) || 0,
-      path: simplifyPath(path, 160),
-      source: "osrm",
+      miles: ok.reduce((n, p) => n + p.miles, 0),
+      seconds: ok.reduce((n, p) => n + p.seconds, 0),
+      path: simplifyPath(path, 220),
+      source: ok.some((p) => p.source === "osrm") ? "osrm" : "valhalla",
     },
-    extra.includes("motorway") ? "eco" : extra.includes("toll") ? "eco" : "fastest",
-    false,
+    mode,
+    ok.some((p) => p.hasToll),
   );
 }
 
-async function highway(from: Stop, to: Stop): Promise<DriveRouteJson | null> {
+async function hop(from: Stop, to: Stop, mode: LegMode): Promise<DriveRouteJson | null> {
+  if (mode === "eco") {
+    const [v, o] = await Promise.all([
+      valhalla(from, to, "eco").catch(() => null),
+      osrm(from, to).catch(() => null),
+    ]);
+    const quiet = [v, o].filter((r): r is DriveRouteJson => Boolean(r && okRoute(r, from, to)));
+    return pickEcoRoute(o && okRoute(o, from, to) ? o : null, quiet.filter((r) => r.source === "valhalla")) ?? (o && okRoute(o, from, to) ? o : v);
+  }
   const [v, o] = await Promise.all([
     valhalla(from, to, "fastest").catch(() => null),
     osrm(from, to).catch(() => null),
   ]);
   return pickRouted(
     "fastest",
-    [v, o].filter((r): r is DriveRouteJson => Boolean(r && anchored(r.path, from, to))),
+    [v, o].filter((r): r is DriveRouteJson => Boolean(r && okRoute(r, from, to))),
   );
+}
+
+async function routeChunked(from: Stop, to: Stop, mode: LegMode): Promise<DriveRouteJson | null> {
+  const stops = hopStops(from, to, 900);
+  if (stops.length === 2) return hop(from, to, mode);
+  const parts: DriveRouteJson[] = [];
+  for (let i = 0; i < stops.length - 1; i++) {
+    const piece = await hop(stops[i], stops[i + 1], mode);
+    if (!piece) return null;
+    parts.push(piece);
+  }
+  return stitch(parts, mode);
 }
 
 function okRoute(route: DriveRouteJson | null, from: Stop, to: Stop) {
@@ -166,19 +241,19 @@ function okRoute(route: DriveRouteJson | null, from: Stop, to: Stop) {
 }
 
 export async function routeDrive(from: Stop, to: Stop, mode: LegMode): Promise<DriveRouteJson | null> {
+  const km = haversineM(from, to) / 1000;
+  if (km > 1300) {
+    const long = await routeChunked(from, to, mode === "cheapest" ? "fastest" : mode);
+    if (long) return withTolls(long, mode, Boolean(long.hasToll));
+  }
   if (mode === "fastest" || mode === "cheapest") {
-    const base = await highway(from, to);
+    const base = await hop(from, to, "fastest");
     return base ? withTolls(base, mode, Boolean(base.hasToll)) : null;
   }
-  const [fast, noHwy, noToll, ecoV] = await Promise.all([
-    highway(from, to).catch(() => null),
-    osrm(from, to, "&exclude=motorway,toll").catch(() => null),
-    osrm(from, to, "&exclude=toll").catch(() => null),
-    valhalla(from, to, "eco").catch(() => null),
-  ]);
-  const quiet = [noHwy, noToll, ecoV].filter((r): r is DriveRouteJson => Boolean(r && okRoute(r, from, to)));
-  const picked = pickEcoRoute(fast && okRoute(fast, from, to) ? fast : null, quiet);
-  return picked ? withTolls(picked, "eco", Boolean(picked.hasToll)) : null;
+  const picked = await hop(from, to, "eco");
+  if (picked) return withTolls(picked, "eco", Boolean(picked.hasToll));
+  const fallback = await hop(from, to, "fastest");
+  return fallback ? withTolls(fallback, "eco", Boolean(fallback.hasToll)) : null;
 }
 
 function parsePoint(raw: string | null): Stop | null {
