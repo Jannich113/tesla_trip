@@ -241,19 +241,21 @@ function okRoute(route: DriveRouteJson | null, from: Stop, to: Stop) {
 }
 
 export async function routeDrive(from: Stop, to: Stop, mode: LegMode): Promise<DriveRouteJson | null> {
-  const km = haversineM(from, to) / 1000;
-  if (km > 1300) {
-    const long = await routeChunked(from, to, mode === "cheapest" ? "fastest" : mode);
-    if (long) return withTolls(long, mode, Boolean(long.hasToll));
-  }
   if (mode === "fastest" || mode === "cheapest") {
+    const os = await osrm(from, to).catch(() => null);
+    if (os && okRoute(os, from, to)) return withTolls(os, mode, Boolean(os.hasToll));
     const base = await hop(from, to, "fastest");
     return base ? withTolls(base, mode, Boolean(base.hasToll)) : null;
   }
+  const km = haversineM(from, to) / 1000;
+  if (km > 1300) {
+    const long = await routeChunked(from, to, "eco");
+    if (long) return withTolls(long, "eco", Boolean(long.hasToll));
+  }
   const picked = await hop(from, to, "eco");
   if (picked) return withTolls(picked, "eco", Boolean(picked.hasToll));
-  const fallback = await hop(from, to, "fastest");
-  return fallback ? withTolls(fallback, "eco", Boolean(fallback.hasToll)) : null;
+  const fallback = await osrm(from, to).catch(() => null);
+  return fallback && okRoute(fallback, from, to) ? withTolls(fallback, "eco", Boolean(fallback.hasToll)) : null;
 }
 
 function parsePoint(raw: string | null): Stop | null {

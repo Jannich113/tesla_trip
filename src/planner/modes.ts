@@ -25,6 +25,8 @@ export type AutoCosting = {
   use_highways: number;
   use_tolls: number;
   use_ferry: number;
+  use_tracks?: number;
+  use_living_streets?: number;
   top_speed?: number;
 };
 
@@ -375,7 +377,9 @@ export function costingFor(mode: LegMode): AutoCosting {
     shortest: false,
     use_highways: 1,
     use_tolls: 1,
-    use_ferry: 0.2,
-    top_speed: 140,
+    use_ferry: 0.1,
+    use_tracks: 0,
+    use_living_streets: 0,
+    top_speed: 130,
   };
 }
