@@ -117,6 +117,15 @@ function CheapAvoidToggles({ className }: { className?: string }) {
   );
 }
 
+function locationsForRoutes(all: ChargeLocation[], routes: RoutedLeg[], maxM = 55_000) {
+  const paths = routes.map((r) => r.path).filter((p) => p.length >= 2);
+  if (!paths.length) return all;
+  return all.filter((l) => {
+    if (l.kind === "home" || !l.preset) return true;
+    return paths.some((p) => minDistToPathM(l.lat, l.lng, p) < maxM);
+  });
+}
+
 function routeKey(
   from: { lat: number; lng: number },
   to: { lat: number; lng: number },
@@ -240,6 +249,8 @@ export function PlanScreen() {
       const patch: Record<string, RoutedLeg> = {};
       await Promise.all(
         jobs.map(async (job) => {
+          const hit = routeMap[job.key];
+          if (hit && hit.source !== "air" && hit.path.length >= 3) return;
           const route = await fetchRoute(job.from, job.to, job.mode);
           if (cancelled) return;
           patch[job.key] = route;
@@ -302,16 +313,16 @@ export function PlanScreen() {
         .slice(0, -1)
         .map((_, i) => {
           const m = activeModes[i] ?? "fastest";
-          return routeMap[routeKey(stops[i], stops[i + 1], pathMode(m, cheapAvoid))];
+          return routeMap[routeKey(stops[i], stops[i + 1], pathMode(m, m === "cheapest" ? cheapAvoid : false))];
         })
         .filter((r): r is RoutedLeg => Boolean(r))
-    : routesFor(pathMode(activeModes[0] ?? "fastest", cheapAvoid));
+    : routesFor(pathMode(activeModes[0] ?? "fastest", activeModes[0] === "cheapest" ? cheapAvoid : false));
 
   const searchRoutes = useMemo(() => {
     const all: RoutedLeg[] = [];
     const seen = new Set<string>();
     for (const mode of LEG_MODES) {
-      const pathM = pathMode(mode, cheapAvoid);
+      const pathM = pathMode(mode, mode === "cheapest" ? cheapAvoid : false);
       for (const r of routesFor(pathM)) {
         const a = r.path[0];
         const b = r.path.at(-1);
@@ -442,7 +453,8 @@ export function PlanScreen() {
 
   const optionRows = useMemo(() => {
     return LEG_MODES.map((mode) => {
-      const optionRoutes = routesFor(pathMode(mode, cheapAvoid));
+      const avoid = mode === "cheapest" ? cheapAvoid : { motorways: false, tolls: false, roadFees: false };
+      const optionRoutes = routesFor(pathMode(mode, avoid));
       if (optionRoutes.length !== Math.max(0, stops.length - 1) || stops.length < 2) {
         return { mode, totals: null as ReturnType<typeof planTotals> | null, kmh: 0, kwhPerMi: 0, legs: [] as PricedLeg[] };
       }
@@ -452,13 +464,17 @@ export function PlanScreen() {
         focuses: stops.slice(1).map(() => (mode === "cheapest" ? "pris" : mode === "eco" ? "distance" : "time")),
         detours: planArgs.detours.map((d) => (mode === "cheapest" ? 15 : d)),
         routes: optionRoutes,
+        locations: locationsForRoutes(locations, optionRoutes),
+        avoid,
       });
       const legs = applyLiveRoutes(
         priced,
-        (from, to, m) =>
-          routeMap[routeKey(from, to, pathMode(m, cheapAvoid))] ?? routeMap[routeKey(from, to, m)],
+        (from, to, m) => {
+          const pathM = pathMode(m, m === "cheapest" ? cheapAvoid : false);
+          return routeMap[routeKey(from, to, pathM)] ?? routeMap[routeKey(from, to, m)];
+        },
         speedEff,
-        cheapAvoid,
+        avoid,
       );
       const miles = legs.reduce((n, l) => n + l.route.miles, 0);
       const seconds = legs.reduce((n, l) => n + l.route.seconds, 0);
@@ -490,7 +506,7 @@ export function PlanScreen() {
     const jobs: { from: PlanStop; to: PlanStop; mode: LegMode; key: string }[] = [];
     const seen = new Set<string>();
     for (const row of optionRows) {
-      const m = pathMode(row.mode, cheapAvoid);
+      const m = pathMode(row.mode, row.mode === "cheapest" ? cheapAvoid : false);
       for (const leg of row.legs) {
         const key = routeKey(leg.from, leg.to, m);
         if (seen.has(key)) continue;
@@ -730,7 +746,7 @@ export function PlanScreen() {
       if (row?.legs.length) {
         for (const leg of row.legs) {
           const live =
-            routeMap[routeKey(leg.from, leg.to, pathMode(mode, cheapAvoid))] ??
+            routeMap[routeKey(leg.from, leg.to, pathMode(mode, mode === "cheapest" ? cheapAvoid : false))] ??
             routeMap[routeKey(leg.from, leg.to, mode)];
           const path =
             live && live.source !== "air" && live.path.length >= 3 ? live.path : leg.route.path;
@@ -739,10 +755,10 @@ export function PlanScreen() {
       }
       if (!pieces.length) {
         const hit =
-          routeMap[routeKey(stops[0], stops[stops.length - 1], pathMode(mode, cheapAvoid))] ??
+          routeMap[routeKey(stops[0], stops[stops.length - 1], pathMode(mode, mode === "cheapest" ? cheapAvoid : false))] ??
           routeMap[routeKey(stops[0], stops[stops.length - 1], mode)] ??
           (stops.length >= 2
-            ? routeMap[routeKey(stops[0], stops[1], pathMode(mode, cheapAvoid))]
+            ? routeMap[routeKey(stops[0], stops[1], pathMode(mode, mode === "cheapest" ? cheapAvoid : false))]
             : undefined);
         if (hit?.path.length) pieces.push(hit.path);
         else {
