@@ -1,6 +1,5 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
-import { geo } from "@/lib/places";
 import { primeRouteCache, canonRouteKey, type LegMode, type LegWhen, type PlanStop, type RoutedLeg } from "./engine";
 import { DEFAULT_DETOUR_KM, DEFAULT_WAIT_MIN, kwhPerMiFrom100km, normalizeMode, type SpeedEff } from "./modes";
 import { simplifyPath } from "./polyline";
@@ -140,9 +139,8 @@ function safeStorage(): {
   };
 }
 
-function homeStop(): PlanStop {
-  const g = geo("Home") ?? { lat: 37.3852, lng: -122.1141, short: "Home" };
-  return { id: "home", name: "Home", lat: g.lat, lng: g.lng };
+function lonelyHome(stops?: PlanStop[] | null) {
+  return !!stops && stops.length === 1 && (stops[0].id === "home" || stops[0].name === "Home");
 }
 
 function uid(prefix: string) {
@@ -211,7 +209,7 @@ function readDraft(): Partial<PlanState> {
     primeRouteCache(routeCache);
     return {
       name: s.name,
-      stops: Array.isArray(s.stops) && s.stops.length ? s.stops : undefined,
+      stops: Array.isArray(s.stops) && s.stops.length && !lonelyHome(s.stops) ? s.stops : undefined,
       modes: s.modes,
       cheapAvoidMotorways: s.cheapAvoidMotorways,
       cheapAvoidTolls: s.cheapAvoidTolls,
@@ -236,7 +234,7 @@ function readDraft(): Partial<PlanState> {
 
 const empty = (): PlanState => ({
   name: "",
-  stops: [homeStop()],
+  stops: [],
   modes: [],
   cheapAvoidMotorways: false,
   cheapAvoidTolls: false,
@@ -476,7 +474,7 @@ export const usePlanStore = create<PlanStore>()(
     }),
     {
       name: "juniper-planner-draft",
-      version: 2,
+      version: 3,
       storage: createJSONStorage(() => safeStorage()),
       skipHydration: true,
       migrate: (persisted, version) => {
@@ -486,6 +484,16 @@ export const usePlanStore = create<PlanStore>()(
           p.cheapAvoidMotorways = p.cheapAvoidMotorways ?? old;
           p.cheapAvoidTolls = p.cheapAvoidTolls ?? old;
           p.cheapAvoidRoadFees = p.cheapAvoidRoadFees ?? old;
+        }
+        if (version < 3 && lonelyHome(p.stops)) {
+          p.stops = [];
+          p.modes = [];
+          p.detours = [];
+          p.waits = [];
+          p.legWhen = [];
+          p.lastOptions = null;
+          p.routeCache = {};
+          if (!p.name || p.name === "Home") p.name = "";
         }
         return p;
       },
@@ -514,6 +522,16 @@ export const usePlanStore = create<PlanStore>()(
       }),
       onRehydrateStorage: () => (state) => {
         if (!state) return;
+        if (lonelyHome(state.stops)) {
+          state.stops = [];
+          state.modes = [];
+          state.detours = [];
+          state.waits = [];
+          state.legWhen = [];
+          state.lastOptions = null;
+          state.routeCache = {};
+          if (!state.name || state.name === "Home") state.name = "";
+        }
         state.routeCache = slimRoutes(state.routeCache) ?? {};
         primeRouteCache(state.routeCache);
         for (const plan of state.saved ?? []) {
