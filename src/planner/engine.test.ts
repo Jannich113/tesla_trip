@@ -532,7 +532,7 @@ describe("leg modes", () => {
     const vias: string[] = [];
     for (let d = 0; d < 12; d++) {
       const kwh = driveKwhAtSpeed(route.miles, route.seconds, eff);
-      const pack = soc < 25 ? 70 : soc;
+      const pack = soc < 25 ? 80 : soc;
       const floorKwh = Math.max(4, ((pack - 8) / 100) * 75);
       if (kwh <= floorKwh * 0.98) break;
       const via = pickViaAtRange({
@@ -552,7 +552,7 @@ describe("leg modes", () => {
       vias.push(via.id);
       const usedKwh = driveKwhAtSpeed(split.before.miles, split.before.seconds, eff);
       soc = Math.max(15, soc - (usedKwh / 75) * 100);
-      soc = 70;
+      soc = 80;
       route = split.after;
     }
     assert.ok(vias.length >= 4, `vias ${vias.length}`);

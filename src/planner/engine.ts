@@ -167,7 +167,7 @@ const REQUIRE_SOC = 25;
 /** Optional stop only in this band, and only when the kWh price is good. */
 const SUGGEST_SOC_MIN = 26;
 const SUGGEST_SOC_MAX = 45;
-const TARGET_SOC = 70;
+const TARGET_SOC = 80;
 /** Every charge session adds at least this much SOC. */
 const MIN_ADD_SOC = 20;
 const CHEAP_VS_LIVE = 0.85;
