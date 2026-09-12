@@ -264,13 +264,16 @@ export function pickViaAtRange(opts: Parameters<typeof pickViaOnPath>[0]): ViaLo
   const frac = Math.min(0.82, Math.max(0.08, targetKwh / Math.max(opts.totalKwh, 1)));
   const [lat, lng] = pointAlongPath(opts.path, frac);
   const exclude = new Set(opts.excludeIds ?? []);
-  const pris = opts.mode === "cheapest" || (opts.focus ?? defaultFocus(opts.mode)) === "pris";
+  const focus = opts.focus ?? defaultFocus(opts.mode);
+  const pris = opts.mode === "cheapest" || focus === "pris";
   const memberships = opts.memberships ?? {};
   const locRate = (loc: ViaLoc) => {
     const netId = networkIdFor(loc.kind, loc.networkId);
     return (netId ? rateForNetwork(netId, Boolean(memberships[netId])) : null) ?? loc.usdPerKwh * 6.85;
   };
-  const band = pris ? CHEAP_STALL_KM * 1000 : 80_000;
+  const band = pris
+    ? CHEAP_STALL_KM * 1000
+    : Math.max(chargeSearchKm(opts.mode, opts.detourKm, focus) * 1000, 18_000);
   const pool = locationsNearPath(opts.locations, opts.path, band);
   let best: ViaLoc | null = null;
   let bestScore = Infinity;

@@ -224,13 +224,12 @@ async function fastestPool(from: Stop, to: Stop): Promise<DriveRouteJson[]> {
     const os = await osrm(from, to).catch(() => null);
     return os && okRoute(os, from, to) ? [os] : [];
   }
-  const [alts, plain, val, skip] = await Promise.all([
+  const [alts, plain, val] = await Promise.all([
     osrmRoutes(from, to, "&alternatives=true").catch(() => []),
     osrmRoutes(from, to).catch(() => []),
     valhalla(from, to, "fastest").catch(() => null),
-    osrmRoutes(from, to, "&exclude=toll").catch(() => []),
   ]);
-  const list = [...alts, ...plain, val, ...skip].filter((r): r is DriveRouteJson =>
+  const list = [...alts, ...plain, val].filter((r): r is DriveRouteJson =>
     Boolean(r && okRoute(r, from, to)),
   );
   return list;

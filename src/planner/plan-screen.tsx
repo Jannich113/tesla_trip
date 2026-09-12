@@ -117,13 +117,18 @@ function CheapAvoidToggles({ className }: { className?: string }) {
   );
 }
 
-function locationsForRoutes(all: ChargeLocation[], routes: RoutedLeg[], maxM = 55_000) {
+function locationsForRoutes(all: ChargeLocation[], routes: RoutedLeg[], maxM = 22_000) {
   const paths = routes.map((r) => r.path).filter((p) => p.length >= 2);
-  if (!paths.length) return all;
-  return all.filter((l) => {
-    if (l.kind === "home" || !l.preset) return true;
-    return paths.some((p) => minDistToPathM(l.lat, l.lng, p) < maxM);
-  });
+  if (!paths.length) return all.filter((l) => l.kind === "home");
+  const near = new Map<string, ChargeLocation>();
+  for (const l of all) {
+    if (l.kind === "home") {
+      near.set(l.id, l);
+      continue;
+    }
+    if (paths.some((p) => minDistToPathM(l.lat, l.lng, p) < maxM)) near.set(l.id, l);
+  }
+  return [...near.values()];
 }
 
 function routeKey(
@@ -131,7 +136,7 @@ function routeKey(
   to: { lat: number; lng: number },
   mode: LegMode,
 ) {
-  return `${from.lat.toFixed(4)},${from.lng.toFixed(4)}|${to.lat.toFixed(4)},${to.lng.toFixed(4)}|${mode}|r6`;
+  return `${from.lat.toFixed(4)},${from.lng.toFixed(4)}|${to.lat.toFixed(4)},${to.lng.toFixed(4)}|${mode}|r7`;
 }
 
 export function PlanScreen() {
@@ -166,11 +171,7 @@ export function PlanScreen() {
     () => ({ motorways: cheapAvoidMotorways, tolls: cheapAvoidTolls, roadFees: cheapAvoidRoadFees }),
     [cheapAvoidMotorways, cheapAvoidTolls, cheapAvoidRoadFees],
   );
-  const pathModes = useMemo<LegMode[]>(() => {
-    const list: LegMode[] = ["eco", "fastest"];
-    if (cheapAvoid.tolls || cheapAvoid.roadFees) list.push("cheapest");
-    return list;
-  }, [cheapAvoid]);
+  const pathModes = useMemo<LegMode[]>(() => ["eco", "fastest", "cheapest"], []);
   const whenKind = usePlanStore((s) => s.whenKind);
   const when = usePlanStore((s) => s.when);
   const legWhen = usePlanStore((s) => s.legWhen);
