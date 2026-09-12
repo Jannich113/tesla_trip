@@ -2,7 +2,7 @@ import { costingFor, type LegMode } from "./modes";
 import { estimateTolls } from "./tolls";
 import { decodePolyline, simplifyPath } from "./polyline";
 import { haversineM } from "./insert";
-import { pickRouted } from "./pick-route";
+import { pickEcoRoute, pickRouted } from "./pick-route";
 import { noStore, publicCache } from "@/lib/http-cache";
 
 type Stop = { lat: number; lng: number };
@@ -127,7 +127,7 @@ async function osrm(from: Stop, to: Stop, extra = ""): Promise<DriveRouteJson | 
   const url =
     `https://router.project-osrm.org/route/v1/driving/` +
     `${from.lng},${from.lat};${to.lng},${to.lat}` +
-    `?overview=simplified&geometries=geojson&alternatives=false${extra}`;
+    `?overview=simplified&geometries=geojson&alternatives=true${extra}`;
   const res = await fetch(url, { headers: { Accept: "application/json" } });
   if (!res.ok) return null;
   const body = (await res.json()) as { routes?: OsrmRoute[] };
@@ -170,15 +170,15 @@ export async function routeDrive(from: Stop, to: Stop, mode: LegMode): Promise<D
     const base = await highway(from, to);
     return base ? withTolls(base, mode, Boolean(base.hasToll)) : null;
   }
-  const [noHwy, noToll, ecoV] = await Promise.all([
+  const [fast, noHwy, noToll, ecoV] = await Promise.all([
+    highway(from, to).catch(() => null),
     osrm(from, to, "&exclude=motorway,toll").catch(() => null),
     osrm(from, to, "&exclude=toll").catch(() => null),
     valhalla(from, to, "eco").catch(() => null),
   ]);
-  if (okRoute(noHwy, from, to)) return withTolls(noHwy!, "eco", Boolean(noHwy!.hasToll));
-  if (okRoute(noToll, from, to)) return withTolls(noToll!, "eco", Boolean(noToll!.hasToll));
-  if (okRoute(ecoV, from, to)) return withTolls(ecoV!, "eco", Boolean(ecoV!.hasToll));
-  return null;
+  const quiet = [noHwy, noToll, ecoV].filter((r): r is DriveRouteJson => Boolean(r && okRoute(r, from, to)));
+  const picked = pickEcoRoute(fast && okRoute(fast, from, to) ? fast : null, quiet);
+  return picked ? withTolls(picked, "eco", Boolean(picked.hasToll)) : null;
 }
 
 function parsePoint(raw: string | null): Stop | null {

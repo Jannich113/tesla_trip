@@ -26,7 +26,7 @@ import {
   timePenalized,
 } from "./modes.ts";
 import { rateForNetwork, networkIdFor, roamExtra, EU_NETWORKS, EU_REGIONS, regionalOwn, regionalRoam } from "./networks.ts";
-import { pickRouted } from "./pick-route.ts";
+import { pickEcoRoute, pickRouted } from "./pick-route.ts";
 import { alongFraction, pickViaOnPath, splitRoutedLeg } from "./insert.ts";
 import { networkFromOsmTags, isDcStation, networkFromOperator } from "./osm-operator.ts";
 import { estimateTolls, gatesOnPath } from "./tolls.ts";
@@ -423,6 +423,15 @@ describe("leg modes", () => {
     assert.equal(pickRouted("fastest", [highway, quiet])?.seconds, highway.seconds);
     assert.equal(pickRouted("eco", [highway, quiet])?.tollKr, 0);
     assert.equal(pickRouted("cheapest", [highway, quiet])?.seconds, highway.seconds);
+  });
+
+  it("eco drops a quiet road that is 2× slower than Fastest", () => {
+    const path = Array.from({ length: 12 }, (_, i) => [48.8 - i * 0.5, 2.3 + i * 0.8] as [number, number]);
+    const highway = { miles: 890, seconds: 15 * 3600, path, source: "valhalla", tollKr: 400 };
+    const crawl = { miles: 1100, seconds: 34 * 3600, path, source: "osrm", tollKr: 0 };
+    const reasonable = { miles: 980, seconds: 18 * 3600, path, source: "osrm", tollKr: 0 };
+    assert.equal(pickEcoRoute(highway, [crawl])?.seconds, highway.seconds);
+    assert.equal(pickEcoRoute(highway, [crawl, reasonable])?.seconds, reasonable.seconds);
   });
 
   it("finds a via on the Paris–Rome corridor for every mode", () => {
