@@ -29,45 +29,69 @@ export function haversineM(a: { lat: number; lng: number }, b: { lat: number; ln
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
 }
 
+/** Equirectangular meters — enough to rank chargers vs a path. */
+function approxM(lat: number, lng: number, plat: number, plng: number) {
+  const dLat = plat - lat;
+  const dLng = (plng - lng) * Math.cos((lat * Math.PI) / 180);
+  return Math.hypot(dLat, dLng) * 111_320;
+}
+
+const cumCache = new WeakMap<[number, number][], number[]>();
+
+function cumMeters(path: [number, number][]) {
+  const hit = cumCache.get(path);
+  if (hit) return hit;
+  const cum = [0];
+  for (let i = 1; i < path.length; i++) {
+    cum.push(cum[i - 1] + approxM(path[i - 1][0], path[i - 1][1], path[i][0], path[i][1]));
+  }
+  cumCache.set(path, cum);
+  return cum;
+}
+
+function sampleStep(path: [number, number][]) {
+  return Math.max(1, Math.floor(path.length / 48));
+}
+
 export function minDistToPathM(lat: number, lng: number, path: [number, number][]) {
   if (path.length === 0) return Infinity;
-  const step = Math.max(1, Math.floor(path.length / 40));
+  const step = sampleStep(path);
   let best = Infinity;
   for (let i = 0; i < path.length; i += step) {
-    const d = haversineM({ lat, lng }, { lat: path[i][0], lng: path[i][1] });
+    const d = approxM(lat, lng, path[i][0], path[i][1]);
     if (d < best) best = d;
   }
   const last = path[path.length - 1];
-  best = Math.min(best, haversineM({ lat, lng }, { lat: last[0], lng: last[1] }));
-  return best;
+  return Math.min(best, approxM(lat, lng, last[0], last[1]));
 }
 
 export function pathMeters(path: [number, number][]) {
-  let n = 0;
-  for (let i = 1; i < path.length; i++) {
-    n += haversineM({ lat: path[i - 1][0], lng: path[i - 1][1] }, { lat: path[i][0], lng: path[i][1] });
-  }
-  return n;
+  const cum = cumMeters(path);
+  return cum[cum.length - 1] ?? 0;
 }
 
 export function closestPathIndex(path: [number, number][], lat: number, lng: number) {
   let best = 0;
   let bestD = Infinity;
-  for (let i = 0; i < path.length; i++) {
-    const d = haversineM({ lat, lng }, { lat: path[i][0], lng: path[i][1] });
+  const step = sampleStep(path);
+  for (let i = 0; i < path.length; i += step) {
+    const d = approxM(lat, lng, path[i][0], path[i][1]);
     if (d < bestD) {
       bestD = d;
       best = i;
     }
   }
+  const last = path.length - 1;
+  if (last > 0 && approxM(lat, lng, path[last][0], path[last][1]) < bestD) return last;
   return best;
 }
 
 export function alongFraction(path: [number, number][], lat: number, lng: number) {
-  const total = pathMeters(path);
+  const cum = cumMeters(path);
+  const total = cum[cum.length - 1] ?? 0;
   if (total <= 0) return 0;
   const idx = closestPathIndex(path, lat, lng);
-  return pathMeters(path.slice(0, idx + 1)) / total;
+  return cum[idx] / total;
 }
 
 export function pointAlongPath(path: [number, number][], frac: number): [number, number] {
