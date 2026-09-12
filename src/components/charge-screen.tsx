@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { BatteryBar } from "@/components/battery-bar";
 import type { MapMarker } from "@/components/bay-map";
@@ -7,7 +7,6 @@ import { HOME_LOCATION_ID, clampRadius, defaultRadius } from "@/lib/charge-locat
 import { searchAddress, type AddressHit } from "@/lib/geocode";
 import {
   type Period,
-  emptyChargeTotals,
   formatCents,
   formatDayLabel,
   formatUsd,
@@ -47,24 +46,10 @@ export function ChargeScreen() {
   const [selected, setSelected] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [mapFocus, setMapFocus] = useState<{ lat: number; lng: number; zoom?: number } | null>(null);
-  const [live, setLive] = useState(false);
-  useEffect(() => {
-    const id = requestAnimationFrame(() => setLive(true));
-    return () => cancelAnimationFrame(id);
-  }, []);
   const today = useMemo(() => laDayString(), []);
-  const totals = useMemo(
-    () => (live ? totalsFor(locations, logged, period, today) : emptyChargeTotals()),
-    [live, locations, logged, period, today],
-  );
-  const driven = useMemo(
-    () => (live ? tripTotals(period, today) : { count: 0, mi: 0, kwh: 0, min: 0 }),
-    [live, period, today],
-  );
-  const ranks = useMemo(
-    () => (live ? ranksFor(locations, logged, period, today) : []),
-    [live, locations, logged, period, today],
-  );
+  const totals = useMemo(() => totalsFor(locations, logged, period, today), [locations, logged, period, today]);
+  const driven = useMemo(() => tripTotals(period, today), [period, today]);
+  const ranks = useMemo(() => ranksFor(locations, logged, period, today), [locations, logged, period, today]);
   const blended = totals.kwh > 0 ? totals.usd / totals.kwh : 0;
   const remaining = Math.max(0, s.chargeLimit - s.soc);
   const minutes =

@@ -1,94 +1,17 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { toast, Toaster } from "sonner";
 import { Car, CircleDollarSign, House, RotateCw, Route, Zap } from "lucide-react";
 import { HomeScreen } from "@/components/home-screen";
+import { TripsScreen } from "@/components/trips-screen";
+import { ChargeScreen } from "@/components/charge-screen";
+import { ElprisScreen } from "@/components/elpris-screen";
+import { VehicleScreen } from "@/components/vehicle-screen";
 import { type Tab, VEHICLE } from "@/lib/vehicle";
 import { cn } from "@/lib/utils";
 import { useVehicleProfile } from "@/hooks/use-vehicle-profile";
 import { useVehicleStore } from "@/store/vehicle-store";
-
-const TripsScreen = lazy(() =>
-  import("@/components/trips-screen").then((m) => ({ default: m.TripsScreen })),
-);
-const ChargeScreen = lazy(() =>
-  import("@/components/charge-screen").then((m) => ({ default: m.ChargeScreen })),
-);
-const ElprisScreen = lazy(() =>
-  import("@/components/elpris-screen").then((m) => ({ default: m.ElprisScreen })),
-);
-const VehicleScreen = lazy(() =>
-  import("@/components/vehicle-screen").then((m) => ({ default: m.VehicleScreen })),
-);
-
-const TAB_LOADERS: Record<Exclude<Tab, "home">, () => Promise<unknown>> = {
-  trips: () => import("@/components/trips-screen"),
-  costs: () => import("@/components/charge-screen"),
-  elpris: () => import("@/components/elpris-screen"),
-  vehicle: () => import("@/components/vehicle-screen"),
-};
-
-const WARM_ORDER: Exclude<Tab, "home">[] = ["trips", "costs", "elpris", "vehicle"];
-const warmed = new Set<string>();
-
-function saveDataOn() {
-  const conn = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } })
-    .connection;
-  return Boolean(conn?.saveData) || conn?.effectiveType === "slow-2g" || conn?.effectiveType === "2g";
-}
-
-function warmTab(id: Tab) {
-  if (id === "home") return Promise.resolve();
-  if (warmed.has(id)) return Promise.resolve();
-  warmed.add(id);
-  return TAB_LOADERS[id]()
-    .then(() => undefined)
-    .catch(() => {
-      warmed.delete(id);
-    });
-}
-
-function warmTabsInIdle(first?: Tab) {
-  if (typeof window === "undefined" || saveDataOn()) return () => {};
-  const order = first && first !== "home" ? [first, ...WARM_ORDER.filter((id) => id !== first)] : [...WARM_ORDER];
-  let i = 0;
-  let idleId = 0;
-  let timer = 0;
-  let stopped = false;
-
-  const step = (deadline?: { didTimeout: boolean; timeRemaining: () => number }) => {
-    if (stopped || i >= order.length) return;
-    const busy = deadline && !deadline.didTimeout && deadline.timeRemaining() < 12;
-    if (busy) {
-      schedule();
-      return;
-    }
-    const id = order[i];
-    i += 1;
-    void warmTab(id).then(() => {
-      if (!stopped) schedule();
-    });
-  };
-
-  const schedule = () => {
-    if (stopped || i >= order.length) return;
-    if (typeof requestIdleCallback === "function") {
-      idleId = requestIdleCallback((d) => step(d), { timeout: 4000 });
-    } else {
-      timer = window.setTimeout(() => step(), 240);
-    }
-  };
-
-  timer = window.setTimeout(schedule, 0);
-  return () => {
-    stopped = true;
-    if (idleId && typeof cancelIdleCallback === "function") cancelIdleCallback(idleId);
-    if (timer) window.clearTimeout(timer);
-  };
-}
-
-function TabFallback() {
-  return <div className="mx-4 mt-4 h-72 rounded-xl bg-surface" />;
-}
+import { useChargeStore } from "@/store/charge-store";
+import { useTripStore } from "@/store/trip-store";
 
 const TABS: { id: Tab; label?: string; icon: typeof House }[] = [
   { id: "home", label: "Home", icon: House },
@@ -138,36 +61,22 @@ export function Dashboard({ startTab = "home" }: { startTab?: Tab }) {
   const { profile } = useVehicleProfile();
 
   const selectTab = (next: Tab) => {
-    if (next !== "home") void warmTab(next);
     setTab(next);
     writeTabToLocation(next);
   };
 
   useEffect(() => {
     const initial = readTabFromLocation();
-    if (initial !== "home") {
-      setTab(initial);
-      void warmTab(initial);
-    }
+    if (initial !== "home") setTab(initial);
     const onPop = () => setTab(readTabFromLocation());
     window.addEventListener("popstate", onPop);
-    const stopWarm = warmTabsInIdle(initial);
-    return () => {
-      window.removeEventListener("popstate", onPop);
-      stopWarm();
-    };
+    return () => window.removeEventListener("popstate", onPop);
   }, []);
 
   useEffect(() => {
     void Promise.resolve(useVehicleStore.persist.rehydrate()).catch(() => {});
-    const later = window.setTimeout(() => {
-      void import("@/store/charge-store")
-        .then((m) => Promise.resolve(m.useChargeStore.persist.rehydrate()))
-        .catch(() => {});
-      void import("@/store/trip-store")
-        .then((m) => Promise.resolve(m.useTripStore.persist.rehydrate()))
-        .catch(() => {});
-    }, 400);
+    void Promise.resolve(useChargeStore.persist.rehydrate()).catch(() => {});
+    void Promise.resolve(useTripStore.persist.rehydrate()).catch(() => {});
     const params = new URLSearchParams(window.location.search);
     const tesla = params.get("tesla");
     if (tesla) {
@@ -184,7 +93,6 @@ export function Dashboard({ startTab = "home" }: { startTab?: Tab }) {
       const qs = params.toString();
       window.history.replaceState({}, "", qs ? `/?${qs}` : "/");
     }
-    return () => window.clearTimeout(later);
   }, []);
 
   useEffect(() => {
@@ -223,14 +131,10 @@ export function Dashboard({ startTab = "home" }: { startTab?: Tab }) {
 
         <main className="flex-1 overflow-y-auto pb-32">
           {tab === "home" && <HomeScreen />}
-          {tab !== "home" ? (
-            <Suspense fallback={<TabFallback />}>
-              {tab === "trips" && <TripsScreen />}
-              {tab === "costs" && <ChargeScreen />}
-              {tab === "elpris" && <ElprisScreen />}
-              {tab === "vehicle" && <VehicleScreen />}
-            </Suspense>
-          ) : null}
+          {tab === "trips" && <TripsScreen />}
+          {tab === "costs" && <ChargeScreen />}
+          {tab === "elpris" && <ElprisScreen />}
+          {tab === "vehicle" && <VehicleScreen />}
         </main>
 
         <nav
@@ -248,15 +152,11 @@ export function Dashboard({ startTab = "home" }: { startTab?: Tab }) {
                     href={tabHref(item.id)}
                     onPointerDown={(e) => {
                       if (e.button !== 0) return;
-                      if (item.id !== "home") void warmTab(item.id);
                       selectTab(item.id);
                     }}
                     onClick={(e) => {
                       e.preventDefault();
                       selectTab(item.id);
-                    }}
-                    onPointerEnter={() => {
-                      if (item.id !== "home") void warmTab(item.id);
                     }}
                     className={cn(
                       "flex h-14 w-full touch-manipulation flex-col items-center justify-center gap-0.5 text-[10px] font-medium no-underline",

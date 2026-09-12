@@ -126,12 +126,6 @@ export function HomeScreen() {
 
         <Link
           to="/plan"
-          onPointerEnter={() => {
-            void import("@/planner/plan-screen");
-          }}
-          onFocus={() => {
-            void import("@/planner/plan-screen");
-          }}
           className="flex items-center gap-3 rounded-xl bg-surface px-4 py-4 shadow-[var(--shadow-border)]"
         >
           <span className="flex size-10 items-center justify-center rounded-lg bg-surface-2 text-muted">

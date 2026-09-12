@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import { ChevronDown, MapPinned } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import type { MapMarker, MapRoute } from "@/components/bay-map";
@@ -81,15 +81,7 @@ export function TripsScreen() {
   const removeAlbum = useTripStore((s) => s.removeAlbum);
   const locations = useChargeStore((s) => s.locations);
   const logged = useChargeStore((s) => s.logged);
-  const [live, setLive] = useState(false);
-  useEffect(() => {
-    const id = requestAnimationFrame(() => setLive(true));
-    return () => cancelAnimationFrame(id);
-  }, []);
-  const sessions = useMemo(
-    () => (live ? pricedSessions(locations, logged) : []),
-    [live, locations, logged],
-  );
+  const sessions = useMemo(() => pricedSessions(locations, logged), [locations, logged]);
 
   const [period, setPeriod] = useState<Period>("week");
   const [selected, setSelected] = useState<string | null>(null);
@@ -102,11 +94,8 @@ export function TripsScreen() {
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
 
   const today = useMemo(() => laDayString(), []);
-  const periodTotals = useMemo(
-    () => (live ? tripTotals(period, today) : { count: 0, mi: 0, kwh: 0, min: 0 }),
-    [live, period, today],
-  );
-  const corridors = useMemo(() => (live ? tripCorridors(period, today) : []), [live, period, today]);
+  const periodTotals = useMemo(() => tripTotals(period, today), [period, today]);
+  const corridors = useMemo(() => tripCorridors(period, today), [period, today]);
   const album = albums.find((a) => a.id === albumId) ?? null;
   const albumItems = useMemo(() => (album ? albumTrips(album) : []), [album]);
   const pickedItems = useMemo(() => getTrips().filter((t) => picked.includes(t.id)), [picked]);
@@ -196,11 +185,10 @@ export function TripsScreen() {
     [focusView, active],
   );
   const historyTree = useMemo(() => {
-    if (!live) return [];
     if (album && !picking) return nestTrips(albumItems, "week", today);
     if (picking && rangeStart && rangeEnd) return nestTrips(tripsInRange(rangeStart, rangeEnd), "week", today);
     return nestTrips(tripsIn(period, today), period, today);
-  }, [live, album, picking, albumItems, today, rangeStart, rangeEnd, period]);
+  }, [album, picking, albumItems, today, rangeStart, rangeEnd, period]);
   const listed = historyTree.reduce((n, g) => n + g.items.length, 0);
   const hero = insight ?? periodTotals;
   const whMi = hero.mi > 0.1 ? (hero.kwh * 1000) / hero.mi : 0;
@@ -325,9 +313,6 @@ export function TripsScreen() {
           </div>
           <Link
             to="/plan"
-            onPointerEnter={() => {
-              void import("@/planner/plan-screen");
-            }}
             className="flex size-10 items-center justify-center rounded-full bg-surface-2 text-muted"
             aria-label="Open trip planner"
           >
