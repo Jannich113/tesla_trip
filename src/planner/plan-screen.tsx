@@ -448,6 +448,7 @@ export function PlanScreen() {
   const [hits, setHits] = useState<AddressHit[]>([]);
   const [addKind, setAddKind] = useState<"auto" | "depart" | "arrive">("depart");
   const [addAt, setAddAt] = useState("");
+  const [editWhen, setEditWhen] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [prefer, setPrefer] = useState<Record<number, string>>({});
   const [acceptCharge, setAcceptCharge] = useState<Record<number, boolean>>({});
@@ -1375,17 +1376,58 @@ export function PlanScreen() {
                     note: Boolean(legWhen[i - 1]?.kind && legWhen[i - 1]?.kind !== "auto"),
                   };
             return (
-              <li key={stop.id} className="relative flex items-center gap-3 py-1.5">
+              <li key={stop.id} className="relative flex items-start gap-3 py-1.5">
                 <span className="absolute bottom-0 left-[13px] top-8 w-px bg-border" aria-hidden />
-                <span className="relative z-[1] flex size-7 shrink-0 items-center justify-center rounded-full bg-surface-2 text-xs tabular-nums text-muted">
+                <span className="relative z-[1] mt-2 flex size-7 shrink-0 items-center justify-center rounded-full bg-surface-2 text-xs tabular-nums text-muted">
                   {i + 1}
                 </span>
-                <div className="relative z-[1] flex min-w-0 flex-1 items-center gap-2 rounded-full bg-surface-2 px-3 h-11">
-                  <p className="min-w-0 truncate text-sm">{stop.name}</p>
-                  {w.note && w.at ? (
-                    <p className="ml-auto shrink-0 text-xs tabular-nums text-muted">
-                      {w.kind === "arrive" ? "Arrive" : "Leave"} {formatDateTime(w.at)}
-                    </p>
+                <div className="relative z-[1] min-w-0 flex-1">
+                  <div className="flex h-11 items-center gap-2 rounded-full bg-surface-2 px-3">
+                    <p className="min-w-0 truncate text-sm">{stop.name}</p>
+                    {w.note && w.at ? (
+                      <button
+                        type="button"
+                        onClick={() => setEditWhen(editWhen === stop.id ? null : stop.id)}
+                        className="ml-auto shrink-0 text-xs tabular-nums text-muted"
+                        aria-expanded={editWhen === stop.id}
+                        aria-label={`Edit ${w.kind === "arrive" ? "arrive" : "leave"} time for ${stop.name}`}
+                      >
+                        {w.kind === "arrive" ? "Arrive" : "Leave"} {formatDateTime(w.at)}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setEditWhen(editWhen === stop.id ? null : stop.id)}
+                        className="ml-auto shrink-0 text-xs text-subtle"
+                        aria-expanded={editWhen === stop.id}
+                      >
+                        Set time
+                      </button>
+                    )}
+                  </div>
+                  {editWhen === stop.id ? (
+                    <WhenFields
+                      kind={i === 0 ? "depart" : w.kind}
+                      at={asDateTime(w.at || clock)}
+                      allowAuto={i > 0}
+                      onKind={(k) => {
+                        if (i === 0) {
+                          setWhenKind("depart");
+                          return;
+                        }
+                        const at = asDateTime(w.at || clock);
+                        setLegWhen(i - 1, { kind: k, hhmm: k === "auto" ? "" : at, at: k === "auto" ? "" : at });
+                      }}
+                      onAt={(dt) => {
+                        if (i === 0) {
+                          setWhenKind("depart");
+                          setWhen(dt);
+                          return;
+                        }
+                        const kind = w.kind === "auto" ? "arrive" : w.kind;
+                        setLegWhen(i - 1, { kind, hhmm: dt, at: dt });
+                      }}
+                    />
                   ) : null}
                 </div>
                 <button
