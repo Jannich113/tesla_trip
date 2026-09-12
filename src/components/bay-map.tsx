@@ -175,7 +175,27 @@ function BayMapImpl({
         map.attributionControl?.setPosition("bottomleft");
         map.setView([37.45, -122.15], 10);
         map.on("click", (e) => {
-          onDropRef.current?.(e.latlng.lat, e.latlng.lng);
+          const latlng = e.latlng;
+          if (onDropRef.current) {
+            onDropRef.current(latlng.lat, latlng.lng);
+            return;
+          }
+          let best: string | null = null;
+          let bestD = 28;
+          for (const [id, line] of routesRef.current) {
+            const pts = line.getLatLngs() as { lat: number; lng: number }[];
+            const step = Math.max(1, Math.floor(pts.length / 40));
+            for (let i = 0; i < pts.length; i += step) {
+              const p = map.latLngToLayerPoint(pts[i]);
+              const q = map.latLngToLayerPoint(latlng);
+              const d = Math.hypot(p.x - q.x, p.y - q.y);
+              if (d < bestD) {
+                bestD = d;
+                best = id;
+              }
+            }
+          }
+          if (best) onSelectRef.current?.(best);
         });
         mapRef.current = map;
         if (!cancelled) setReady(true);
@@ -238,14 +258,10 @@ function BayMapImpl({
             ...style,
             lineCap: "round",
             lineJoin: "round",
-            interactive: true,
-            bubblingMouseEvents: false,
+            interactive: false,
+            bubblingMouseEvents: true,
             smoothFactor: 1.8,
             renderer: canvas,
-          });
-          line.on("click", (e: import("leaflet").LeafletMouseEvent) => {
-            L.DomEvent.stopPropagation(e);
-            onSelectRef.current?.(route.id);
           });
           line.addTo(map);
           routesRef.current.set(route.id, line);

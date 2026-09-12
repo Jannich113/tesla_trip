@@ -769,7 +769,7 @@ export function PlanScreen() {
   }, [optionRows, locations, stops, mapMode, showAllRoutes]);
 
   return (
-    <div className="space-y-5 px-4 pb-6">
+    <div className="space-y-5 px-4 pb-6 [touch-action:manipulation]">
       <div className="flex rounded-full bg-surface-2 p-1">
         {(["plan", "advanced"] as const).map((id) => (
           <button
@@ -885,7 +885,14 @@ export function PlanScreen() {
                 <div className={cn("px-3 py-3", on && "bg-background/40")}>
                 <button
                   type="button"
-                  onClick={() => setAllModes(row.mode)}
+                  onPointerDown={(e) => {
+                    if (e.button !== 0) return;
+                    setAllModes(row.mode);
+                  }}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setAllModes(row.mode);
+                  }}
                   className="flex w-full items-start gap-3 text-left"
                 >
                   <span
@@ -1197,6 +1204,10 @@ export function PlanScreen() {
         <div className="flex items-center gap-1">
           <button
             type="button"
+            onPointerDown={(e) => {
+              if (e.button !== 0) return;
+              setShowAllRoutes(false);
+            }}
             onClick={() => setShowAllRoutes(false)}
             className={cn(
               "h-8 rounded-full px-3 text-[11px] font-medium",
@@ -1208,6 +1219,10 @@ export function PlanScreen() {
           </button>
           <button
             type="button"
+            onPointerDown={(e) => {
+              if (e.button !== 0) return;
+              setShowAllRoutes(true);
+            }}
             onClick={() => setShowAllRoutes(true)}
             className={cn(
               "h-8 rounded-full px-3 text-[11px] font-medium",
@@ -1244,7 +1259,15 @@ export function PlanScreen() {
                 <button
                   key={mode}
                   type="button"
-                  onClick={() => setAllModes(mode)}
+                  onPointerDown={(e) => {
+                    if (e.button !== 0) return;
+                    e.preventDefault();
+                    setAllModes(mode);
+                  }}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setAllModes(mode);
+                  }}
                   className={cn(
                     "h-7 rounded-full px-2.5 text-[11px] font-medium",
                     on ? "text-background" : "bg-surface-2 text-muted",
@@ -1292,9 +1315,13 @@ export function PlanScreen() {
                   <button
                     type="button"
                     className="flex min-w-0 flex-1 items-center gap-3 text-left"
-                    onClick={() => {
+                    onPointerDown={(e) => {
+                      if (e.button !== 0) return;
                       setSelected(inbound ? `leg-${userI}` : stop.id);
                       if (inbound || outbound) setOpenStops((cur) => ({ ...cur, [stop.id]: !cur[stop.id] }));
+                    }}
+                    onClick={(e) => {
+                      e.preventDefault();
                     }}
                   >
                     <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-surface-2 text-xs tabular-nums text-muted">

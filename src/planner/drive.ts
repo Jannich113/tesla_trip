@@ -136,7 +136,7 @@ async function osrm(from: Stop, to: Stop, extra = ""): Promise<DriveRouteJson | 
   const url =
     `https://router.project-osrm.org/route/v1/driving/` +
     `${from.lng},${from.lat};${to.lng},${to.lat}` +
-    `?overview=full&geometries=geojson${extra}`;
+    `?overview=simplified&geometries=geojson${extra}`;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 25_000);
   try {
@@ -227,13 +227,11 @@ async function hop(from: Stop, to: Stop, mode: LegMode): Promise<DriveRouteJson 
 async function routeChunked(from: Stop, to: Stop, mode: LegMode): Promise<DriveRouteJson | null> {
   const stops = hopStops(from, to, 900);
   if (stops.length === 2) return hop(from, to, mode);
-  const parts: DriveRouteJson[] = [];
-  for (let i = 0; i < stops.length - 1; i++) {
-    const piece = await hop(stops[i], stops[i + 1], mode);
-    if (!piece) return null;
-    parts.push(piece);
-  }
-  return stitch(parts, mode);
+  const parts = await Promise.all(
+    stops.slice(0, -1).map((s, i) => hop(s, stops[i + 1], mode)),
+  );
+  if (parts.some((p) => !p)) return null;
+  return stitch(parts as DriveRouteJson[], mode);
 }
 
 function okRoute(route: DriveRouteJson | null, from: Stop, to: Stop) {
