@@ -311,6 +311,9 @@ export function TripsScreen() {
           </div>
           <Link
             to="/plan"
+            onPointerEnter={() => {
+              void import("@/planner/plan-screen");
+            }}
             className="flex size-10 items-center justify-center rounded-full bg-surface-2 text-muted"
             aria-label="Open trip planner"
           >

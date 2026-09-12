@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState, useDeferredValue } from "react";
+import { useEffect, useMemo, useState, useDeferredValue, lazy, Suspense } from "react";
 import { ChevronDown, ChevronUp, Navigation, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { BayMap, type MapMarker, type MapRoute } from "@/components/bay-map";
+import type { MapMarker, MapRoute } from "@/components/bay-map";
 import { searchAddress, type AddressHit } from "./search";
 import {
   DETOUR_KM,
@@ -45,7 +45,7 @@ import {
   SPEED_KMH,
   splitDateTime,
 } from "./engine";
-import { usePlanStore } from "./store";
+import { usePlanStore, type OptionSnap } from "./store";
 import { withRetry } from "./retry";
 import { formatKrPerKwh, formatKrValue, type HourPrice } from "@/lib/elpris";
 import { applyTillægToHours, providerById } from "@/lib/el-providers";
@@ -141,6 +141,28 @@ function routeKey(
   return corridorKey(from, to, mode);
 }
 
+function stopsKey(stops: { name: string; lat: number; lng: number }[]) {
+  return stops.map((s) => `${s.name}:${s.lat.toFixed(2)},${s.lng.toFixed(2)}`).join("|");
+}
+
+function snapTotals(snap: OptionSnap) {
+  return {
+    mi: snap.mi,
+    kwh: 0,
+    kr: snap.kr,
+    tollKr: snap.tollKr,
+    min: snap.driveMin,
+    driveMin: snap.driveMin,
+    chargeMin: 0,
+    waitMin: 0,
+    chargeKwh: 0,
+    requiredKwh: 0,
+    charges: snap.charges,
+  };
+}
+
+const BayMap = lazy(() => import("@/components/bay-map").then((m) => ({ default: m.BayMap })));
+
 export function PlanScreen() {
   const units = useVehicleStore((s) => s.units);
   const soc = useVehicleStore((s) => Math.round(s.soc));
@@ -191,7 +213,10 @@ export function PlanScreen() {
   const reset = usePlanStore((s) => s.reset);
   const routeMap = usePlanStore((s) => s.routeCache);
   const setRouteCache = usePlanStore((s) => s.setRouteCache);
+  const lastOptions = usePlanStore((s) => s.lastOptions);
+  const setLastOptions = usePlanStore((s) => s.setLastOptions);
 
+  const [live, setLive] = useState(false);
   const [routing, setRouting] = useState(false);
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<AddressHit[]>([]);
@@ -210,12 +235,13 @@ export function PlanScreen() {
   const { data: elpris } = useLiveElpris(area);
 
   useEffect(() => {
-    void Promise.all([
-      useVehicleStore.persist.rehydrate(),
-      useChargeStore.persist.rehydrate(),
-    ]).catch(() => {
-      /* localStorage may be unavailable */
-    });
+    const kick = () => setLive(true);
+    if (typeof requestIdleCallback === "function") {
+      const id = requestIdleCallback(kick, { timeout: 250 });
+      return () => cancelIdleCallback(id);
+    }
+    const t = window.setTimeout(kick, 0);
+    return () => window.clearTimeout(t);
   }, []);
 
   useEffect(() => {
@@ -231,6 +257,7 @@ export function PlanScreen() {
   }, [query]);
 
   useEffect(() => {
+    if (!live) return;
     if (stops.length < 2) return;
     let cancelled = false;
     const order: LegMode[] = ["fastest", "eco", "cheapest"];
@@ -275,7 +302,7 @@ export function PlanScreen() {
     return () => {
       cancelled = true;
     };
-  }, [stops, setRouteCache]);
+  }, [live, stops, setRouteCache]);
 
   useEffect(() => {
     setPrefer({});
@@ -348,7 +375,7 @@ export function PlanScreen() {
   }, [routeMap, stops, cheapAvoid]);
 
   const { chargers: routeChargers, loading: chargersLoading } = useRouteChargers(
-    searchRoutes,
+    live ? searchRoutes : [],
     Math.max(
       DEFAULT_DETOUR_KM,
       ...stops.slice(1).flatMap((_, i) =>
@@ -360,6 +387,7 @@ export function PlanScreen() {
   );
 
   const locations = useMemo(() => {
+    if (!live) return locationsStored.filter((l) => l.kind === "home").slice(0, 4);
     const paths = searchRoutes.map((r) => r.path).filter((p) => p.length >= 2);
     const europe = paths.some((p) => p.some(([lat, lng]) => lat > 34 && lng > -12 && lng < 42));
     const keep = locationsStored.filter((l) => {
@@ -382,7 +410,7 @@ export function PlanScreen() {
       for (const s of ranked) picked.set(s.l.id, s.l);
     }
     return [...picked.values()];
-  }, [locationsStored, routeChargers, searchRoutes]);
+  }, [live, locationsStored, routeChargers, searchRoutes]);
 
   const driveMinGuess = selectedRoutes.reduce((n, r) => n + r.seconds / 60, 0);
   const departHhmm =
@@ -477,6 +505,13 @@ export function PlanScreen() {
   const deferredMap = useDeferredValue(routeMap);
 
   const pricedRows = useMemo(() => {
+    if (!live) {
+      return LEG_MODES.map((mode) => ({
+        mode,
+        priced: [] as PricedLeg[],
+        avoid: mode === "cheapest" ? cheapAvoid : { motorways: false, tolls: false, roadFees: false },
+      }));
+    }
     return LEG_MODES.map((mode) => {
       const avoid = mode === "cheapest" ? cheapAvoid : { motorways: false, tolls: false, roadFees: false };
       const optionRoutes = routesFor(pathMode(mode, avoid));
@@ -497,7 +532,7 @@ export function PlanScreen() {
         }),
       };
     });
-  }, [corridorStamp, stops, detours, waits, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc, prefer, networkAbo, cheapAvoid]);
+  }, [live, corridorStamp, stops, detours, waits, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc, prefer, networkAbo, cheapAvoid]);
 
   const optionRows = useMemo(() => {
     const rows = pricedRows.map(({ mode, priced, avoid }) => {
@@ -513,17 +548,21 @@ export function PlanScreen() {
       const miles = legs.reduce((n, l) => n + l.route.miles, 0);
       const seconds = legs.reduce((n, l) => n + l.route.seconds, 0);
       const kmh = avgSpeedKmh(miles, seconds);
+      const liveTotals = legs.length ? planTotals(legs) : null;
+      const snap =
+        !liveTotals && lastOptions?.key === stopsKey(stops) ? lastOptions.rows[mode] : undefined;
       return {
         mode,
-        totals: legs.length ? planTotals(legs) : null,
-        kmh,
-        kwhPerMi: interpolateWhPerMi(speedEff, kmh) / 1000,
+        totals: liveTotals ?? (snap ? snapTotals(snap) : null),
+        kmh: liveTotals ? kmh : (snap?.kmh ?? kmh),
+        kwhPerMi: interpolateWhPerMi(speedEff, liveTotals ? kmh : (snap?.kmh ?? kmh)) / 1000,
         legs,
       };
     });
     const fast = rows.find((r) => r.mode === "fastest")?.totals;
     return rows.map((row) => {
       if (row.mode !== "cheapest" || !row.totals || !fast) return row;
+      if (!row.legs.length) return row;
       if (row.totals.driveMin >= fast.driveMin - 0.4) return row;
       const driveMin = fast.driveMin;
       const seconds = driveMin * 60;
@@ -533,7 +572,26 @@ export function PlanScreen() {
         kmh: avgSpeedKmh(row.totals.mi, seconds),
       };
     });
-  }, [pricedRows, deferredMap, speedEff, cheapAvoid]);
+  }, [pricedRows, deferredMap, speedEff, cheapAvoid, lastOptions, stops]);
+
+  useEffect(() => {
+    if (!live) return;
+    const key = stopsKey(stops);
+    const rows: NonNullable<typeof lastOptions>["rows"] = {};
+    for (const row of optionRows) {
+      if (!row.totals || !row.legs.length) continue;
+      rows[row.mode] = {
+        mi: row.totals.mi,
+        kr: row.totals.kr,
+        driveMin: row.totals.driveMin,
+        charges: row.totals.charges,
+        tollKr: row.totals.tollKr,
+        kmh: row.kmh,
+      };
+    }
+    if (!Object.keys(rows).length) return;
+    setLastOptions({ key, rows });
+  }, [live, optionRows, stops, setLastOptions]);
 
   const hopKey = optionRows
     .map((row) =>
@@ -1361,21 +1419,27 @@ export function PlanScreen() {
             All 3
           </button>
         </div>
-        <BayMap
-          markers={idleMap.markers.length ? idleMap.markers : mapMarkers}
-          routes={idleMap.routes.length ? idleMap.routes : mapRoutes}
-          selectedId={selected}
-          selectedIds={selectedIds}
-          onSelect={onMapSelect}
-          caption={
-            routing
-              ? "Routing…"
-              : showAllRoutes
-                ? "All modes · tap a leg or charger"
-                : `${modeLabel(mapMode)} · full route`
-          }
-          hidden={!shareLocation}
-        />
+        <Suspense fallback={<div className="h-52 rounded-xl bg-surface shadow-[var(--shadow-border)]" />}>
+          {live ? (
+            <BayMap
+              markers={idleMap.markers.length ? idleMap.markers : mapMarkers}
+              routes={idleMap.routes.length ? idleMap.routes : mapRoutes}
+              selectedId={selected}
+              selectedIds={selectedIds}
+              onSelect={onMapSelect}
+              caption={
+                routing
+                  ? "Routing…"
+                  : showAllRoutes
+                    ? "All modes · tap a leg or charger"
+                    : `${modeLabel(mapMode)} · full route`
+              }
+              hidden={!shareLocation}
+            />
+          ) : (
+            <div className="h-52 rounded-xl bg-surface shadow-[var(--shadow-border)]" />
+          )}
+        </Suspense>
       </div>
 
       <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">

@@ -32,6 +32,20 @@ export type SavedPlan = {
   routes?: Record<string, RoutedLeg>;
 };
 
+export type OptionSnap = {
+  mi: number;
+  kr: number;
+  driveMin: number;
+  charges: number;
+  tollKr: number;
+  kmh: number;
+};
+
+export type LastOptions = {
+  key: string;
+  rows: Partial<Record<LegMode, OptionSnap>>;
+};
+
 export type PlanSummary = {
   startAt?: string;
   min?: number;
@@ -155,6 +169,7 @@ type PlanState = {
   speedEff: SpeedEff | null;
   networkAbo: Record<string, boolean>;
   routeCache: Record<string, RoutedLeg>;
+  lastOptions: LastOptions | null;
   saved: SavedPlan[];
   seq: number;
 };
@@ -177,6 +192,7 @@ type PlanStore = PlanState & {
   setNetworkAbo: (id: string, on: boolean) => void;
   insertStopAt: (index: number, stop: Omit<PlanStop, "id"> & { id?: string }) => void;
   setRouteCache: (patch: Record<string, RoutedLeg>) => void;
+  setLastOptions: (next: LastOptions | null) => void;
   savePlan: (label?: string, summary?: PlanSummary) => SavedPlan | null;
   loadPlan: (id: string) => void;
   deleteSaved: (id: string) => void;
@@ -209,6 +225,7 @@ function readDraft(): Partial<PlanState> {
       speedEff: s.speedEff,
       networkAbo: s.networkAbo,
       routeCache,
+      lastOptions: s.lastOptions ?? null,
       saved: s.saved,
       seq: s.seq,
     };
@@ -233,6 +250,7 @@ const empty = (): PlanState => ({
   speedEff: null,
   networkAbo: { tesla: true },
   routeCache: {},
+  lastOptions: null,
   saved: [],
   seq: 0,
 });
@@ -254,6 +272,8 @@ export const usePlanStore = create<PlanStore>()(
       setSpeedEff: (speedEff) => set({ speedEff, whPerMi: speedEff ? kwhPerMiFrom100km(speedEff[80]) * 1000 : null }),
       setNetworkAbo: (id, on) =>
         set({ networkAbo: { ...get().networkAbo, [id]: on } }),
+
+      setLastOptions: (lastOptions) => set({ lastOptions }),
 
       setRouteCache: (patch) => {
         const clean: Record<string, RoutedLeg> = {};
@@ -485,6 +505,7 @@ export const usePlanStore = create<PlanStore>()(
         speedEff: s.speedEff,
         networkAbo: s.networkAbo,
         routeCache: slimRoutes(s.routeCache) ?? {},
+        lastOptions: s.lastOptions,
         saved: s.saved.slice(-8).map((plan) => ({
           ...plan,
           routes: slimRoutes(plan.routes),
