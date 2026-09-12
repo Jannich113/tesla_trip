@@ -92,6 +92,54 @@ const CHARGE_OFFSET: Record<LegMode, [number, number]> = {
   cheapest: [0.0016, 0.0009],
 };
 
+function WhenFields({
+  kind,
+  at,
+  onKind,
+  onAt,
+}: {
+  kind: "depart" | "arrive";
+  at: string;
+  onKind: (k: "depart" | "arrive") => void;
+  onAt: (dt: string) => void;
+}) {
+  const day = at.slice(0, 10);
+  const hm = at.slice(11, 16);
+  return (
+    <div className="mt-1.5 space-y-1.5">
+      <div className="flex rounded-full bg-surface-2 p-0.5">
+        {(["depart", "arrive"] as const).map((k) => (
+          <button
+            key={k}
+            type="button"
+            onClick={() => onKind(k)}
+            className={cn(
+              "h-8 flex-1 rounded-full text-[11px] font-medium",
+              kind === k ? "bg-foreground text-background" : "text-muted",
+            )}
+          >
+            {k === "depart" ? "Leave" : "Arrive"}
+          </button>
+        ))}
+      </div>
+      <div className="grid grid-cols-2 gap-1.5">
+        <input
+          type="date"
+          value={day}
+          onChange={(e) => onAt(`${e.target.value}T${hm || "00:00"}`)}
+          className="h-9 rounded-xl bg-surface-2 px-2 text-xs tabular-nums text-foreground outline-none"
+        />
+        <input
+          type="time"
+          value={hm}
+          onChange={(e) => onAt(`${day || "2026-01-01"}T${e.target.value}`)}
+          className="h-9 rounded-xl bg-surface-2 px-2 text-xs tabular-nums text-foreground outline-none"
+        />
+      </div>
+    </div>
+  );
+}
+
 function CheapAvoidToggles({ className }: { className?: string }) {
   const motorways = usePlanStore((s) => s.cheapAvoidMotorways);
   const tolls = usePlanStore((s) => s.cheapAvoidTolls);
@@ -392,6 +440,8 @@ export function PlanScreen() {
   const [routing, setRouting] = useState(false);
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<AddressHit[]>([]);
+  const [addKind, setAddKind] = useState<"depart" | "arrive">("depart");
+  const [addAt, setAddAt] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
   const [prefer, setPrefer] = useState<Record<number, string>>({});
   const [acceptCharge, setAcceptCharge] = useState<Record<number, boolean>>({});
@@ -427,6 +477,10 @@ export function PlanScreen() {
     }, 280);
     return () => window.clearTimeout(t);
   }, [query]);
+
+  useEffect(() => {
+    setAddKind(stops.length === 0 ? "depart" : "arrive");
+  }, [stops.length]);
 
   useEffect(() => {
     if (!live) return;
@@ -834,10 +888,20 @@ export function PlanScreen() {
   }, [hopKey, cheapAvoid]);
 
   function addStop(hit: AddressHit) {
+    const idx = stops.length;
+    const at = asDateTime(addAt || clock);
     addStopToStore({ name: hit.label.split(",")[0] || hit.label, lat: hit.lat, lng: hit.lng });
+    if (idx === 0) {
+      setWhenKind(addKind);
+      setWhen(at);
+      setAddKind("arrive");
+    } else {
+      setLegWhen(idx - 1, { kind: addKind, hhmm: at, at });
+    }
     setQuery("");
     setHits([]);
-    setSelected(`leg-${stops.length - 1}`);
+    setAddAt(at);
+    setSelected(`leg-${Math.max(0, idx - 1)}`);
   }
 
   function insertCharge(legIndex: number, spot: PricedCharge) {
@@ -1273,57 +1337,56 @@ export function PlanScreen() {
           placeholder={stops.length >= 2 ? tripTitle(stops) : "Name this plan"}
           className="w-full bg-transparent text-sm font-medium text-foreground outline-none placeholder:text-subtle"
         />
-        <div className="mt-3 flex rounded-full bg-surface-2 p-1">
-          {(["depart", "arrive"] as const).map((kind) => (
-            <button
-              key={kind}
-              type="button"
-              onClick={() => setWhenKind(kind)}
-              className={cn(
-                "h-9 flex-1 rounded-full text-xs font-medium",
-                whenKind === kind ? "bg-foreground text-background" : "text-muted",
-              )}
-            >
-              {kind === "depart" ? "Leave" : "Arrive"}
-            </button>
-          ))}
-        </div>
-        <div className="mt-2 grid grid-cols-2 gap-2">
-          <input
-            type="date"
-            value={clock.slice(0, 10)}
-            onChange={(e) => setWhen(`${e.target.value}T${clock.slice(11, 16) || "00:00"}`)}
-            className="h-10 rounded-xl bg-surface-2 px-3 text-sm tabular-nums text-foreground outline-none"
-          />
-          <input
-            type="time"
-            value={clock.slice(11, 16)}
-            onChange={(e) => setWhen(`${clock.slice(0, 10)}T${e.target.value}`)}
-            className="h-10 rounded-xl bg-surface-2 px-3 text-sm tabular-nums text-foreground outline-none"
-          />
-        </div>
         <p className="mt-2 text-xs text-muted">
           {profile.usableKwh} kWh usable · {formatNumber(soc, 0)}% now
         </p>
 
         <ol className="relative mt-4">
-          {stops.map((stop, i) => (
-            <li key={stop.id} className="relative flex items-center gap-3 py-2">
-              <span className="absolute bottom-0 left-[13px] top-8 w-px bg-border" aria-hidden />
-              <span className="relative z-[1] flex size-7 shrink-0 items-center justify-center rounded-full bg-surface-2 text-xs tabular-nums text-muted">
-                {i + 1}
-              </span>
-              <p className="min-w-0 flex-1 truncate text-sm">{stop.name}</p>
-              <button
-                type="button"
-                onClick={() => removeStop(stop.id)}
-                className="relative z-[1] flex size-9 shrink-0 items-center justify-center rounded-full text-muted"
-                aria-label={`Remove ${stop.name}`}
-              >
-                <Trash2 className="size-4" />
-              </button>
-            </li>
-          ))}
+          {stops.map((stop, i) => {
+            const w = i === 0
+              ? { kind: whenKind, at: clock }
+              : {
+                  kind: (legWhen[i - 1]?.kind === "depart" ? "depart" : "arrive") as "depart" | "arrive",
+                  at: asDateTime(legWhen[i - 1]?.at || legWhen[i - 1]?.hhmm || clock),
+                };
+            return (
+              <li key={stop.id} className="relative flex items-start gap-3 py-2">
+                <span className="absolute bottom-0 left-[13px] top-8 w-px bg-border" aria-hidden />
+                <span className="relative z-[1] mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-surface-2 text-xs tabular-nums text-muted">
+                  {i + 1}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <p className="min-w-0 flex-1 truncate text-sm">{stop.name}</p>
+                    <button
+                      type="button"
+                      onClick={() => removeStop(stop.id)}
+                      className="flex size-9 shrink-0 items-center justify-center rounded-full text-muted"
+                      aria-label={`Remove ${stop.name}`}
+                    >
+                      <Trash2 className="size-4" />
+                    </button>
+                  </div>
+                  <WhenFields
+                    kind={w.kind}
+                    at={w.at}
+                    onKind={(k) => {
+                      if (i === 0) setWhenKind(k);
+                      else setLegWhen(i - 1, { kind: k, hhmm: w.at, at: w.at });
+                    }}
+                    onAt={(dt) => {
+                      if (i === 0) {
+                        setWhen(dt);
+                        setWhenKind(w.kind);
+                      } else {
+                        setLegWhen(i - 1, { kind: w.kind, hhmm: dt, at: dt });
+                      }
+                    }}
+                  />
+                </div>
+              </li>
+            );
+          })}
           <li className="relative flex items-start gap-3 py-2">
             <span className="relative z-[1] mt-2 flex size-7 shrink-0 items-center justify-center rounded-full bg-surface-2 text-muted">
               <Plus className="size-3.5" />
@@ -1334,6 +1397,12 @@ export function PlanScreen() {
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder={stops.length === 0 ? "Add a start" : stops.length === 1 ? "Add a destination" : "Add a stop"}
                 className="h-11 w-full rounded-xl bg-surface-2 px-3 text-sm outline-none placeholder:text-subtle"
+              />
+              <WhenFields
+                kind={addKind}
+                at={asDateTime(addAt || clock)}
+                onKind={setAddKind}
+                onAt={setAddAt}
               />
               {hits.length ? (
                 <ul className="mt-1 overflow-hidden rounded-xl bg-surface-2">
