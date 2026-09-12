@@ -1,10 +1,12 @@
 /* Juniper trip PWA — network-first shell, SWR static, cache-first OSM tiles. */
-const VERSION = "juniper-sw-v1";
+const VERSION = "juniper-sw-v2";
 const SHELL = `${VERSION}-shell`;
 const RUNTIME = `${VERSION}-runtime`;
 const TILES = `${VERSION}-tiles`;
 
 const PRECACHE = ["/", "/favicon.svg", "/__grok/icon-180.png"];
+const PRICE_PATHS = ["/api/elpris?area=DK1", "/api/elpris?area=DK2", "/api/charge-prices"];
+const PERIODIC_TAG = "juniper-prices";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -142,4 +144,27 @@ self.addEventListener("fetch", (event) => {
   if (request.mode === "navigate" && url.origin === self.location.origin) {
     event.respondWith(networkFirst(request, SHELL));
   }
+});
+
+async function refreshPrices() {
+  const cache = await caches.open(RUNTIME);
+  await Promise.all(
+    PRICE_PATHS.map(async (path) => {
+      const request = new Request(new URL(path, self.location.origin), {
+        headers: { Accept: "application/json" },
+        cache: "reload",
+      });
+      try {
+        const res = await fetch(request);
+        if (res && res.ok) await cache.put(request, res.clone());
+      } catch {
+        /* stay on last cached body */
+      }
+    }),
+  );
+}
+
+self.addEventListener("periodicsync", (event) => {
+  if (event.tag !== PERIODIC_TAG) return;
+  event.waitUntil(refreshPrices());
 });
