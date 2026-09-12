@@ -28,7 +28,8 @@ import {
   getCharges,
   laDayString,
 } from "@/lib/history";
-import { energyKwh } from "@/lib/vehicle";
+import { VEHICLE, energyKwh } from "@/lib/vehicle";
+import { bindChargeBridge } from "@/store/vehicle-store";
 
 export type LoggedSession = ChargeSession & { locationId: string };
 
@@ -264,6 +265,15 @@ export const useChargeStore = create<ChargeStore>()(
     },
   ),
 );
+
+bindChargeBridge({
+  beginCharge: (soc) => useChargeStore.getState().beginCharge(soc),
+  endCharge: (soc, where) => useChargeStore.getState().endCharge(soc, where),
+  siteLabel: () => {
+    const s = useChargeStore.getState();
+    return s.locations.find((l) => l.id === s.chargeAtId)?.short ?? VEHICLE.home.label;
+  },
+});
 
 export function ranksFor(
   locations: ChargeLocation[],

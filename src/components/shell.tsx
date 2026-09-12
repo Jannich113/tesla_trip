@@ -119,11 +119,8 @@ function readTabFromLocation(): Tab {
   return "home";
 }
 
-function tabHref(id: Tab) {
-  return id === "home" ? "/" : `/?tab=${id}`;
-}
-
 function writeTabToLocation(next: Tab) {
+  if (typeof window === "undefined") return;
   const url = new URL(window.location.href);
   if (next === "home") url.searchParams.delete("tab");
   else url.searchParams.set("tab", next);
@@ -144,10 +141,14 @@ export function Dashboard() {
   };
 
   useEffect(() => {
-    setTab(readTabFromLocation());
+    const initial = readTabFromLocation();
+    if (initial !== "home") {
+      setTab(initial);
+      void warmTab(initial);
+    }
     const onPop = () => setTab(readTabFromLocation());
     window.addEventListener("popstate", onPop);
-    const stopWarm = warmTabsInIdle(tab);
+    const stopWarm = warmTabsInIdle(initial);
     return () => {
       window.removeEventListener("popstate", onPop);
       stopWarm();
@@ -238,8 +239,13 @@ export function Dashboard() {
               const label = item.id === "vehicle" ? profile.name : item.label!;
               return (
                 <li key={item.id}>
-                  <a
-                    href={tabHref(item.id)}
+                  <button
+                    type="button"
+                    onPointerDown={(e) => {
+                      if (e.button !== 0) return;
+                      if (item.id !== "home") void warmTab(item.id);
+                      selectTab(item.id);
+                    }}
                     onClick={(e) => {
                       e.preventDefault();
                       selectTab(item.id);
@@ -257,7 +263,7 @@ export function Dashboard() {
                   >
                     <Icon className="size-5" strokeWidth={current ? 2.2 : 1.8} />
                     <span className="max-w-full truncate px-0.5">{label}</span>
-                  </a>
+                  </button>
                 </li>
               );
             })}

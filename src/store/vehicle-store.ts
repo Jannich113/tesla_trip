@@ -8,7 +8,6 @@ import {
   isTeslaModelId,
   modelById,
 } from "@/lib/tesla-models";
-import { useChargeStore } from "@/store/charge-store";
 
 export type VehicleSnapshot = {
   soc: number;
@@ -93,9 +92,21 @@ function clamp(n: number, min: number, max: number) {
   return Math.min(max, Math.max(min, n));
 }
 
+type ChargeBridge = {
+  beginCharge: (soc: number) => void;
+  endCharge: (soc: number, where?: string) => void;
+  siteLabel: () => string;
+};
+
+let charges: ChargeBridge | null = null;
+
+/** Bound from charge-store so the shell can load without trip history. */
+export function bindChargeBridge(api: ChargeBridge) {
+  charges = api;
+}
+
 function chargeSiteLabel() {
-  const charge = useChargeStore.getState();
-  return charge.locations.find((l) => l.id === charge.chargeAtId)?.short ?? VEHICLE.home.label;
+  return charges?.siteLabel() ?? VEHICLE.home.label;
 }
 
 function driveWhPerMi(speedMph: number, climateOn: boolean) {
@@ -154,7 +165,7 @@ export const useVehicleStore = create<VehicleStore>()(
         if (s.mode === "charging") {
           const kw = homeChargeKw(s.soc, s.chargeLimit);
           if (kw <= 0) {
-            useChargeStore.getState().endCharge(s.soc, chargeSiteLabel());
+            charges?.endCharge(s.soc, chargeSiteLabel());
             set({
               mode: "parked",
               chargeKw: 0,
@@ -171,7 +182,7 @@ export const useVehicleStore = create<VehicleStore>()(
           const nextSoc = clamp(s.soc + (kwh / VEHICLE.usableKwh) * 100, 0, s.chargeLimit);
           const done = nextSoc >= s.chargeLimit - 0.05;
           const soc = done ? s.chargeLimit : nextSoc;
-          if (done) useChargeStore.getState().endCharge(soc, chargeSiteLabel());
+          if (done) charges?.endCharge(soc, chargeSiteLabel());
           set({
             soc,
             chargeKw: done ? 0 : kw,
@@ -201,7 +212,7 @@ export const useVehicleStore = create<VehicleStore>()(
       setMode: (mode) => {
         const cur = get();
         if (cur.mode === "charging" && mode !== "charging") {
-          useChargeStore.getState().endCharge(cur.soc, chargeSiteLabel());
+          charges?.endCharge(cur.soc, chargeSiteLabel());
         }
         if (mode === "driving") {
           set({
@@ -229,7 +240,7 @@ export const useVehicleStore = create<VehicleStore>()(
             });
             return;
           }
-          useChargeStore.getState().beginCharge(s.soc);
+          charges?.beginCharge(s.soc);
           const at = chargeSiteLabel();
           set({
             mode,
