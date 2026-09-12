@@ -680,92 +680,102 @@ export function PlanScreen() {
     const draw = showAllRoutes ? LEG_MODES : [mapMode];
     for (const mode of draw) {
       const row = optionRows.find((r) => r.mode === mode);
-      const hops = row?.legs.length
-        ? row.legs.map((leg) => ({
-            from: leg.from,
-            to: leg.to,
-            path: (() => {
-              const live =
-                routeMap[routeKey(leg.from, leg.to, pathMode(mode, cheapAvoidFees))] ??
-                routeMap[routeKey(leg.from, leg.to, mode)];
-              if (live && live.source !== "air" && live.path.length >= 3) return live.path;
-              return leg.route.path;
-            })(),
-          }))
-        : stops.slice(0, -1).map((_, i) => {
-            const hit =
-              routeMap[routeKey(stops[i], stops[i + 1], pathMode(mode, cheapAvoidFees))] ??
-              routeMap[routeKey(stops[i], stops[i + 1], mode)] ??
-              (mode === "cheapest" ? routeMap[routeKey(stops[i], stops[i + 1], "fastest")] : undefined);
-            return hit
-              ? { from: stops[i], to: stops[i + 1], path: hit.path }
-              : {
-                  from: stops[i],
-                  to: stops[i + 1],
-                  path: [
-                    [stops[i].lat, stops[i].lng],
-                    [stops[i + 1].lat, stops[i + 1].lng],
-                  ] as [number, number][],
-                };
-          });
-      for (const [i, hop] of hops.entries()) {
-        const raw = hop.path.length >= 2 ? simplifyPath(hop.path, 48) : ([
-          [hop.from.lat, hop.from.lng],
-          [hop.to.lat, hop.to.lng],
-        ] as [number, number][]);
-        out.push({
-          id: `opt-${mode}-${i}`,
-          from: [hop.from.lat, hop.from.lng],
-          to: [hop.to.lat, hop.to.lng],
-          weight: showAllRoutes && mode !== mapMode ? 2.4 : 3.2,
-          path: offsetPath(raw, showAllRoutes ? ROUTE_OFFSET_M[mode] : 0),
-          color: modeColor(mode),
-        });
+      const pieces: [number, number][][] = [];
+      if (row?.legs.length) {
+        for (const leg of row.legs) {
+          const live =
+            routeMap[routeKey(leg.from, leg.to, pathMode(mode, cheapAvoidFees))] ??
+            routeMap[routeKey(leg.from, leg.to, mode)];
+          const path =
+            live && live.source !== "air" && live.path.length >= 3 ? live.path : leg.route.path;
+          if (path.length >= 2) pieces.push(path);
+        }
       }
+      if (!pieces.length) {
+        const hit =
+          routeMap[routeKey(stops[0], stops[stops.length - 1], pathMode(mode, cheapAvoidFees))] ??
+          routeMap[routeKey(stops[0], stops[stops.length - 1], mode)] ??
+          (stops.length >= 2
+            ? routeMap[routeKey(stops[0], stops[1], pathMode(mode, cheapAvoidFees))]
+            : undefined);
+        if (hit?.path.length) pieces.push(hit.path);
+        else {
+          pieces.push(stops.map((s) => [s.lat, s.lng] as [number, number]));
+        }
+      }
+      const joined: [number, number][] = [];
+      for (const piece of pieces) {
+        for (const pt of piece) {
+          const last = joined[joined.length - 1];
+          if (last && Math.abs(last[0] - pt[0]) < 1e-5 && Math.abs(last[1] - pt[1]) < 1e-5) continue;
+          joined.push(pt);
+        }
+      }
+      const raw = joined.length >= 2 ? simplifyPath(joined, 96) : joined;
+      const start = raw[0] ?? [stops[0].lat, stops[0].lng];
+      const end = raw.at(-1) ?? [stops[stops.length - 1].lat, stops[stops.length - 1].lng];
+      out.push({
+        id: `opt-${mode}-0`,
+        from: start,
+        to: end,
+        weight: showAllRoutes && mode !== mapMode ? 2.4 : 3.6,
+        path: offsetPath(raw, showAllRoutes ? ROUTE_OFFSET_M[mode] : 0),
+        color: modeColor(mode),
+      });
     }
     return out;
   }, [stops, routeMap, cheapAvoidFees, mapMode, showAllRoutes, optionRows]);
 
   const mapMarkers: MapMarker[] = useMemo(() => {
-    const chargerMarkers: MapMarker[] = [];
-    for (const row of optionRows) {
-      if (!showAllRoutes && row.mode !== mapMode) continue;
-      const [dLat, dLng] = CHARGE_OFFSET[row.mode];
-      const color = modeColor(row.mode);
+    const row = optionRows.find((r) => r.mode === mapMode);
+    const seq: { id: string; lat: number; lng: number; label: string; via: boolean }[] = [];
+    if (row?.legs.length) {
+      const first = row.legs[0].from;
+      seq.push({ id: first.id, lat: first.lat, lng: first.lng, label: first.name, via: false });
       for (const [i, leg] of row.legs.entries()) {
         const spot = leg.charge;
-        const lat = spot
-          ? (locations.find((x) => x.id === spot.locationId)?.lat ?? (leg.via ? leg.to.lat : undefined))
-          : leg.via
-            ? leg.to.lat
-            : undefined;
-        const lng = spot
-          ? (locations.find((x) => x.id === spot.locationId)?.lng ?? (leg.via ? leg.to.lng : undefined))
-          : leg.via
-            ? leg.to.lng
-            : undefined;
-        if (lat == null || lng == null) continue;
-        chargerMarkers.push({
-          id: spot ? `chg-${row.mode}-${i}-${spot.locationId}` : `via-${row.mode}-${leg.to.id}`,
-          lat: lat + dLat,
-          lng: lng + dLng,
-          label: `${modeLabel(row.mode)} · ${spot?.name ?? leg.to.name}`,
-          kind: "charger",
-          badge: row.mode === "eco" ? "E" : row.mode === "cheapest" ? "$" : "F",
-          color,
+        const loc = spot ? locations.find((x) => x.id === spot.locationId) : undefined;
+        seq.push({
+          id: leg.to.id,
+          lat: loc?.lat ?? leg.to.lat,
+          lng: loc?.lng ?? leg.to.lng,
+          label: spot?.name ?? leg.to.name,
+          via: Boolean(leg.via),
         });
+      }
+    } else {
+      for (const s of stops) seq.push({ id: s.id, lat: s.lat, lng: s.lng, label: s.name, via: false });
+    }
+    const extra: MapMarker[] = [];
+    if (showAllRoutes) {
+      for (const other of optionRows) {
+        if (other.mode === mapMode) continue;
+        const [dLat, dLng] = CHARGE_OFFSET[other.mode];
+        for (const [i, leg] of other.legs.entries()) {
+          if (!leg.via && !leg.charge) continue;
+          extra.push({
+            id: `chg-${other.mode}-${i}-${leg.charge?.locationId ?? leg.to.id}`,
+            lat: leg.to.lat + dLat,
+            lng: leg.to.lng + dLng,
+            label: `${modeLabel(other.mode)} · ${leg.charge?.name ?? leg.to.name}`,
+            kind: "charger",
+            badge: other.mode === "eco" ? "E" : other.mode === "cheapest" ? "$" : "F",
+            color: modeColor(other.mode),
+          });
+        }
       }
     }
     return [
-      ...stops.map((s, i) => ({
+      ...seq.map((s, i) => ({
         id: s.id,
         lat: s.lat,
         lng: s.lng,
-        label: s.name,
-        kind: (s.id === "home" || s.name === "Home" ? "home" : "place") as MapMarker["kind"],
+        label: `${i + 1}. ${s.label}`,
+        kind: (s.via ? "charger" : i === 0 ? "home" : "place") as MapMarker["kind"],
         badge: String(i + 1),
+        color: s.via ? modeColor(mapMode) : undefined,
       })),
-      ...chargerMarkers,
+      ...extra,
     ];
   }, [optionRows, locations, stops, mapMode, showAllRoutes]);
 
@@ -1244,7 +1254,7 @@ export function PlanScreen() {
               ? "Routing…"
               : showAllRoutes
                 ? "All modes · tap a leg or charger"
-                : `${modeLabel(mapMode)} · tap a leg or charger`
+                : `${modeLabel(mapMode)} · full route`
           }
           hidden={!shareLocation}
         />

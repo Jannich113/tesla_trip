@@ -48,7 +48,7 @@ function arc(a: [number, number], b: [number, number], steps = 10): [number, num
   return pts;
 }
 
-function thin(path: [number, number][], max = 48): [number, number][] {
+function thin(path: [number, number][], max = 80): [number, number][] {
   if (path.length <= max) return path;
   const step = Math.ceil(path.length / max);
   const out = path.filter((_, i) => i % step === 0);
@@ -58,7 +58,7 @@ function thin(path: [number, number][], max = 48): [number, number][] {
 }
 
 function routePts(route: MapRoute): [number, number][] {
-  return thin(route.path && route.path.length >= 2 ? route.path : arc(route.from, route.to), 48);
+  return thin(route.path && route.path.length >= 2 ? route.path : arc(route.from, route.to), 80);
 }
 
 function overlayKey(
@@ -237,10 +237,9 @@ function BayMapImpl({
         [selectedId, ...(selectedIds ?? [])].filter((id): id is string => !!id),
       );
       const selectedRoutes = routes.filter((r) => selectedSet.has(r.id));
-      const pins =
-        markers.length > 10
-          ? markers.filter((m) => m.kind !== "charger").concat(markers.filter((m) => m.kind === "charger").slice(0, 6))
-          : markers;
+      const pins = markers.length > 40
+        ? markers.filter((m) => m.kind !== "charger").concat(markers.filter((m) => m.kind === "charger").slice(0, 24))
+        : markers;
 
       const keepRoutes = new Set<string>();
       for (const route of routes) {
@@ -338,19 +337,19 @@ function BayMapImpl({
       prune(dotsRef.current, keepDots);
       prune(ringsRef.current, keepRings);
 
-      const focusKey = `${routes.map((r) => r.id).join(",")}:${routes.length}`;
-      const fitPts = routes.flatMap((r) => {
-        const raw = r.path && r.path.length >= 2 ? r.path : [r.from, r.to];
-        return [raw[0], raw[Math.floor(raw.length / 2)], raw[raw.length - 1]];
-      });
-      if (fitPts.length < 2) {
-        for (const m of pins) fitPts.push([m.lat, m.lng]);
-      }
+      const focusKey = `${routes.map((r) => `${r.id}:${r.path?.length ?? 0}`).join(",")}:${pins.map((m) => m.id).join(",")}`;
+      const fitPts: [number, number][] = [
+        ...routes.flatMap((r) => {
+          const raw = r.path && r.path.length >= 2 ? r.path : [r.from, r.to];
+          return [raw[0], raw[Math.floor(raw.length / 2)], raw[raw.length - 1]] as [number, number][];
+        }),
+        ...pins.map((m) => [m.lat, m.lng] as [number, number]),
+      ];
       if (fitPts.length >= 2 && fitKeyRef.current !== focusKey) {
         fitKeyRef.current = focusKey;
         map.fitBounds(L.latLngBounds(fitPts), {
-          padding: [36, 36],
-          maxZoom: selectedRoutes.length === 1 ? 12 : 8,
+          padding: [28, 28],
+          maxZoom: 7,
           animate: false,
         });
       } else if (fitPts.length === 1 && fitKeyRef.current !== focusKey) {
