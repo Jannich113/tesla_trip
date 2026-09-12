@@ -28,7 +28,7 @@ import {
   timePenalized,
 } from "./modes.ts";
 import { rateForNetwork, networkIdFor, roamExtra, EU_NETWORKS, EU_REGIONS, regionalOwn, regionalRoam } from "./networks.ts";
-import { pickEcoRoute, pickRouted } from "./pick-route.ts";
+import { pickCheapAvoidRoute, pickEcoRoute, pickRouted } from "./pick-route.ts";
 import { alongFraction, pickViaAtRange, pickViaOnPath, splitRoutedLeg } from "./insert.ts";
 import { networkFromOsmTags, isDcStation, networkFromOperator } from "./osm-operator.ts";
 import { estimateTolls, gatesOnPath } from "./tolls.ts";
@@ -124,7 +124,7 @@ describe("leg modes", () => {
     assert.equal(pathMode("cheapest"), "fastest");
     assert.equal(pathMode("cheapest", true), "eco");
     assert.equal(pathMode("cheapest", { motorways: true }), "eco");
-    assert.equal(pathMode("cheapest", { tolls: true, roadFees: true }), "fastest");
+    assert.equal(pathMode("cheapest", { tolls: true, roadFees: true }), "cheapest");
   });
 
   it("cheapest avoid toggles split motorways, gates and road fees", () => {
@@ -133,6 +133,24 @@ describe("leg modes", () => {
     assert.equal(noTolls.use_tolls, 0);
     const noMoto = costingFor("cheapest", { motorways: true });
     assert.equal(noMoto.use_highways, 0.25);
+  });
+
+  it("cheapest skips a gate only if the detour stays under 15%", () => {
+    const gatePath: [number, number][] = [
+      [55.33, 10.9],
+      [55.3417, 10.9944],
+      [55.36, 11.1],
+    ];
+    const skipPath: [number, number][] = [
+      [55.4, 10.4],
+      [55.5, 9.5],
+      [55.4, 9.4],
+    ];
+    const fast = { miles: 12, seconds: 1000, path: gatePath, source: "osrm", hasToll: true };
+    const near = { miles: 14, seconds: 1100, path: skipPath, source: "valhalla", hasToll: false };
+    const far = { miles: 40, seconds: 2000, path: skipPath, source: "osrm", hasToll: false };
+    assert.equal(pickCheapAvoidRoute(fast, [near], { tolls: true })?.source, "valhalla");
+    assert.equal(pickCheapAvoidRoute(fast, [far], { tolls: true })?.source, "osrm");
   });
 
   it("time takes the highway corridor at 130 km/t", () => {

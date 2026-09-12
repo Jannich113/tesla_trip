@@ -90,13 +90,19 @@ export function asCheapAvoid(raw: boolean | CheapAvoid | null | undefined): Requ
   };
 }
 
-/** Eco: own corridor. Cheapest: fastest roads unless Avoid motorways, then eco. */
+/** Eco: own corridor. Cheapest: fastest unless Avoid motorways (eco) or avoid gates/fees (own no-toll try). */
 export function pathMode(mode: LegMode, avoid: boolean | CheapAvoid = false): LegMode {
   if (mode === "eco") return "eco";
-  if (mode === "cheapest" && asCheapAvoid(avoid).motorways) return "eco";
+  if (mode === "cheapest") {
+    const a = asCheapAvoid(avoid);
+    if (a.motorways) return "eco";
+    if (a.tolls || a.roadFees) return "cheapest";
+  }
   return "fastest";
 }
 
+/** Extra drive time cheapest may spend vs Fastest to skip a gate or road fee. */
+export const CHEAP_AVOID_FRAC = 0.15;
 /** Extra drive time cheapest may spend vs Fastest to reach a cheaper stall. */
 export const CHEAP_TIME_FRAC = 0.15;
 /** Net save must be at least this many times the extra drive cost. */

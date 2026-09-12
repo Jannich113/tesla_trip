@@ -1,8 +1,8 @@
-import { costingFor, type LegMode } from "./modes";
+import { costingFor, type CheapAvoid, type LegMode } from "./modes";
 import { estimateTolls } from "./tolls";
 import { decodePolyline, simplifyPath } from "./polyline";
 import { haversineM } from "./insert";
-import { pickEcoRoute, pickRouted } from "./pick-route";
+import { pickCheapAvoidRoute, pickEcoRoute, pickRouted } from "./pick-route";
 import { noStore, publicCache } from "@/lib/http-cache";
 
 type Stop = { lat: number; lng: number };
@@ -61,8 +61,8 @@ function anchored(path: [number, number][], from: Stop, to: Stop) {
   );
 }
 
-async function valhalla(from: Stop, to: Stop, mode: LegMode): Promise<DriveRouteJson | null> {
-  const costing = costingFor(mode);
+async function valhalla(from: Stop, to: Stop, mode: LegMode, avoid?: CheapAvoid): Promise<DriveRouteJson | null> {
+  const costing = costingFor(mode, avoid ?? (mode === "cheapest" ? { tolls: true, roadFees: true } : false));
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 22_000);
   try {
@@ -214,6 +214,16 @@ async function hop(from: Stop, to: Stop, mode: LegMode): Promise<DriveRouteJson 
     const quiet = [v, o].filter((r): r is DriveRouteJson => Boolean(r && okRoute(r, from, to)));
     return pickEcoRoute(o && okRoute(o, from, to) ? o : null, quiet.filter((r) => r.source === "valhalla")) ?? (o && okRoute(o, from, to) ? o : v);
   }
+  if (mode === "cheapest") {
+    const [v, o, skip] = await Promise.all([
+      valhalla(from, to, "cheapest").catch(() => null),
+      osrm(from, to).catch(() => null),
+      osrm(from, to, "&exclude=toll").catch(() => null),
+    ]);
+    const fast = o && okRoute(o, from, to) ? o : null;
+    const cands = [v, skip].filter((r): r is DriveRouteJson => Boolean(r && okRoute(r, from, to)));
+    return pickCheapAvoidRoute(fast, cands, { tolls: true, roadFees: true }) ?? fast;
+  }
   const [v, o] = await Promise.all([
     valhalla(from, to, "fastest").catch(() => null),
     osrm(from, to).catch(() => null),
@@ -239,11 +249,32 @@ function okRoute(route: DriveRouteJson | null, from: Stop, to: Stop) {
 }
 
 export async function routeDrive(from: Stop, to: Stop, mode: LegMode): Promise<DriveRouteJson | null> {
-  if (mode === "fastest" || mode === "cheapest") {
+  if (mode === "fastest") {
     const os = await osrm(from, to).catch(() => null);
     if (os && okRoute(os, from, to)) return withTolls(os, mode, Boolean(os.hasToll));
     const base = await hop(from, to, "fastest");
     return base ? withTolls(base, mode, Boolean(base.hasToll)) : null;
+  }
+  if (mode === "cheapest") {
+    const km = haversineM(from, to) / 1000;
+    if (km > 1300) {
+      const long = await routeChunked(from, to, "cheapest");
+      if (long) return withTolls(long, "cheapest", Boolean(long.hasToll));
+    }
+    const [fast, skipVal, skipOsrm] = await Promise.all([
+      osrm(from, to).catch(() => null),
+      valhalla(from, to, "cheapest").catch(() => null),
+      osrm(from, to, "&exclude=toll").catch(() => null),
+    ]);
+    const fastOk = fast && okRoute(fast, from, to) ? withTolls(fast, "fastest", Boolean(fast.hasToll)) : null;
+    const cands = [skipVal, skipOsrm]
+      .filter((r): r is DriveRouteJson => Boolean(r && okRoute(r, from, to)))
+      .map((r) => withTolls(r, "cheapest", Boolean(r.hasToll)));
+    const picked = pickCheapAvoidRoute(fastOk, cands, { tolls: true, roadFees: true });
+    if (picked) return withTolls(picked, "cheapest", Boolean(picked.hasToll));
+    if (fastOk) return fastOk;
+    const hopped = await hop(from, to, "cheapest");
+    return hopped ? withTolls(hopped, "cheapest", Boolean(hopped.hasToll)) : null;
   }
   const km = haversineM(from, to) / 1000;
   if (km > 1300) {

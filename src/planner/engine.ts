@@ -267,7 +267,6 @@ export function applyLiveRoutes(
       live.miles,
       Boolean(live.hasToll),
       leg.mode,
-      leg.mode === "cheapest" ? avoid : false,
     );
     const chargeKr = Math.max(0, leg.kr - (leg.tollKr ?? 0));
     return { ...leg, route: live, kwh, tollKr: toll.kr, tollLabel: toll.label, kr: chargeKr + toll.kr };
@@ -887,7 +886,6 @@ export function pricePlan(opts: {
       route.miles,
       Boolean(route.hasToll),
       mode,
-      mode === "cheapest" ? opts.avoid : false,
     );
     out.push({
       from: job.from,

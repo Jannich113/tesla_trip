@@ -42,19 +42,36 @@ export function estimateTolls(
   miles: number,
   hasToll: boolean,
   mode: LegMode,
-  avoid: boolean | CheapAvoid = false,
 ) {
-  const a = asCheapAvoid(avoid);
   const gates = gatesOnPath(path);
-  const gateKr = a.tolls ? 0 : gates.reduce((n, g) => n + g.kr, 0);
+  const gateKr = gates.reduce((n, g) => n + g.kr, 0);
   const rate =
     path.length > 0
       ? path.reduce((n, [lat, lng]) => n + kmRateAt(lat, lng), 0) / path.length
       : 0;
   const km = miles * 1.609344;
-  const skipRoad = mode === "eco" || a.roadFees;
-  const roadKr = skipRoad || !(hasToll || rate > 0) ? 0 : km * rate;
+  const roadKr = (hasToll || rate > 0) && mode !== "eco" ? km * rate : 0;
+  const rawRoadKr = hasToll || rate > 0 ? km * rate : 0;
   const kr = Math.round((gateKr + roadKr) * 10) / 10;
-  const label = gates.length && !a.tolls ? gates.map((g) => g.name).join(" · ") : roadKr > 1 ? "Road toll" : "";
-  return { kr, label, hasToll: hasToll || gates.length > 0 || roadKr > 1, gates };
+  const label = gates.length ? gates.map((g) => g.name).join(" · ") : roadKr > 1 ? "Road toll" : "";
+  return {
+    kr,
+    gateKr,
+    roadKr: Math.round(rawRoadKr * 10) / 10,
+    label,
+    hasToll: hasToll || gates.length > 0 || rawRoadKr > 1,
+    gates,
+  };
+}
+
+/** Fees the cheapest avoid-toggles are trying to skip on this geometry. */
+export function avoidableFeeKr(
+  path: [number, number][],
+  miles: number,
+  hasToll: boolean,
+  avoid: boolean | CheapAvoid,
+) {
+  const a = asCheapAvoid(avoid);
+  const t = estimateTolls(path, miles, hasToll, "fastest");
+  return (a.tolls ? t.gateKr : 0) + (a.roadFees ? t.roadKr : 0);
 }

@@ -125,8 +125,6 @@ function routeKey(
   return `${from.lat.toFixed(4)},${from.lng.toFixed(4)}|${to.lat.toFixed(4)},${to.lng.toFixed(4)}|${mode}|r5`;
 }
 
-const PATH_MODES: LegMode[] = ["eco", "fastest"];
-
 export function PlanScreen() {
   const units = useVehicleStore((s) => s.units);
   const soc = useVehicleStore((s) => Math.round(s.soc));
@@ -159,6 +157,11 @@ export function PlanScreen() {
     () => ({ motorways: cheapAvoidMotorways, tolls: cheapAvoidTolls, roadFees: cheapAvoidRoadFees }),
     [cheapAvoidMotorways, cheapAvoidTolls, cheapAvoidRoadFees],
   );
+  const pathModes = useMemo<LegMode[]>(() => {
+    const list: LegMode[] = ["eco", "fastest"];
+    if (cheapAvoid.tolls || cheapAvoid.roadFees) list.push("cheapest");
+    return list;
+  }, [cheapAvoid]);
   const whenKind = usePlanStore((s) => s.whenKind);
   const when = usePlanStore((s) => s.when);
   const legWhen = usePlanStore((s) => s.legWhen);
@@ -221,7 +224,7 @@ export function PlanScreen() {
     let cancelled = false;
     const jobs: { from: (typeof stops)[number]; to: (typeof stops)[number]; mode: LegMode; key: string }[] = [];
     for (let i = 0; i < stops.length - 1; i++) {
-      for (const mode of PATH_MODES) {
+      for (const mode of pathModes) {
         const from = stops[i];
         const to = stops[i + 1];
         jobs.push({ from, to, mode, key: routeKey(from, to, mode) });
@@ -250,7 +253,7 @@ export function PlanScreen() {
     return () => {
       cancelled = true;
     };
-  }, [stops, setRouteCache]);
+  }, [stops, setRouteCache, pathModes]);
 
   useEffect(() => {
     setPrefer({});
