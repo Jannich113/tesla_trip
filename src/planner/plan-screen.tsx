@@ -32,6 +32,7 @@ import {
   interpolateWhPerMi,
   normalizeSpeedEff,
   avgSpeedKmh,
+  minutesBetweenDateTime,
   minutesToHm,
   modeColor,
   modeHint,
@@ -97,18 +98,21 @@ function WhenFields({
   at,
   onKind,
   onAt,
+  allowAuto,
 }: {
-  kind: "depart" | "arrive";
+  kind: "auto" | "depart" | "arrive";
   at: string;
-  onKind: (k: "depart" | "arrive") => void;
+  onKind: (k: "auto" | "depart" | "arrive") => void;
   onAt: (dt: string) => void;
+  allowAuto?: boolean;
 }) {
   const day = at.slice(0, 10);
   const hm = at.slice(11, 16);
+  const keys = allowAuto ? (["auto", "depart", "arrive"] as const) : (["depart"] as const);
   return (
     <div className="mt-1.5 space-y-1.5">
       <div className="flex rounded-full bg-surface-2 p-0.5">
-        {(["depart", "arrive"] as const).map((k) => (
+        {keys.map((k) => (
           <button
             key={k}
             type="button"
@@ -118,24 +122,26 @@ function WhenFields({
               kind === k ? "bg-foreground text-background" : "text-muted",
             )}
           >
-            {k === "depart" ? "Leave" : "Arrive"}
+            {k === "auto" ? "Auto" : k === "depart" ? "Leave" : "Arrive"}
           </button>
         ))}
       </div>
-      <div className="grid grid-cols-2 gap-1.5">
-        <input
-          type="date"
-          value={day}
-          onChange={(e) => onAt(`${e.target.value}T${hm || "00:00"}`)}
-          className="h-9 rounded-xl bg-surface-2 px-2 text-xs tabular-nums text-foreground outline-none"
-        />
-        <input
-          type="time"
-          value={hm}
-          onChange={(e) => onAt(`${day || "2026-01-01"}T${e.target.value}`)}
-          className="h-9 rounded-xl bg-surface-2 px-2 text-xs tabular-nums text-foreground outline-none"
-        />
-      </div>
+      {kind !== "auto" ? (
+        <div className="grid grid-cols-2 gap-1.5">
+          <input
+            type="date"
+            value={day}
+            onChange={(e) => onAt(`${e.target.value}T${hm || "00:00"}`)}
+            className="h-9 rounded-xl bg-surface-2 px-2 text-xs tabular-nums text-foreground outline-none"
+          />
+          <input
+            type="time"
+            value={hm}
+            onChange={(e) => onAt(`${day || "2026-01-01"}T${e.target.value}`)}
+            className="h-9 rounded-xl bg-surface-2 px-2 text-xs tabular-nums text-foreground outline-none"
+          />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -440,7 +446,7 @@ export function PlanScreen() {
   const [routing, setRouting] = useState(false);
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<AddressHit[]>([]);
-  const [addKind, setAddKind] = useState<"depart" | "arrive">("depart");
+  const [addKind, setAddKind] = useState<"auto" | "depart" | "arrive">("depart");
   const [addAt, setAddAt] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
   const [prefer, setPrefer] = useState<Record<number, string>>({});
@@ -479,7 +485,7 @@ export function PlanScreen() {
   }, [query]);
 
   useEffect(() => {
-    setAddKind(stops.length === 0 ? "depart" : "arrive");
+    setAddKind(stops.length === 0 ? "depart" : "auto");
   }, [stops.length]);
 
   useEffect(() => {
@@ -834,6 +840,23 @@ export function PlanScreen() {
 
   const totals = useMemo(() => planTotals(viewLegs), [viewLegs]);
 
+  useEffect(() => {
+    if (stops.length < 2) return;
+    let arriveAt = "";
+    for (let i = 0; i < stops.length - 1; i++) {
+      const w = legWhen[i];
+      if (w?.kind === "arrive" && (w.at || w.hhmm)) arriveAt = asDateTime(w.at || w.hhmm);
+    }
+    if (!arriveAt) return;
+    if (Math.abs(minutesBetweenDateTime(clock, arriveAt)) < 1) return;
+    const drive = totals.driveMin > 0 ? totals.driveMin : driveMinGuess;
+    if (!(drive > 0)) return;
+    const leave = addMinutesDateTime(arriveAt, -drive);
+    if (whenKind === "depart" && Math.abs(minutesBetweenDateTime(clock, leave)) < 1) return;
+    setWhenKind("depart");
+    setWhen(leave);
+  }, [legWhen, stops.length, totals.driveMin, driveMinGuess, clock, whenKind, setWhen, setWhenKind]);
+
   const hopKey = optionRows
     .map((row) =>
       row.legs
@@ -892,15 +915,15 @@ export function PlanScreen() {
     const at = asDateTime(addAt || clock);
     addStopToStore({ name: hit.label.split(",")[0] || hit.label, lat: hit.lat, lng: hit.lng });
     if (idx === 0) {
-      setWhenKind(addKind);
+      setWhenKind("depart");
       setWhen(at);
-      setAddKind("arrive");
-    } else {
+      setAddKind("auto");
+    } else if (addKind !== "auto") {
       setLegWhen(idx - 1, { kind: addKind, hhmm: at, at });
     }
     setQuery("");
     setHits([]);
-    setAddAt(at);
+    if (addKind !== "auto") setAddAt(at);
     setSelected(`leg-${Math.max(0, idx - 1)}`);
   }
 
@@ -1343,12 +1366,14 @@ export function PlanScreen() {
 
         <ol className="relative mt-4">
           {stops.map((stop, i) => {
-            const w = i === 0
-              ? { kind: whenKind, at: clock }
-              : {
-                  kind: (legWhen[i - 1]?.kind === "depart" ? "depart" : "arrive") as "depart" | "arrive",
-                  at: asDateTime(legWhen[i - 1]?.at || legWhen[i - 1]?.hhmm || clock),
-                };
+            const w =
+              i === 0
+                ? { kind: "depart" as const, at: clock, note: true }
+                : {
+                    kind: (legWhen[i - 1]?.kind ?? "auto") as "auto" | "depart" | "arrive",
+                    at: asDateTime(legWhen[i - 1]?.at || legWhen[i - 1]?.hhmm || ""),
+                    note: Boolean(legWhen[i - 1]?.kind && legWhen[i - 1]?.kind !== "auto"),
+                  };
             return (
               <li key={stop.id} className="relative flex items-center gap-3 py-1.5">
                 <span className="absolute bottom-0 left-[13px] top-8 w-px bg-border" aria-hidden />
@@ -1357,9 +1382,11 @@ export function PlanScreen() {
                 </span>
                 <div className="relative z-[1] flex min-w-0 flex-1 items-center gap-2 rounded-full bg-surface-2 px-3 h-11">
                   <p className="min-w-0 truncate text-sm">{stop.name}</p>
-                  <p className="ml-auto shrink-0 text-xs tabular-nums text-muted">
-                    {w.kind === "arrive" ? "Arrive" : "Leave"} {formatDateTime(w.at)}
-                  </p>
+                  {w.note && w.at ? (
+                    <p className="ml-auto shrink-0 text-xs tabular-nums text-muted">
+                      {w.kind === "arrive" ? "Arrive" : "Leave"} {formatDateTime(w.at)}
+                    </p>
+                  ) : null}
                 </div>
                 <button
                   type="button"
@@ -1384,8 +1411,9 @@ export function PlanScreen() {
                 className="h-11 w-full rounded-xl bg-surface-2 px-3 text-sm outline-none placeholder:text-subtle"
               />
               <WhenFields
-                kind={addKind}
+                kind={stops.length === 0 ? "depart" : addKind}
                 at={asDateTime(addAt || clock)}
+                allowAuto={stops.length > 0}
                 onKind={setAddKind}
                 onAt={setAddAt}
               />

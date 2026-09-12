@@ -67,6 +67,7 @@ export {
   hoursFrom,
   interpolateWhPerMi,
   kwhPerMiFrom100km,
+  minutesBetweenDateTime,
   normalizeSpeedEff,
   avgSpeedKmh,
   splitDateTime,
