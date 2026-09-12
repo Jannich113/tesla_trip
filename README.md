@@ -1,6 +1,6 @@
 # tesla_trip
 
-A dark, mobile-first companion for Tesla ownership — trips, charging costs, Danish spot electricity (`Elpris`), and a local vehicle catalog with factory paint heroes.
+A dark, mobile-first companion for Tesla ownership — trips, charging costs, Danish spot electricity (`Elpris`), a local vehicle catalog, and an EV trip planner with eco / fastest / cheapest corridors.
 
 Demo data ships out of the box. Owner-only Tesla linking is scaffolded; nothing remote is commanded.
 
@@ -16,6 +16,23 @@ At-a-glance status for the selected car: parked/driving, battery %, rated range,
 - Odometer, charged energy, regen, and vs-petrol savings tiles
 - Charge limit marker on the battery bar
 - Header + bottom tab follow the selected model name
+- Link into the trip planner (`/plan`)
+
+### Trip planner
+Plan a drive with three independent corridors. Opened from Home (or Trips) at [`/plan`](/plan).
+
+![Trip planner — map, stops, and colored routes](docs/readme/plan.png)
+
+- **Eco** — 80–100 km/t roads, avoids motorways and tolls when it can
+- **Fastest** — motorway corridor, time first, tolls allowed
+- **Cheapest** — same roads as Fastest unless you toggle avoid motorway / toll / road fee; hunts cheaper stalls (max ~15 km extra per leg)
+- Leave or arrive clock (date + time); wait only counts when a cheap slot actually delays you
+- Charge when SOC would drop under 25% (never below 8%); typical fill to 80%
+- Suggested optional charge in the 26–45% band when the price is good
+- EU charging networks + OpenChargeMap along the polyline; live Elpris for kWh cost
+- Save / load named plans (default name from start → end) and export to Tesla nav
+
+![Trip planner — Eco, Fastest, Cheapest with avoid toggles](docs/readme/plan-modes.png)
 
 ### Trips
 Period filters (Day / Week / Month / Year / Total) with maps, energy charts, and expandable day/week/year subgroups.
@@ -36,7 +53,7 @@ Charging spend broken down by Home, Supercharger, and Custom locations — with 
 - Period pills aligned with Trips
 - Map pins for charge locations (visit counts)
 - Always-visible **Home · Supercharger · Custom · Per mile** tiles
-- Add custom places (address search) and set ¢/kWh + geofence radius
+- Add custom places (address search or map pin) and set ¢/kWh + geofence radius
 
 ### Elpris
 Live Danish day-ahead spot prices from Energi Data Service, plus retailer tillæg.
@@ -92,6 +109,7 @@ public/vehicles/{modelId}-{paintId}-{front|rear}.jpg
 | Costs | `?tab=costs` | Charge spend & locations |
 | Elpris | `?tab=elpris` | DK spot + retailer prices |
 | Profile | `?tab=vehicle` | Model, paint, privacy, specs |
+| Trip planner | `/plan` | Eco / fastest / cheapest route + chargers |
 
 The profile tab label is the selected model name (e.g. **Juniper**).
 
@@ -101,7 +119,8 @@ The profile tab label is the selected model name (e.g. **Juniper**).
 
 - **UI:** React 19, TanStack Router/Start, Tailwind CSS 4, Zustand
 - **Maps:** Leaflet + OpenStreetMap
-- **Prices:** Energi Data Service (DK1/DK2 day-ahead)
+- **Routing:** OSRM / Valhalla alternatives, OpenChargeMap along the polyline
+- **Prices:** Energi Data Service (DK1/DK2 day-ahead) + EU network catalog
 - **Data:** Local/demo vehicle + trip/charge stores (PGlite migrations available)
 
 ---
@@ -113,7 +132,7 @@ npm install
 npm run dev
 ```
 
-Dev server defaults to [http://localhost:8080](http://localhost:8080).
+Dev server defaults to [http://localhost:8080](http://localhost:8080). Open [`/plan`](http://localhost:8080/plan) for the trip planner.
 
 ```bash
 npm run typecheck
@@ -127,6 +146,7 @@ npm run build
 
 - Trip and charge data stay on-device in this demo build
 - Address find uses OpenStreetMap Nominatim only when you tap it
+- Planner charger search uses OpenChargeMap along the chosen route
 - Export / clear local data from the Vehicle tab
 - Tesla owner linking is scaffolded for demos — no remote vehicle commands
 
