@@ -171,12 +171,8 @@ const REQUIRE_SOC = 25;
 const SUGGEST_SOC_MIN = 26;
 const SUGGEST_SOC_MAX = 45;
 const TARGET_SOC = 80;
-/** Charge this high to skip an extra stop rather than drip 8% hops. */
-const STRETCH_SOC = 95;
-/** Every charge session adds at least this much SOC. */
+/** Every charge session adds at least this much SOC, never past TARGET_SOC. */
 const MIN_ADD_SOC = 20;
-/** Remaining energy may exceed one hop by this fraction before we insert another via. */
-const SKIP_STOP_FRAC = 1.22;
 const CHEAP_VS_LIVE = 0.85;
 
 export function airRoute(from: PlanStop, to: PlanStop): RoutedLeg {
@@ -724,13 +720,7 @@ export function pricePlan(opts: {
     const packSoc = soc < REQUIRE_SOC ? Math.max(soc, TARGET_SOC) : soc;
     const floorKwh = Math.max(4, ((packSoc - FLOOR_SOC) / 100) * usableKwh);
     const bandKwh = Math.max(0, ((packSoc - REQUIRE_SOC) / 100) * usableKwh);
-    const stretchSoc = Math.min(
-      STRETCH_SOC,
-      Math.max(packSoc, FLOOR_SOC + (kwh / usableKwh) * 100 + 5),
-    );
-    const stretchKwh = Math.max(4, ((stretchSoc - FLOOR_SOC) / 100) * usableKwh);
-    const coverWithStretch = kwh > floorKwh * 0.98 && kwh <= stretchKwh * 0.99 && stretchSoc <= STRETCH_SOC;
-    if (kwh > floorKwh * 0.98 && !coverWithStretch && job.depth < 8) {
+    if (kwh > floorKwh * 0.98 && job.depth < 8) {
       const viaOpts = {
         path: route.path,
         locations,
@@ -793,7 +783,6 @@ export function pricePlan(opts: {
     const minArrive = FLOOR_SOC;
     const required =
       socAfter < FLOOR_SOC ||
-      coverWithStretch ||
       (soc < REQUIRE_SOC && (jobs.length > 0 || kwh > floorKwh * 0.5));
     const searchHours = hoursFrom(hours, readyAt);
     const cheap = cheapestHour(searchHours);
@@ -802,18 +791,18 @@ export function pricePlan(opts: {
     const suggested = !required && goodPrice && inSuggestBand;
     const needForHop = minArrive + (kwh / usableKwh) * 100;
     const autoTarget = Math.min(
-      100,
+      TARGET_SOC,
       Math.max(
-        soc + MIN_ADD_SOC,
-        required ? Math.max(coverWithStretch ? stretchSoc : TARGET_SOC, needForHop) : soc + MIN_ADD_SOC,
+        Math.min(TARGET_SOC, soc + MIN_ADD_SOC),
+        required ? Math.max(TARGET_SOC, Math.min(TARGET_SOC, needForHop)) : 0,
       ),
     );
-    const minTarget = Math.min(100, soc + MIN_ADD_SOC);
+    const minTarget = Math.min(TARGET_SOC, soc + MIN_ADD_SOC);
     const atViaFrom = job.from.id.startsWith("via-");
     const rawTarget = atViaFrom || !via ? opts.chargeToSoc?.[userIndex] : null;
     const userTarget =
       rawTarget != null && Number.isFinite(rawTarget)
-        ? Math.min(100, Math.max(minTarget, rawTarget))
+        ? Math.min(TARGET_SOC, Math.max(minTarget, rawTarget))
         : null;
     const target = userTarget ?? autoTarget;
     const wantCharge = required || suggested || userTarget != null;
@@ -882,7 +871,7 @@ export function pricePlan(opts: {
     const departAt = maxDateTime(plannedStart, billed ? chargeDone : readyAt);
     const arriveAt = addMinutesDateTime(departAt, route.seconds / 60);
     const packKwh = billed ? kwhNeed : 0;
-    const startSoc = billed && charge ? Math.min(100, soc + (packKwh / usableKwh) * 100) : soc;
+    const startSoc = billed && charge ? Math.min(TARGET_SOC, soc + (packKwh / usableKwh) * 100) : soc;
     const arriveSoc = Math.max(minArrive, startSoc - (kwh / usableKwh) * 100);
     const extraKr =
       billed && charge && userTarget != null

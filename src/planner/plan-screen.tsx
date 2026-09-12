@@ -1443,12 +1443,12 @@ export function PlanScreen() {
                       <input
                         type="number"
                         min={1}
-                        max={100}
+                        max={80}
                         value={Math.round(chargeTo)}
                         onChange={(e) => {
                           const n = Number(e.target.value);
                           if (!Number.isFinite(n)) return;
-                          const v = Math.max(5, Math.min(100, Math.round(n)));
+                          const v = Math.max(5, Math.min(80, Math.round(n)));
                           setChargeToSoc((cur) => ({ ...cur, [userI]: v }));
                           setAcceptCharge((cur) => ({ ...cur, [userI]: true }));
                         }}
@@ -1646,7 +1646,7 @@ export function PlanScreen() {
                             <input
                               type="number"
                               min={1}
-                              max={100}
+                              max={80}
                               value={Math.round(
                                 chargeToSoc[userI] ??
                                   (chargedLeg.accepted ? chargedLeg.startSoc : chargedLeg.autoStartSoc),
@@ -1654,7 +1654,7 @@ export function PlanScreen() {
                               onChange={(e) => {
                                 const n = Number(e.target.value);
                                 if (!Number.isFinite(n)) return;
-                                const v = Math.max(5, Math.min(100, Math.round(n)));
+                                const v = Math.max(5, Math.min(80, Math.round(n)));
                                 setChargeToSoc((cur) => ({ ...cur, [userI]: v }));
                                 setAcceptCharge((cur) => ({ ...cur, [userI]: true }));
                               }}
@@ -1714,12 +1714,12 @@ export function PlanScreen() {
                           <input
                             type="number"
                             min={1}
-                            max={100}
+                            max={80}
                             value={Math.round(chargeToSoc[userI] ?? leftPct)}
                             onChange={(e) => {
                               const n = Number(e.target.value);
                               if (!Number.isFinite(n)) return;
-                              const v = Math.max(5, Math.min(100, Math.round(n)));
+                              const v = Math.max(5, Math.min(80, Math.round(n)));
                               setChargeToSoc((cur) => ({ ...cur, [userI]: v }));
                               setAcceptCharge((cur) => ({ ...cur, [userI]: true }));
                             }}

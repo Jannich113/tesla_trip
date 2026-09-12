@@ -598,9 +598,6 @@ describe("leg modes", () => {
       const pack = soc < 25 ? 80 : soc;
       const floorKwh = Math.max(4, ((pack - 8) / 100) * 75);
       if (kwh <= floorKwh * 0.98) break;
-      const stretchSoc = Math.min(95, Math.max(pack, 8 + (kwh / 75) * 100 + 5));
-      const stretchKwh = ((stretchSoc - 8) / 100) * 75;
-      if (kwh <= stretchKwh * 0.99) break;
       const via = pickViaAtRange({
         path: route.path,
         locations,
