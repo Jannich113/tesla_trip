@@ -472,6 +472,37 @@ describe("leg modes", () => {
     assert.ok(frac * 200 <= 36 * 0.96, `via at ${frac} uses too much energy`);
   });
 
+  it("charge stop arrives between 8% and 25%", () => {
+    const path: [number, number][] = [
+      [55.4, 10.4],
+      [54.8, 9.4],
+      [53.5, 10.0],
+      [51.2, 6.8],
+      [48.8, 9.2],
+      [45.5, 9.2],
+      [41.9, 12.5],
+    ];
+    const locations = seedsAlongPath(path, 40_000);
+    const soc = 70;
+    const usable = 75;
+    const budgetKwh = ((soc - 8) / 100) * usable;
+    const minKwh = ((soc - 25) / 100) * usable;
+    const via = pickViaOnPath({
+      path,
+      locations,
+      budgetKwh,
+      minKwh,
+      totalKwh: 280,
+      mode: "fastest",
+      detourKm: 18,
+    });
+    assert.ok(via, "via in 8–25% band");
+    const energy = 280 * alongFraction(path, via!.lat, via!.lng);
+    const arrive = soc - (energy / usable) * 100;
+    assert.ok(arrive >= 8, `arrive ${arrive} below 8%`);
+    assert.ok(arrive <= 25, `arrive ${arrive} above 25%`);
+  });
+
   it("1200 mile trip inserts several charge vias", () => {
     const from = { lat: 55.4, lng: 10.4 };
     const to = { lat: 41.9, lng: 12.5 };
@@ -501,12 +532,14 @@ describe("leg modes", () => {
     const vias: string[] = [];
     for (let d = 0; d < 12; d++) {
       const kwh = driveKwhAtSpeed(route.miles, route.seconds, eff);
-      const rangeKwh = Math.max(8, ((soc - 15) / 100) * 75);
-      if (kwh <= rangeKwh * 0.88) break;
+      const pack = soc < 25 ? 70 : soc;
+      const floorKwh = Math.max(4, ((pack - 8) / 100) * 75);
+      if (kwh <= floorKwh * 0.98) break;
       const via = pickViaAtRange({
         path: route.path,
         locations,
-        budgetKwh: rangeKwh * 0.85,
+        budgetKwh: floorKwh,
+        minKwh: Math.max(0, ((pack - 25) / 100) * 75),
         totalKwh: kwh,
         mode: "fastest",
         detourKm: 18,

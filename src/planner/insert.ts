@@ -149,6 +149,8 @@ export function pickViaOnPath(opts: {
   detourKm: number;
   excludeIds?: Iterable<string>;
   memberships?: Record<string, boolean>;
+  /** Energy that drops SOC to 25%. Prefer a stall after this (lower = faster DC). */
+  minKwh?: number;
 }): ViaLoc | null {
   const { path, locations, budgetKwh, totalKwh, mode, detourKm } = opts;
   const focus = opts.focus ?? defaultFocus(mode);
@@ -177,8 +179,9 @@ export function pickViaOnPath(opts: {
     const frac = alongFraction(path, loc.lat, loc.lng);
     if (frac < 0.02 || frac > 0.92) continue;
     const energyTo = totalKwh * frac;
-    if (energyTo > budgetKwh * 0.98) continue;
-    if (energyTo < budgetKwh * 0.08) continue;
+    if (energyTo > budgetKwh * 0.99) continue;
+    const minEnergy = Math.max(0, opts.minKwh ?? budgetKwh * 0.45);
+    if (energyTo < minEnergy) continue;
     const rate = locRate(loc);
     if (!(rate > 0)) continue;
     const extraMin = (distM / 1000 / 80) * 60;
@@ -197,7 +200,7 @@ export function pickViaOnPath(opts: {
       extraDriveKr: extraKr,
       extraKwh: (distM / 1000) * 0.2,
     });
-    const along = energyTo * 6;
+    const along = energyTo * 12;
     const score = along - fit;
     if (score > bestScore) {
       bestScore = score;
@@ -211,7 +214,9 @@ export function pickViaOnPath(opts: {
 export function pickViaAtRange(opts: Parameters<typeof pickViaOnPath>[0]): ViaLoc | null {
   const hit = pickViaOnPath(opts);
   if (hit) return hit;
-  const frac = Math.min(0.82, Math.max(0.08, (opts.budgetKwh * 0.75) / Math.max(opts.totalKwh, 1)));
+  const minEnergy = Math.max(0, opts.minKwh ?? opts.budgetKwh * 0.45);
+  const targetKwh = minEnergy + 0.85 * Math.max(0, opts.budgetKwh - minEnergy);
+  const frac = Math.min(0.82, Math.max(0.08, targetKwh / Math.max(opts.totalKwh, 1)));
   const [lat, lng] = pointAlongPath(opts.path, frac);
   const exclude = new Set(opts.excludeIds ?? []);
   let best: ViaLoc | null = null;
