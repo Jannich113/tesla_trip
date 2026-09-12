@@ -24,6 +24,11 @@ export function pickRouted<T extends DriveCandidate>(mode: LegMode, routes: T[])
   return list.reduce((best, r) => (r.seconds < best.seconds ? r : best));
 }
 
+/** Fastest must be the lowest drive time among real candidates. */
+export function pickFastestRoute<T extends DriveCandidate>(routes: T[]): T | null {
+  return pickRouted("fastest", routes);
+}
+
 /** Prefer a quiet road under 2× Fastest. Never fall back to the motorway. */
 export function pickEcoRoute<T extends DriveCandidate>(fast: T | null, cands: T[]): T | null {
   const cap = fast && fast.seconds > 0 ? fast.seconds * SLOW_TIME_FACTOR : Infinity;

@@ -29,7 +29,7 @@ import {
   timePenalized,
 } from "./modes.ts";
 import { rateForNetwork, networkIdFor, roamExtra, EU_NETWORKS, EU_REGIONS, regionalOwn, regionalRoam } from "./networks.ts";
-import { pickCheapAvoidRoute, pickEcoRoute, pickRouted } from "./pick-route.ts";
+import { pickCheapAvoidRoute, pickEcoRoute, pickFastestRoute, pickRouted } from "./pick-route.ts";
 import { alongFraction, pickViaAtRange, pickViaOnPath, splitRoutedLeg } from "./insert.ts";
 import { networkFromOsmTags, isDcStation, networkFromOperator } from "./osm-operator.ts";
 import { estimateTolls, gatesOnPath } from "./tolls.ts";
@@ -459,6 +459,16 @@ describe("leg modes", () => {
     assert.equal(pickRouted("fastest", [highway, quiet])?.seconds, highway.seconds);
     assert.equal(pickRouted("eco", [highway, quiet])?.tollKr, 0);
     assert.equal(pickRouted("cheapest", [highway, quiet])?.seconds, highway.seconds);
+  });
+
+  it("fastest keeps the lowest-time candidate among alternatives", () => {
+    const path = Array.from({ length: 8 }, (_, i) => [55 - i * 0.4, 10 + i * 0.2] as [number, number]);
+    const a = { miles: 900, seconds: 16 * 3600, path, source: "osrm" };
+    const b = { miles: 880, seconds: 14 * 3600, path, source: "valhalla" };
+    const c = { miles: 920, seconds: 15 * 3600, path, source: "osrm" };
+    const picked = pickFastestRoute([a, b, c]);
+    assert.equal(picked?.seconds, b.seconds);
+    assert.ok((picked?.seconds ?? 0) <= Math.min(a.seconds, b.seconds, c.seconds));
   });
 
   it("eco drops a quiet road that is 2× slower than Fastest", () => {

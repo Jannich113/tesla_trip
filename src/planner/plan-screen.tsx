@@ -131,7 +131,7 @@ function routeKey(
   to: { lat: number; lng: number },
   mode: LegMode,
 ) {
-  return `${from.lat.toFixed(4)},${from.lng.toFixed(4)}|${to.lat.toFixed(4)},${to.lng.toFixed(4)}|${mode}|r5`;
+  return `${from.lat.toFixed(4)},${from.lng.toFixed(4)}|${to.lat.toFixed(4)},${to.lng.toFixed(4)}|${mode}|r6`;
 }
 
 export function PlanScreen() {
