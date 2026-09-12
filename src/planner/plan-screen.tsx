@@ -90,6 +90,33 @@ const CHARGE_OFFSET: Record<LegMode, [number, number]> = {
   cheapest: [0.0016, 0.0009],
 };
 
+function CheapAvoidToggles({ className }: { className?: string }) {
+  const motorways = usePlanStore((s) => s.cheapAvoidMotorways);
+  const tolls = usePlanStore((s) => s.cheapAvoidTolls);
+  const roadFees = usePlanStore((s) => s.cheapAvoidRoadFees);
+  const setCheapAvoid = usePlanStore((s) => s.setCheapAvoid);
+  const rows = [
+    { on: motorways, label: "Avoid motorways", set: (v: boolean) => setCheapAvoid({ motorways: v }) },
+    { on: tolls, label: "Avoid toll gates", set: (v: boolean) => setCheapAvoid({ tolls: v }) },
+    { on: roadFees, label: "Avoid road fees", set: (v: boolean) => setCheapAvoid({ roadFees: v }) },
+  ] as const;
+  return (
+    <div className={cn("space-y-2", className)}>
+      {rows.map((row) => (
+        <label key={row.label} className="flex items-center gap-2 text-xs text-muted">
+          <input
+            type="checkbox"
+            checked={row.on}
+            onChange={(e) => row.set(e.target.checked)}
+            className="size-4 accent-foreground"
+          />
+          {row.label}
+        </label>
+      ))}
+    </div>
+  );
+}
+
 function routeKey(
   from: { lat: number; lng: number },
   to: { lat: number; lng: number },
@@ -125,8 +152,13 @@ export function PlanScreen() {
   const setLegDetour = usePlanStore((s) => s.setLegDetour);
   const setLegWait = usePlanStore((s) => s.setLegWait);
   const setAllModes = usePlanStore((s) => s.setAllModes);
-  const cheapAvoidFees = usePlanStore((s) => s.cheapAvoidFees);
-  const setCheapAvoidFees = usePlanStore((s) => s.setCheapAvoidFees);
+  const cheapAvoidMotorways = usePlanStore((s) => s.cheapAvoidMotorways);
+  const cheapAvoidTolls = usePlanStore((s) => s.cheapAvoidTolls);
+  const cheapAvoidRoadFees = usePlanStore((s) => s.cheapAvoidRoadFees);
+  const cheapAvoid = useMemo(
+    () => ({ motorways: cheapAvoidMotorways, tolls: cheapAvoidTolls, roadFees: cheapAvoidRoadFees }),
+    [cheapAvoidMotorways, cheapAvoidTolls, cheapAvoidRoadFees],
+  );
   const whenKind = usePlanStore((s) => s.whenKind);
   const when = usePlanStore((s) => s.when);
   const legWhen = usePlanStore((s) => s.legWhen);
@@ -267,16 +299,16 @@ export function PlanScreen() {
         .slice(0, -1)
         .map((_, i) => {
           const m = activeModes[i] ?? "fastest";
-          return routeMap[routeKey(stops[i], stops[i + 1], pathMode(m, cheapAvoidFees))];
+          return routeMap[routeKey(stops[i], stops[i + 1], pathMode(m, cheapAvoid))];
         })
         .filter((r): r is RoutedLeg => Boolean(r))
-    : routesFor(pathMode(activeModes[0] ?? "fastest", cheapAvoidFees));
+    : routesFor(pathMode(activeModes[0] ?? "fastest", cheapAvoid));
 
   const searchRoutes = useMemo(() => {
     const all: RoutedLeg[] = [];
     const seen = new Set<string>();
     for (const mode of LEG_MODES) {
-      const pathM = pathMode(mode, cheapAvoidFees);
+      const pathM = pathMode(mode, cheapAvoid);
       for (const r of routesFor(pathM)) {
         const a = r.path[0];
         const b = r.path.at(-1);
@@ -288,7 +320,7 @@ export function PlanScreen() {
       }
     }
     return all;
-  }, [routeMap, stops, cheapAvoidFees]);
+  }, [routeMap, stops, cheapAvoid]);
 
   const { chargers: routeChargers, loading: chargersLoading } = useRouteChargers(
     searchRoutes,
@@ -351,6 +383,7 @@ export function PlanScreen() {
     preferIds: stops.slice(1).map((_, i) => prefer[i] ?? null),
     memberships: networkAbo,
     focuses: activeModes.map((m) => (m === "cheapest" ? "pris" : m === "eco" ? "distance" : "time")),
+    avoid: cheapAvoid,
   };
 
   const legs: PricedLeg[] = useMemo(() => {
@@ -360,7 +393,7 @@ export function PlanScreen() {
       modes: activeModes,
       routes: selectedRoutes,
     });
-  }, [stops, activeModes, cheapAvoidFees, detours, waits, selectedRoutes, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc, prefer, networkAbo]);
+  }, [stops, activeModes, cheapAvoid, detours, waits, selectedRoutes, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc, prefer, networkAbo]);
 
   const viewLegs = useMemo(() => {
     return legs.map((leg, i) => {
@@ -406,7 +439,7 @@ export function PlanScreen() {
 
   const optionRows = useMemo(() => {
     return LEG_MODES.map((mode) => {
-      const optionRoutes = routesFor(pathMode(mode, cheapAvoidFees));
+      const optionRoutes = routesFor(pathMode(mode, cheapAvoid));
       if (optionRoutes.length !== Math.max(0, stops.length - 1) || stops.length < 2) {
         return { mode, totals: null as ReturnType<typeof planTotals> | null, kmh: 0, kwhPerMi: 0, legs: [] as PricedLeg[] };
       }
@@ -420,8 +453,9 @@ export function PlanScreen() {
       const legs = applyLiveRoutes(
         priced,
         (from, to, m) =>
-          routeMap[routeKey(from, to, pathMode(m, cheapAvoidFees))] ?? routeMap[routeKey(from, to, m)],
+          routeMap[routeKey(from, to, pathMode(m, cheapAvoid))] ?? routeMap[routeKey(from, to, m)],
         speedEff,
+        cheapAvoid,
       );
       const miles = legs.reduce((n, l) => n + l.route.miles, 0);
       const seconds = legs.reduce((n, l) => n + l.route.seconds, 0);
@@ -434,7 +468,7 @@ export function PlanScreen() {
         legs,
       };
     });
-  }, [routeMap, stops, detours, waits, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc, prefer, networkAbo, cheapAvoidFees]);
+  }, [routeMap, stops, detours, waits, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc, prefer, networkAbo, cheapAvoid]);
 
   const hopKey = optionRows
     .map((row) =>
@@ -453,7 +487,7 @@ export function PlanScreen() {
     const jobs: { from: PlanStop; to: PlanStop; mode: LegMode; key: string }[] = [];
     const seen = new Set<string>();
     for (const row of optionRows) {
-      const m = pathMode(row.mode, cheapAvoidFees);
+      const m = pathMode(row.mode, cheapAvoid);
       for (const leg of row.legs) {
         const key = routeKey(leg.from, leg.to, m);
         if (seen.has(key)) continue;
@@ -479,7 +513,7 @@ export function PlanScreen() {
     return () => {
       cancelled = true;
     };
-  }, [hopKey, cheapAvoidFees]);
+  }, [hopKey, cheapAvoid]);
 
   function addStop(hit: AddressHit) {
     addStopToStore({ name: hit.label.split(",")[0] || hit.label, lat: hit.lat, lng: hit.lng });
@@ -693,7 +727,7 @@ export function PlanScreen() {
       if (row?.legs.length) {
         for (const leg of row.legs) {
           const live =
-            routeMap[routeKey(leg.from, leg.to, pathMode(mode, cheapAvoidFees))] ??
+            routeMap[routeKey(leg.from, leg.to, pathMode(mode, cheapAvoid))] ??
             routeMap[routeKey(leg.from, leg.to, mode)];
           const path =
             live && live.source !== "air" && live.path.length >= 3 ? live.path : leg.route.path;
@@ -702,10 +736,10 @@ export function PlanScreen() {
       }
       if (!pieces.length) {
         const hit =
-          routeMap[routeKey(stops[0], stops[stops.length - 1], pathMode(mode, cheapAvoidFees))] ??
+          routeMap[routeKey(stops[0], stops[stops.length - 1], pathMode(mode, cheapAvoid))] ??
           routeMap[routeKey(stops[0], stops[stops.length - 1], mode)] ??
           (stops.length >= 2
-            ? routeMap[routeKey(stops[0], stops[1], pathMode(mode, cheapAvoidFees))]
+            ? routeMap[routeKey(stops[0], stops[1], pathMode(mode, cheapAvoid))]
             : undefined);
         if (hit?.path.length) pieces.push(hit.path);
         else {
@@ -733,7 +767,7 @@ export function PlanScreen() {
       });
     }
     return out;
-  }, [stops, routeMap, cheapAvoidFees, mapMode, showAllRoutes, optionRows]);
+  }, [stops, routeMap, cheapAvoid, mapMode, showAllRoutes, optionRows]);
 
   const mapMarkers: MapMarker[] = useMemo(() => {
     const row = optionRows.find((r) => r.mode === mapMode);
@@ -941,9 +975,21 @@ export function PlanScreen() {
                           avg {formatNumber(row.kmh, 0)} km/t
                           {slow ? " · 2× slower" : ""}
                           {row.mode === "cheapest"
-                            ? cheapAvoidFees
-                              ? " · no motorways / tolls"
-                              : " · cheapest stalls"
+                            ? [
+                                cheapAvoid.motorways && "no motorways",
+                                cheapAvoid.tolls && "no toll gates",
+                                cheapAvoid.roadFees && "no road fees",
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")
+                                ? ` · ${[
+                                    cheapAvoid.motorways && "no motorways",
+                                    cheapAvoid.tolls && "no toll gates",
+                                    cheapAvoid.roadFees && "no road fees",
+                                  ]
+                                    .filter(Boolean)
+                                    .join(" · ")}`
+                                : " · cheapest stalls"
                             : ""}
                         </span>
                         <span className="mt-0.5 block text-xs text-muted">
@@ -966,17 +1012,7 @@ export function PlanScreen() {
                     )}
                   </span>
                 </button>
-                {row.mode === "cheapest" ? (
-                  <label className="mt-2 flex items-center gap-2 pl-5 text-xs text-muted">
-                    <input
-                      type="checkbox"
-                      checked={cheapAvoidFees}
-                      onChange={(e) => setCheapAvoidFees(e.target.checked)}
-                      className="size-4 accent-foreground"
-                    />
-                    Avoid motorways, toll gates and road fees
-                  </label>
-                ) : null}
+                {row.mode === "cheapest" ? <CheapAvoidToggles className="mt-2 pl-5" /> : null}
                 </div>
               </li>
             );
@@ -1471,15 +1507,7 @@ export function PlanScreen() {
                       {modeHint((modes[userI] ?? "fastest") as LegMode)}
                     </p>
                     {(modes[userI] ?? "fastest") === "cheapest" ? (
-                      <label className="mt-2 flex items-center gap-2 text-xs text-muted">
-                        <input
-                          type="checkbox"
-                          checked={cheapAvoidFees}
-                          onChange={(e) => setCheapAvoidFees(e.target.checked)}
-                          className="size-4 accent-foreground"
-                        />
-                        Avoid motorways, toll gates and road fees
-                      </label>
+                      <CheapAvoidToggles className="mt-2" />
                     ) : null}
                     <div className="mt-3 flex gap-1">
                       <button

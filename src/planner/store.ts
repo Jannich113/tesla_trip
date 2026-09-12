@@ -14,6 +14,9 @@ export type SavedPlan = {
   stops: PlanStop[];
   modes: LegMode[];
   cheapAvoidFees?: boolean;
+  cheapAvoidMotorways?: boolean;
+  cheapAvoidTolls?: boolean;
+  cheapAvoidRoadFees?: boolean;
   detours: number[];
   waits: number[];
   whenKind: WhenKind;
@@ -65,7 +68,9 @@ type PlanState = {
   name: string;
   stops: PlanStop[];
   modes: LegMode[];
-  cheapAvoidFees: boolean;
+  cheapAvoidMotorways: boolean;
+  cheapAvoidTolls: boolean;
+  cheapAvoidRoadFees: boolean;
   detours: number[];
   waits: number[];
   whenKind: WhenKind;
@@ -86,7 +91,7 @@ type PlanStore = PlanState & {
   moveStop: (id: string, dir: -1 | 1) => void;
   setLegMode: (index: number, mode: LegMode) => void;
   setAllModes: (mode: LegMode) => void;
-  setCheapAvoidFees: (on: boolean) => void;
+  setCheapAvoid: (patch: { motorways?: boolean; tolls?: boolean; roadFees?: boolean }) => void;
   setLegDetour: (index: number, km: number) => void;
   setLegWait: (index: number, min: number) => void;
   setWhenKind: (kind: WhenKind) => void;
@@ -107,7 +112,9 @@ const empty = (): PlanState => ({
   name: "",
   stops: [homeStop()],
   modes: [],
-  cheapAvoidFees: false,
+  cheapAvoidMotorways: false,
+  cheapAvoidTolls: false,
+  cheapAvoidRoadFees: false,
   detours: [],
   waits: [],
   whenKind: "depart",
@@ -235,7 +242,12 @@ export const usePlanStore = create<PlanStore>()(
         set({ modes: get().stops.slice(1).map(() => normalizeMode(mode)) });
       },
 
-      setCheapAvoidFees: (cheapAvoidFees) => set({ cheapAvoidFees }),
+      setCheapAvoid: (patch) =>
+        set({
+          cheapAvoidMotorways: patch.motorways ?? get().cheapAvoidMotorways,
+          cheapAvoidTolls: patch.tolls ?? get().cheapAvoidTolls,
+          cheapAvoidRoadFees: patch.roadFees ?? get().cheapAvoidRoadFees,
+        }),
 
       setLegDetour: (index, km) => {
         const detours = get().detours.length
@@ -262,7 +274,7 @@ export const usePlanStore = create<PlanStore>()(
       },
 
       savePlan: (given, summary) => {
-        const { name, stops, modes, cheapAvoidFees, detours, waits, whenKind, when, legWhen, whPerMi, speedEff, saved, seq } = get();
+        const { name, stops, modes, cheapAvoidMotorways, cheapAvoidTolls, cheapAvoidRoadFees, detours, waits, whenKind, when, legWhen, whPerMi, speedEff, saved, seq } = get();
         if (stops.length < 2) return null;
         const label = (given ?? name).trim();
         if (!label) return null;
@@ -271,7 +283,9 @@ export const usePlanStore = create<PlanStore>()(
           name: label,
           stops,
           modes,
-          cheapAvoidFees,
+          cheapAvoidMotorways,
+          cheapAvoidTolls,
+          cheapAvoidRoadFees,
           detours,
           waits,
           whenKind,
@@ -301,7 +315,9 @@ export const usePlanStore = create<PlanStore>()(
           name: plan.name,
           stops: plan.stops,
           modes: (plan.modes ?? []).map(normalizeMode),
-          cheapAvoidFees: Boolean(plan.cheapAvoidFees),
+          cheapAvoidMotorways: plan.cheapAvoidMotorways ?? Boolean(plan.cheapAvoidFees),
+          cheapAvoidTolls: plan.cheapAvoidTolls ?? Boolean(plan.cheapAvoidFees),
+          cheapAvoidRoadFees: plan.cheapAvoidRoadFees ?? Boolean(plan.cheapAvoidFees),
           detours: plan.detours,
           waits: plan.waits ?? plan.stops.slice(1).map(() => DEFAULT_WAIT_MIN),
           whenKind: plan.whenKind ?? "depart",
@@ -325,13 +341,26 @@ export const usePlanStore = create<PlanStore>()(
     }),
     {
       name: "juniper-planner-draft",
+      version: 2,
       storage: createJSONStorage(() => localStorage),
       skipHydration: true,
+      migrate: (persisted, version) => {
+        const p = persisted as SavedPlan & PlanState & { cheapAvoidFees?: boolean };
+        if (version < 2) {
+          const old = Boolean(p.cheapAvoidFees);
+          p.cheapAvoidMotorways = p.cheapAvoidMotorways ?? old;
+          p.cheapAvoidTolls = p.cheapAvoidTolls ?? old;
+          p.cheapAvoidRoadFees = p.cheapAvoidRoadFees ?? old;
+        }
+        return p;
+      },
       partialize: (s) => ({
         name: s.name,
         stops: s.stops,
         modes: s.modes,
-        cheapAvoidFees: s.cheapAvoidFees,
+        cheapAvoidMotorways: s.cheapAvoidMotorways,
+        cheapAvoidTolls: s.cheapAvoidTolls,
+        cheapAvoidRoadFees: s.cheapAvoidRoadFees,
         detours: s.detours,
         waits: s.waits,
         whenKind: s.whenKind,

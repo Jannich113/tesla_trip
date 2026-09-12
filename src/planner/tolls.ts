@@ -1,5 +1,5 @@
 import { minDistToPathM } from "./insert.ts";
-import type { LegMode } from "./modes";
+import { asCheapAvoid, type CheapAvoid, type LegMode } from "./modes.ts";
 
 export type TollGate = {
   id: string;
@@ -37,16 +37,24 @@ function kmRateAt(lat: number, lng: number) {
   return hit?.kr ?? 0;
 }
 
-export function estimateTolls(path: [number, number][], miles: number, hasToll: boolean, mode: LegMode) {
+export function estimateTolls(
+  path: [number, number][],
+  miles: number,
+  hasToll: boolean,
+  mode: LegMode,
+  avoid: boolean | CheapAvoid = false,
+) {
+  const a = asCheapAvoid(avoid);
   const gates = gatesOnPath(path);
-  const gateKr = gates.reduce((n, g) => n + g.kr, 0);
+  const gateKr = a.tolls ? 0 : gates.reduce((n, g) => n + g.kr, 0);
   const rate =
     path.length > 0
       ? path.reduce((n, [lat, lng]) => n + kmRateAt(lat, lng), 0) / path.length
       : 0;
   const km = miles * 1.609344;
-  const roadKr = mode !== "eco" && (hasToll || rate > 0) ? km * rate : 0;
+  const skipRoad = mode === "eco" || a.roadFees;
+  const roadKr = skipRoad || !(hasToll || rate > 0) ? 0 : km * rate;
   const kr = Math.round((gateKr + roadKr) * 10) / 10;
-  const label = gates.length ? gates.map((g) => g.name).join(" · ") : roadKr > 1 ? "Road toll" : "";
+  const label = gates.length && !a.tolls ? gates.map((g) => g.name).join(" · ") : roadKr > 1 ? "Road toll" : "";
   return { kr, label, hasToll: hasToll || gates.length > 0 || roadKr > 1, gates };
 }

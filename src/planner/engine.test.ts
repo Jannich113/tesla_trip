@@ -123,6 +123,16 @@ describe("leg modes", () => {
     assert.equal(pathMode("fastest"), "fastest");
     assert.equal(pathMode("cheapest"), "fastest");
     assert.equal(pathMode("cheapest", true), "eco");
+    assert.equal(pathMode("cheapest", { motorways: true }), "eco");
+    assert.equal(pathMode("cheapest", { tolls: true, roadFees: true }), "fastest");
+  });
+
+  it("cheapest avoid toggles split motorways, gates and road fees", () => {
+    const noTolls = costingFor("cheapest", { tolls: true });
+    assert.equal(noTolls.use_highways, 1);
+    assert.equal(noTolls.use_tolls, 0);
+    const noMoto = costingFor("cheapest", { motorways: true });
+    assert.equal(noMoto.use_highways, 0.25);
   });
 
   it("time takes the highway corridor at 130 km/t", () => {

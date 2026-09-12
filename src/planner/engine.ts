@@ -5,6 +5,7 @@ import {
   type LegMode,
   type ModeFocus,
   type SpeedEff,
+  type CheapAvoid,
   addDaysYmd,
   addMinutesDateTime,
   addMinutesHhmm,
@@ -73,6 +74,8 @@ export {
   MODE_FOCUSES,
   DEFAULT_MODE_FOCUS,
   pathMode,
+  asCheapAvoid,
+  type CheapAvoid,
   routeAb,
   timePenalized,
   stallKw,
@@ -253,12 +256,19 @@ export function applyLiveRoutes(
   legs: PricedLeg[],
   lookup: (from: PlanStop, to: PlanStop, mode: LegMode) => RoutedLeg | undefined,
   speedEff: SpeedEff,
+  avoid: boolean | CheapAvoid = false,
 ): PricedLeg[] {
   return legs.map((leg) => {
     const live = lookup(leg.from, leg.to, leg.mode);
     if (!live || live.source === "air" || live.path.length < 3) return leg;
     const kwh = driveKwh(live.miles, live.seconds, speedEff);
-    const toll = estimateTolls(live.path, live.miles, Boolean(live.hasToll), leg.mode);
+    const toll = estimateTolls(
+      live.path,
+      live.miles,
+      Boolean(live.hasToll),
+      leg.mode,
+      leg.mode === "cheapest" ? avoid : false,
+    );
     const chargeKr = Math.max(0, leg.kr - (leg.tollKr ?? 0));
     return { ...leg, route: live, kwh, tollKr: toll.kr, tollLabel: toll.label, kr: chargeKr + toll.kr };
   });
@@ -670,6 +680,7 @@ export function pricePlan(opts: {
   waitCapMin?: number[];
   focuses?: ModeFocus[];
   preferIds?: Array<string | null | undefined>;
+  avoid?: CheapAvoid;
 }): PricedLeg[] {
   const { stops, modes, detours, routes, usableKwh, locations, hours, acKw, acKr, speedEff } =
     opts;
@@ -871,7 +882,13 @@ export function pricePlan(opts: {
         : charge
           ? { ...charge, waitMin }
           : null;
-    const toll = estimateTolls(route.path, route.miles, Boolean(route.hasToll), mode);
+    const toll = estimateTolls(
+      route.path,
+      route.miles,
+      Boolean(route.hasToll),
+      mode,
+      mode === "cheapest" ? opts.avoid : false,
+    );
     out.push({
       from: job.from,
       to: job.to,
