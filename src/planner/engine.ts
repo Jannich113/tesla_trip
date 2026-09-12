@@ -164,8 +164,12 @@ export const DKK_PER_USD = 6.85;
 const FLOOR_SOC = 8;
 /** Stop to charge when SOC would be under this. Lower in the 8–25 band is faster DC. */
 const REQUIRE_SOC = 25;
+/** Optional stop only in this band, and only when the kWh price is good. */
+const SUGGEST_SOC_MIN = 26;
+const SUGGEST_SOC_MAX = 45;
 const TARGET_SOC = 70;
-const SUGGEST_SOC = 45;
+/** Every charge session adds at least this much SOC. */
+const MIN_ADD_SOC = 20;
 const CHEAP_VS_LIVE = 0.85;
 
 export function airRoute(from: PlanStop, to: PlanStop): RoutedLeg {
@@ -773,24 +777,24 @@ export function pricePlan(opts: {
     const searchHours = hoursFrom(hours, readyAt);
     const cheap = cheapestHour(searchHours);
     const goodPrice = Boolean(cheap && cheap.krPerKwh <= live * CHEAP_VS_LIVE);
-    const lowEnough = soc < REQUIRE_SOC || socAfter < REQUIRE_SOC;
-    const deep = socAfter < SUGGEST_SOC;
-    const suggested =
-      chargingStop && !required && ((goodPrice && lowEnough) || (deep && focus !== "time") || socAfter < REQUIRE_SOC);
-    const autoNeedSoc = required
-      ? Math.max(TARGET_SOC - soc, minArrive + (kwh / usableKwh) * 100 - soc)
-      : Math.min(TARGET_SOC - soc, Math.max((kwh / usableKwh) * 100, 12));
-    const autoTarget = Math.min(100, Math.max(soc, soc + autoNeedSoc));
-    const minTarget = required
-      ? Math.min(100, Math.max(soc + 1, minArrive + (kwh / usableKwh) * 100))
-      : soc;
+    const inSuggestBand = soc >= SUGGEST_SOC_MIN && soc <= SUGGEST_SOC_MAX;
+    const suggested = chargingStop && !required && goodPrice && inSuggestBand;
+    const needForHop = minArrive + (kwh / usableKwh) * 100;
+    const autoTarget = Math.min(
+      100,
+      Math.max(
+        soc + MIN_ADD_SOC,
+        required ? Math.max(TARGET_SOC, needForHop) : soc + MIN_ADD_SOC,
+      ),
+    );
+    const minTarget = Math.min(100, soc + MIN_ADD_SOC);
     const rawTarget = via ? null : opts.chargeToSoc?.[userIndex];
     const userTarget =
       rawTarget != null && Number.isFinite(rawTarget)
         ? Math.min(100, Math.max(minTarget, rawTarget))
         : null;
     const target = userTarget ?? autoTarget;
-    const wantCharge = chargingStop && (required || suggested || focus === "pris" || userTarget != null);
+    const wantCharge = chargingStop && (required || suggested || userTarget != null);
     const kwhNeed = Math.max((target - soc) / 100, 0) * usableKwh;
     const autoKwh = Math.max((autoTarget - soc) / 100, 0) * usableKwh;
     const chargeMinEst = (Math.max(kwhNeed, 5) / 150) * 60;
@@ -839,7 +843,7 @@ export function pricePlan(opts: {
       ? null
       : required
         ? "required"
-        : suggested || (mode === "cheapest" && charge)
+        : suggested
           ? "suggested"
           : null;
     const accepted =
