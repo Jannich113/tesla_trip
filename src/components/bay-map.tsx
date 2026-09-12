@@ -156,6 +156,11 @@ function BayMapImpl({
           zoomControl: false,
           attributionControl: true,
           scrollWheelZoom: false,
+          dragging: false,
+          doubleClickZoom: false,
+          boxZoom: false,
+          keyboard: false,
+          touchZoom: false,
           fadeAnimation: false,
           zoomAnimation: false,
           markerZoomAnimation: false,
@@ -174,29 +179,6 @@ function BayMapImpl({
         }).addTo(map);
         map.attributionControl?.setPosition("bottomleft");
         map.setView([37.45, -122.15], 10);
-        map.on("click", (e) => {
-          const latlng = e.latlng;
-          if (onDropRef.current) {
-            onDropRef.current(latlng.lat, latlng.lng);
-            return;
-          }
-          let best: string | null = null;
-          let bestD = 28;
-          for (const [id, line] of routesRef.current) {
-            const pts = line.getLatLngs() as { lat: number; lng: number }[];
-            const step = Math.max(1, Math.floor(pts.length / 40));
-            for (let i = 0; i < pts.length; i += step) {
-              const p = map.latLngToLayerPoint(pts[i]);
-              const q = map.latLngToLayerPoint(latlng);
-              const d = Math.hypot(p.x - q.x, p.y - q.y);
-              if (d < bestD) {
-                bestD = d;
-                best = id;
-              }
-            }
-          }
-          if (best) onSelectRef.current?.(best);
-        });
         mapRef.current = map;
         if (!cancelled) setReady(true);
       })();
@@ -230,7 +212,7 @@ function BayMapImpl({
     const key = overlayKey(markers, routes, selectedId, selectedIds, dropping);
     if (key === drawKeyRef.current) return;
 
-    const raf = window.requestAnimationFrame(() => {
+    const timer = window.setTimeout(() => {
       if (mapRef.current !== map) return;
       drawKeyRef.current = key;
       const selectedSet = new Set(
@@ -287,11 +269,8 @@ function BayMapImpl({
             fillColor: color,
             fillOpacity: selected ? 1 : 0.88,
             renderer: canvas,
-            bubblingMouseEvents: false,
-          });
-          dot.on("click", (e: import("leaflet").LeafletMouseEvent) => {
-            L.DomEvent.stopPropagation(e);
-            onSelectRef.current?.(marker.id);
+            interactive: false,
+            bubblingMouseEvents: true,
           });
           dot.addTo(map);
           dotsRef.current.set(marker.id, dot);
@@ -358,7 +337,7 @@ function BayMapImpl({
       }
     });
 
-    return () => window.cancelAnimationFrame(raf);
+    return () => window.clearTimeout(timer);
   }, [ready, hidden, markers, routes, selectedId, selectedIds, dropping]);
 
   useEffect(() => {

@@ -109,6 +109,16 @@ input[type="range"].charge-range::-moz-range-thumb {
   background: var(--color-surface);
   font-family: var(--font-sans);
   z-index: 0;
+  touch-action: pan-y;
+}
+
+.bay-map .leaflet-container {
+  pointer-events: none;
+}
+
+.bay-map .leaflet-control-zoom,
+.bay-map .leaflet-control-zoom a {
+  pointer-events: auto;
 }
 
 .bay-map .leaflet-pane,

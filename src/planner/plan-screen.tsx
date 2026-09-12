@@ -202,14 +202,18 @@ export function PlanScreen() {
     if (missing) setRouting(true);
     else setRouting(false);
     void (async () => {
+      const patch: Record<string, RoutedLeg> = {};
       await Promise.all(
         jobs.map(async (job) => {
           const route = await fetchRoute(job.from, job.to, job.mode);
           if (cancelled) return;
-          setRouteCache({ [job.key]: route });
+          patch[job.key] = route;
         }),
       );
-      if (!cancelled) setRouting(false);
+      if (!cancelled) {
+        if (Object.keys(patch).length) setRouteCache(patch);
+        setRouting(false);
+      }
     })();
     return () => {
       cancelled = true;
@@ -228,7 +232,7 @@ export function PlanScreen() {
     speedEffOverride,
     whPerMiOverride && whPerMiOverride > 0 ? whPerMiOverride : carWhPerMi,
   );
-  const clock = asDateTime(when || dkNowDateTime());
+  const clock = useMemo(() => asDateTime(when || dkNowDateTime()), [when]);
 
   const hours = useMemo(() => {
     if (!elpris) return [];
@@ -461,12 +465,17 @@ export function PlanScreen() {
       }
     }
     if (!jobs.length) return;
-    void Promise.all(
-      jobs.map(async (job) => {
-        const route = await fetchRoute(job.from, job.to, job.mode);
-        if (!cancelled && route.source !== "air" && route.path.length >= 3) setRouteCache({ [job.key]: route });
-      }),
-    );
+    void (async () => {
+      const patch: Record<string, RoutedLeg> = {};
+      await Promise.all(
+        jobs.map(async (job) => {
+          const route = await fetchRoute(job.from, job.to, job.mode);
+          if (cancelled || route.source === "air" || route.path.length < 3) return;
+          patch[job.key] = route;
+        }),
+      );
+      if (!cancelled && Object.keys(patch).length) setRouteCache(patch);
+    })();
     return () => {
       cancelled = true;
     };
@@ -778,6 +787,13 @@ export function PlanScreen() {
       ...extra,
     ];
   }, [optionRows, locations, stops, mapMode, showAllRoutes]);
+
+  const [idleMap, setIdleMap] = useState({ routes: [] as MapRoute[], markers: [] as MapMarker[] });
+  useEffect(() => {
+    if (routing) return;
+    const t = window.setTimeout(() => setIdleMap({ routes: mapRoutes, markers: mapMarkers }), 160);
+    return () => window.clearTimeout(t);
+  }, [routing, mapRoutes, mapMarkers]);
 
   return (
     <div className="space-y-5 px-4 pb-6 [touch-action:manipulation]">
@@ -1244,8 +1260,8 @@ export function PlanScreen() {
           </button>
         </div>
         <BayMap
-          markers={mapMarkers}
-          routes={mapRoutes}
+          markers={idleMap.markers.length ? idleMap.markers : mapMarkers}
+          routes={idleMap.routes.length ? idleMap.routes : mapRoutes}
           selectedId={selected}
           selectedIds={selectedIds}
           onSelect={onMapSelect}
