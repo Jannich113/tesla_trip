@@ -38,6 +38,7 @@ import {
   pickViaAtRange,
   splitRoutedLeg,
   spreadAlongPath,
+  locationsNearPath,
 } from "./insert";
 import { estimateTolls } from "./tolls";
 import { withRetry, fetchWithTimeout } from "./retry";
@@ -535,15 +536,18 @@ export function pickCharges(opts: {
     return (id ? rateForNetwork(id, Boolean(memberships[id])) : null) ?? usdToKr(loc.usdPerKwh);
   };
 
-  const nearby = locations
+  const band = preferCheap ? CHEAP_STALL_KM * 1000 : Math.max(searchBand, 40_000);
+  const nearby = [
+    ...locationsNearPath(locations, path, band),
+    ...locations.filter((l) => l.id === preferId || l.id === backupId),
+  ]
+    .filter((loc, i, arr) => arr.findIndex((x) => x.id === loc.id) === i)
     .map((loc) => ({ loc, distM: minDistToPathM(loc.lat, loc.lng, path) }))
     .filter(
       (s) =>
         s.loc.id === preferId ||
         s.loc.id === backupId ||
-        (s.distM <= (preferCheap ? CHEAP_STALL_KM * 1000 : Math.max(searchBand, 40_000)) &&
-          (s.distM / 1000 / 80) * 60 <= maxExtraMin &&
-          locRate(s.loc) > 0.3),
+        ((s.distM / 1000 / 80) * 60 <= maxExtraMin && locRate(s.loc) > 0.3),
     );
   const rankedNear = preferCheap
     ? [...nearby].sort((a, b) => locRate(a.loc) - locRate(b.loc) || a.distM - b.distM).slice(0, 36)

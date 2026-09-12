@@ -1,4 +1,5 @@
 import { chargeFitScore, chargeSearchKm, CHEAP_STALL_KM, defaultFocus, extraMileageKr, type LegMode, type ModeFocus } from "./modes.ts";
+import { geohashesAlongPath, inGeohashSet } from "./geohash.ts";
 import { networkIdFor, rateForNetwork } from "./networks.ts";
 
 export type ViaLoc = {
@@ -124,6 +125,25 @@ export function pointAlongPath(path: [number, number][], frac: number): [number,
   return path[path.length - 1];
 }
 
+/** Drop chargers whose geohash cell is not on the corridor (plus 8 neighbors). */
+export function locationsNearPath<T extends { lat: number; lng: number }>(
+  locations: T[],
+  path: [number, number][],
+  maxM: number,
+): T[] {
+  if (!locations.length || path.length < 2) return [];
+  if (locations.length < 48) {
+    return locations.filter((l) => minDistToPathM(l.lat, l.lng, path) <= maxM);
+  }
+  const cells = geohashesAlongPath(path);
+  const out: T[] = [];
+  for (const loc of locations) {
+    if (!inGeohashSet(loc.lat, loc.lng, cells)) continue;
+    if (minDistToPathM(loc.lat, loc.lng, path) <= maxM) out.push(loc);
+  }
+  return out;
+}
+
 /** Keep stalls spread along the corridor, not the 40 nearest (those all sit in one country). */
 export function spreadAlongPath<T extends { id: string; lat: number; lng: number }>(
   locations: T[],
@@ -132,10 +152,10 @@ export function spreadAlongPath<T extends { id: string; lat: number; lng: number
   maxM = 50_000,
 ): T[] {
   if (!locations.length || path.length < 2) return [];
+  const nearby = locationsNearPath(locations, path, maxM);
   const chosen = new Map<number, { loc: T; d: number }>();
-  for (const loc of locations) {
+  for (const loc of nearby) {
     const d = minDistToPathM(loc.lat, loc.lng, path);
-    if (d > maxM) continue;
     const frac = alongFraction(path, loc.lat, loc.lng);
     if (frac < 0.02 || frac > 0.98) continue;
     const b = Math.min(buckets - 1, Math.floor(frac * buckets));
@@ -193,16 +213,16 @@ export function pickViaOnPath(opts: {
     mode === "cheapest" || focus === "pris"
       ? CHEAP_STALL_KM * 1000
       : Math.max(chargeSearchKm(mode, detourKm, focus) * 1000, 12_000);
+  const pool = locationsNearPath(locations, path, searchBand);
   const locRate = (loc: ViaLoc) => {
     const netId = networkIdFor(loc.kind, loc.networkId);
     return (netId ? rateForNetwork(netId, Boolean(memberships[netId])) : null) ?? loc.usdPerKwh * 6.85;
   };
   let best: ViaLoc | null = null;
   let bestScore = -Infinity;
-  for (const loc of locations) {
+  for (const loc of pool) {
     if (exclude.has(loc.id) || loc.kind === "home") continue;
     const distM = minDistToPathM(loc.lat, loc.lng, path);
-    if (distM > searchBand) continue;
     const frac = alongFraction(path, loc.lat, loc.lng);
     if (frac < 0.02 || frac > 0.92) continue;
     const energyTo = totalKwh * frac;
@@ -250,15 +270,17 @@ export function pickViaAtRange(opts: Parameters<typeof pickViaOnPath>[0]): ViaLo
     const netId = networkIdFor(loc.kind, loc.networkId);
     return (netId ? rateForNetwork(netId, Boolean(memberships[netId])) : null) ?? loc.usdPerKwh * 6.85;
   };
+  const band = pris ? CHEAP_STALL_KM * 1000 : 80_000;
+  const pool = locationsNearPath(opts.locations, opts.path, band);
   let best: ViaLoc | null = null;
   let bestScore = Infinity;
-  let bestD = pris ? CHEAP_STALL_KM * 1000 : 80_000;
-  for (const loc of opts.locations) {
+  let bestD = band;
+  for (const loc of pool) {
     if (exclude.has(loc.id) || loc.kind === "home") continue;
     const energyTo = opts.totalKwh * alongFraction(opts.path, loc.lat, loc.lng);
     if (energyTo < minEnergy * 0.9 || energyTo > opts.budgetKwh * 1.02) continue;
     const d = approxM(lat, lng, loc.lat, loc.lng);
-    if (d > (pris ? CHEAP_STALL_KM * 1000 : 80_000)) continue;
+    if (d > band) continue;
     if (pris) {
       const cost = locRate(loc) * 50 + extraMileageKr(d);
       if (cost < bestScore - 0.5 || (Math.abs(cost - bestScore) <= 0.5 && d < bestD)) {

@@ -30,7 +30,8 @@ import {
 } from "./modes.ts";
 import { rateForNetwork, networkIdFor, roamExtra, EU_NETWORKS, EU_REGIONS, regionalOwn, regionalRoam } from "./networks.ts";
 import { pickCheapAvoidRoute, pickEcoRoute, pickFastestRoute, pickRouted } from "./pick-route.ts";
-import { alongFraction, haversineM, pickViaAtRange, pickViaOnPath, splitRoutedLeg } from "./insert.ts";
+import { alongFraction, haversineM, locationsNearPath, pickViaAtRange, pickViaOnPath, splitRoutedLeg } from "./insert.ts";
+import { encodeGeohash, geohashNeighborhood, geohashesAlongPath } from "./geohash.ts";
 import { networkFromOsmTags, isDcStation, networkFromOperator } from "./osm-operator.ts";
 import { estimateTolls, gatesOnPath } from "./tolls.ts";
 import { seedsAlongPath } from "./seed-chargers.ts";
@@ -466,6 +467,31 @@ describe("leg modes", () => {
     assert.ok(Math.abs(far - classic(a, b)) / classic(a, b) < 0.012);
     assert.ok(Math.abs(close - classic(a, near)) / classic(a, near) < 0.006);
     assert.ok(far > 1_400_000 && far < 1_900_000);
+  });
+
+  it("geohash neighborhood covers a cell edge and a path corridor", () => {
+    const odense = encodeGeohash(55.4038, 10.4024, 4);
+    const neigh = geohashNeighborhood(odense);
+    assert.equal(neigh.length, 9);
+    assert.ok(neigh.includes(odense));
+    const path: [number, number][] = [
+      [55.4, 10.4],
+      [48.8, 2.3],
+      [41.9, 12.5],
+    ];
+    const cells = geohashesAlongPath(path);
+    assert.ok(cells.has(odense));
+    assert.ok(!cells.has(encodeGeohash(37.33, -121.89, 4)));
+    const locs = [
+      { id: "dk", lat: 55.4, lng: 10.4 },
+      { id: "ca", lat: 37.33, lng: -121.89 },
+      { id: "rome", lat: 41.9, lng: 12.5 },
+      ...Array.from({ length: 50 }, (_, i) => ({ id: `pad-${i}`, lat: 37.3, lng: -121.8 })),
+    ];
+    const near = locationsNearPath(locs, path, 80_000);
+    assert.ok(near.some((l) => l.id === "dk"));
+    assert.ok(near.some((l) => l.id === "rome"));
+    assert.ok(!near.some((l) => l.id === "ca"));
   });
 
   it("simplifies a dense path without dropping the ends", () => {
