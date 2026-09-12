@@ -55,19 +55,28 @@ function tabHref(id: Tab) {
 
 export function Dashboard({ startTab = "home" }: { startTab?: Tab }) {
   const [tab, setTab] = useState<Tab>(startTab);
+  const [pending, setPending] = useState<Tab | null>(null);
+  const [opened, setOpened] = useState<Tab[]>([startTab]);
   const wake = useVehicleStore((s) => s.wake);
   const waking = useVehicleStore((s) => s.waking);
   const tick = useVehicleStore((s) => s.tick);
   const { profile } = useVehicleProfile();
+  const shown = pending ?? tab;
 
   const selectTab = (next: Tab) => {
+    if (next === shown) return;
+    setPending(next);
     setTab(next);
+    setOpened((cur) => (cur.includes(next) ? cur : [...cur, next]));
     writeTabToLocation(next);
   };
 
   useEffect(() => {
     const initial = readTabFromLocation();
-    if (initial !== "home") setTab(initial);
+    if (initial !== "home") {
+      setTab(initial);
+      setOpened((cur) => (cur.includes(initial) ? cur : [...cur, initial]));
+    }
     const onPop = () => setTab(readTabFromLocation());
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
@@ -130,11 +139,31 @@ export function Dashboard({ startTab = "home" }: { startTab?: Tab }) {
         </header>
 
         <main className="flex-1 overflow-y-auto pb-32">
-          {tab === "home" && <HomeScreen />}
-          {tab === "trips" && <TripsScreen />}
-          {tab === "costs" && <ChargeScreen />}
-          {tab === "elpris" && <ElprisScreen />}
-          {tab === "vehicle" && <VehicleScreen />}
+          {opened.includes("home") && (
+            <div className={tab === "home" ? undefined : "pointer-events-none hidden"} aria-hidden={tab !== "home"}>
+              <HomeScreen />
+            </div>
+          )}
+          {opened.includes("trips") && (
+            <div className={tab === "trips" ? undefined : "pointer-events-none hidden"} aria-hidden={tab !== "trips"}>
+              <TripsScreen visible={tab === "trips"} />
+            </div>
+          )}
+          {opened.includes("costs") && (
+            <div className={tab === "costs" ? undefined : "pointer-events-none hidden"} aria-hidden={tab !== "costs"}>
+              <ChargeScreen visible={tab === "costs"} />
+            </div>
+          )}
+          {opened.includes("elpris") && (
+            <div className={tab === "elpris" ? undefined : "pointer-events-none hidden"} aria-hidden={tab !== "elpris"}>
+              <ElprisScreen />
+            </div>
+          )}
+          {opened.includes("vehicle") && (
+            <div className={tab === "vehicle" ? undefined : "pointer-events-none hidden"} aria-hidden={tab !== "vehicle"}>
+              <VehicleScreen />
+            </div>
+          )}
         </main>
 
         <nav
@@ -144,7 +173,7 @@ export function Dashboard({ startTab = "home" }: { startTab?: Tab }) {
           <ul className="grid grid-cols-5">
             {TABS.map((item) => {
               const Icon = item.icon;
-              const current = tab === item.id;
+              const current = shown === item.id;
               const label = item.id === "vehicle" ? profile.name : item.label!;
               return (
                 <li key={item.id}>

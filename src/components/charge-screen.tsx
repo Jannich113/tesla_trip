@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo, useState } from "react";
+import { lazy, Suspense, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { BatteryBar } from "@/components/battery-bar";
 import type { MapMarker } from "@/components/bay-map";
@@ -32,7 +32,7 @@ type Draft = {
   searching: boolean;
 };
 
-export function ChargeScreen() {
+export function ChargeScreen({ visible = true }: { visible?: boolean }) {
   const s = useVehicleStore();
   const locations = useChargeStore((st) => st.locations);
   const logged = useChargeStore((st) => st.logged);
@@ -43,13 +43,23 @@ export function ChargeScreen() {
   const removeLocation = useChargeStore((st) => st.removeLocation);
 
   const [period, setPeriod] = useState<Period>("month");
+  const listPeriod = useDeferredValue(period);
   const [selected, setSelected] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [mapFocus, setMapFocus] = useState<{ lat: number; lng: number; zoom?: number } | null>(null);
+  const [mapOn, setMapOn] = useState(false);
+  useEffect(() => {
+    if (!visible) {
+      setMapOn(false);
+      return;
+    }
+    const id = window.setTimeout(() => setMapOn(true), 400);
+    return () => window.clearTimeout(id);
+  }, [visible]);
   const today = useMemo(() => laDayString(), []);
-  const totals = useMemo(() => totalsFor(locations, logged, period, today), [locations, logged, period, today]);
-  const driven = useMemo(() => tripTotals(period, today), [period, today]);
-  const ranks = useMemo(() => ranksFor(locations, logged, period, today), [locations, logged, period, today]);
+  const totals = useMemo(() => totalsFor(locations, logged, listPeriod, today), [locations, logged, listPeriod, today]);
+  const driven = useMemo(() => tripTotals(listPeriod, today), [listPeriod, today]);
+  const ranks = useMemo(() => ranksFor(locations, logged, listPeriod, today), [locations, logged, listPeriod, today]);
   const blended = totals.kwh > 0 ? totals.usd / totals.kwh : 0;
   const remaining = Math.max(0, s.chargeLimit - s.soc);
   const minutes =
@@ -197,28 +207,32 @@ export function ChargeScreen() {
         </p>
       </section>
 
-      <Suspense fallback={<div className="h-52 rounded-xl bg-surface shadow-[var(--shadow-border)]" />}>
-        <BayMap
-          markers={markers}
-          selectedId={draft ? "draft" : activeId}
-          onSelect={(id) => {
-            if (id === "draft") return;
-            setSelected(id);
-            setChargeAt(id);
-          }}
-          onDrop={draft ? (lat, lng) => setDraft({ ...draft, lat, lng, hits: [] }) : undefined}
-          dropping={!!draft}
-          hidden={!s.shareLocation}
-          focus={mapFocus}
-          caption={
-            draft
-              ? "Tap map to place the pin · circle is the catch radius"
-              : activeRank
-                ? `${activeRank.short} · ${formatCents(activeRank.usdPerKwh)} · ${activeRank.radiusM} m`
-                : `${ranks.length} locations`
-          }
-        />
-      </Suspense>
+      {mapOn && visible ? (
+        <Suspense fallback={<div className="h-52 rounded-xl bg-surface shadow-[var(--shadow-border)]" />}>
+          <BayMap
+            markers={markers}
+            selectedId={draft ? "draft" : activeId}
+            onSelect={(id) => {
+              if (id === "draft") return;
+              setSelected(id);
+              setChargeAt(id);
+            }}
+            onDrop={draft ? (lat, lng) => setDraft({ ...draft, lat, lng, hits: [] }) : undefined}
+            dropping={!!draft}
+            hidden={!s.shareLocation}
+            focus={mapFocus}
+            caption={
+              draft
+                ? "Tap map to place the pin · circle is the catch radius"
+                : activeRank
+                  ? `${activeRank.short} · ${formatCents(activeRank.usdPerKwh)} · ${activeRank.radiusM} m`
+                  : `${ranks.length} locations`
+            }
+          />
+        </Suspense>
+      ) : (
+        <div className="h-52 rounded-xl bg-surface shadow-[var(--shadow-border)]" />
+      )}
 
       <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
         <div className="flex items-center justify-between gap-3">

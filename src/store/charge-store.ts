@@ -94,10 +94,17 @@ function priceSession(session: ChargeSession & { locationId?: string }, location
   };
 }
 
+let pricedCache: { locations: ChargeLocation[]; logged: LoggedSession[]; rows: ChargeSession[] } | null = null;
+
 export function pricedSessions(locations: ChargeLocation[], logged: LoggedSession[]): ChargeSession[] {
+  if (pricedCache && pricedCache.locations === locations && pricedCache.logged === logged) {
+    return pricedCache.rows;
+  }
   const extra = logged.map((s) => priceSession(s, locations));
   const hist = getCharges().map((s) => priceSession(s, locations));
-  return [...extra, ...hist].sort((a, b) => (a.day === b.day ? b.hour - a.hour : a.day < b.day ? 1 : -1));
+  const rows = [...extra, ...hist].sort((a, b) => (a.day === b.day ? b.hour - a.hour : a.day < b.day ? 1 : -1));
+  pricedCache = { locations, logged, rows };
+  return rows;
 }
 
 export const useChargeStore = create<ChargeStore>()(

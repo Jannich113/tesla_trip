@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo, useState } from "react";
+import { lazy, Suspense, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { ChevronDown, MapPinned } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import type { MapMarker, MapRoute } from "@/components/bay-map";
@@ -72,7 +72,7 @@ function routesFromTrips(trips: Trip[]): { routes: MapRoute[]; markers: MapMarke
   return { routes: [...corridors.values()], markers, keys };
 }
 
-export function TripsScreen() {
+export function TripsScreen({ visible = true }: { visible?: boolean }) {
   const units = useVehicleStore((s) => s.units);
   const shareLocation = useVehicleStore((s) => s.shareLocation);
   const albums = useTripStore((s) => s.albums);
@@ -84,6 +84,7 @@ export function TripsScreen() {
   const sessions = useMemo(() => pricedSessions(locations, logged), [locations, logged]);
 
   const [period, setPeriod] = useState<Period>("week");
+  const listPeriod = useDeferredValue(period);
   const [selected, setSelected] = useState<string | null>(null);
   const [albumId, setAlbumId] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
@@ -92,10 +93,19 @@ export function TripsScreen() {
   const [rangeStart, setRangeStart] = useState("");
   const [rangeEnd, setRangeEnd] = useState("");
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+  const [mapOn, setMapOn] = useState(false);
+  useEffect(() => {
+    if (!visible) {
+      setMapOn(false);
+      return;
+    }
+    const id = window.setTimeout(() => setMapOn(true), 400);
+    return () => window.clearTimeout(id);
+  }, [visible]);
 
   const today = useMemo(() => laDayString(), []);
-  const periodTotals = useMemo(() => tripTotals(period, today), [period, today]);
-  const corridors = useMemo(() => tripCorridors(period, today), [period, today]);
+  const periodTotals = useMemo(() => tripTotals(listPeriod, today), [listPeriod, today]);
+  const corridors = useMemo(() => tripCorridors(listPeriod, today), [listPeriod, today]);
   const album = albums.find((a) => a.id === albumId) ?? null;
   const albumItems = useMemo(() => (album ? albumTrips(album) : []), [album]);
   const pickedItems = useMemo(() => getTrips().filter((t) => picked.includes(t.id)), [picked]);
@@ -122,8 +132,8 @@ export function TripsScreen() {
         start && end ? { start, end, fill: true } : undefined,
       );
     }
-    return periodEnergy(period, sessions, today);
-  }, [focusTrips, sessions, today, period, spanStart, spanEnd, insight?.firstDay, insight?.lastDay]);
+    return periodEnergy(listPeriod, sessions, today);
+  }, [focusTrips, sessions, today, listPeriod, spanStart, spanEnd, insight?.firstDay, insight?.lastDay]);
   const maxKwh = Math.max(0.1, ...energyDays.flatMap((d) => [d.driveKwh, d.chargeKwh]));
 
   const corridorView = useMemo(() => {
@@ -187,8 +197,8 @@ export function TripsScreen() {
   const historyTree = useMemo(() => {
     if (album && !picking) return nestTrips(albumItems, "week", today);
     if (picking && rangeStart && rangeEnd) return nestTrips(tripsInRange(rangeStart, rangeEnd), "week", today);
-    return nestTrips(tripsIn(period, today), period, today);
-  }, [album, picking, albumItems, today, rangeStart, rangeEnd, period]);
+    return nestTrips(tripsIn(listPeriod, today), listPeriod, today);
+  }, [album, picking, albumItems, today, rangeStart, rangeEnd, listPeriod]);
   const listed = historyTree.reduce((n, g) => n + g.items.length, 0);
   const hero = insight ?? periodTotals;
   const whMi = hero.mi > 0.1 ? (hero.kwh * 1000) / hero.mi : 0;
@@ -240,7 +250,7 @@ export function TripsScreen() {
   }
 
   return (
-    <div className="space-y-5 px-4 pb-6">
+    <div className="space-y-5 px-4 pb-6" data-period={period}>
       <PeriodPills
         value={period}
         onChange={(p) => {
@@ -467,17 +477,21 @@ export function TripsScreen() {
         ) : null}
       </section>
 
-      <Suspense fallback={<div className="h-52 rounded-xl bg-surface shadow-[var(--shadow-border)]" />}>
-        <BayMap
-          markers={mapMarkers}
-          routes={mapRoutes}
-          selectedId={active}
-          selectedIds={selectedIds}
-          onSelect={selectOnMap}
-          caption={caption}
-          hidden={!shareLocation}
-        />
-      </Suspense>
+      {mapOn && visible ? (
+        <Suspense fallback={<div className="h-52 rounded-xl bg-surface shadow-[var(--shadow-border)]" />}>
+          <BayMap
+            markers={mapMarkers}
+            routes={mapRoutes}
+            selectedId={active}
+            selectedIds={selectedIds}
+            onSelect={selectOnMap}
+            caption={caption}
+            hidden={!shareLocation}
+          />
+        </Suspense>
+      ) : (
+        <div className="h-52 rounded-xl bg-surface shadow-[var(--shadow-border)]" />
+      )}
 
       <EnergyDays
         days={energyDays}
