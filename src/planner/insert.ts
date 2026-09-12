@@ -132,9 +132,10 @@ export function pickViaOnPath(opts: {
     const distM = minDistToPathM(loc.lat, loc.lng, path);
     if (distM > searchBand) continue;
     const frac = alongFraction(path, loc.lat, loc.lng);
-    if (frac < 0.18 || frac > 0.82) continue;
+    if (frac < 0.04 || frac > 0.94) continue;
     const energyTo = totalKwh * frac;
     if (energyTo > budgetKwh * 0.95) continue;
+    if (energyTo < budgetKwh * 0.2) continue;
     const rate = locRate(loc);
     if (!(rate > 0.3)) continue;
     const extraMin = (distM / 1000 / 80) * 60;

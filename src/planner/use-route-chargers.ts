@@ -36,12 +36,12 @@ export function useRouteChargers(routes: RoutedLeg[], radiusKm?: number) {
     const seen = new Set<string>();
     for (const r of routes) {
       if (r.path.length < 2) continue;
-      const k = `${r.path[0][0].toFixed(3)},${r.path[0][1].toFixed(3)}-${r.path.at(-1)![0].toFixed(3)},${r.path.at(-1)![1].toFixed(3)}-${r.miles.toFixed(0)}`;
+      const k = `${r.path[0][0].toFixed(3)},${r.path[0][1].toFixed(3)}-${r.path.at(-1)![0].toFixed(3)},${r.path.at(-1)![1].toFixed(3)}-${r.miles.toFixed(0)}-${r.source}`;
       if (seen.has(k)) continue;
       seen.add(k);
       out.push(downsample(r.path, 60));
     }
-    return out.slice(0, 6);
+    return out.slice(0, 8);
   }, [routes]);
 
   const key = useMemo(() => {

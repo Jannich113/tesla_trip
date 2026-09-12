@@ -430,7 +430,7 @@ describe("leg modes", () => {
     const highway = { miles: 890, seconds: 15 * 3600, path, source: "valhalla", tollKr: 400 };
     const crawl = { miles: 1100, seconds: 34 * 3600, path, source: "osrm", tollKr: 0 };
     const reasonable = { miles: 980, seconds: 18 * 3600, path, source: "osrm", tollKr: 0 };
-    assert.equal(pickEcoRoute(highway, [crawl])?.seconds, highway.seconds);
+    assert.equal(pickEcoRoute(highway, [crawl])?.seconds, crawl.seconds);
     assert.equal(pickEcoRoute(highway, [crawl, reasonable])?.seconds, reasonable.seconds);
   });
 
@@ -459,5 +459,16 @@ describe("leg modes", () => {
       });
       assert.ok(via, `${mode} via`);
     }
+    const near = pickViaOnPath({
+      path,
+      locations,
+      budgetKwh: 36,
+      totalKwh: 200,
+      mode: "fastest",
+      detourKm: 18,
+    });
+    assert.ok(near, "via within current SOC range");
+    const frac = alongFraction(path, near!.lat, near!.lng);
+    assert.ok(frac * 200 <= 36 * 0.96, `via at ${frac} uses too much energy`);
   });
 });

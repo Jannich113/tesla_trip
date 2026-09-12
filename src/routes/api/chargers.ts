@@ -268,11 +268,14 @@ async function searchCorridor(path: [number, number][], asked: number) {
   const radiusM = wideKm * 1000;
   const seed = seedsAlongPath(path, radiusM);
   const samples = samplePath(path, 40_000, 8);
-  const ocm = await fetchOcm(path, samples, tightKm, wideKm);
-  const osm = ocm.length >= 8 ? [] : chargersOnPath(await fetchOverpass(samples, radiusM), path, wideKm);
+  const [ocm, osmRaw] = await Promise.all([
+    fetchOcm(path, samples, tightKm, wideKm),
+    fetchOverpass(samples, radiusM),
+  ]);
+  const osm = chargersOnPath(osmRaw, path, wideKm);
   return {
     chargers: mergeChargers(seed, [...ocm, ...osm]),
-    source: ocm.length ? "ocm+seed" : osm.length ? "overpass+seed" : seed.length ? "seed" : "none",
+    source: [ocm.length && "ocm", osm.length && "osm", seed.length && "seed"].filter(Boolean).join("+") || "none",
     seed: seed.length,
     live: ocm.length + osm.length,
     ocm: ocm.length,

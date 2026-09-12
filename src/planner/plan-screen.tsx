@@ -95,7 +95,7 @@ function routeKey(
   to: { lat: number; lng: number },
   mode: LegMode,
 ) {
-  return `${from.lat.toFixed(4)},${from.lng.toFixed(4)}|${to.lat.toFixed(4)},${to.lng.toFixed(4)}|${mode}|r2`;
+  return `${from.lat.toFixed(4)},${from.lng.toFixed(4)}|${to.lat.toFixed(4)},${to.lng.toFixed(4)}|${mode}|r3`;
 }
 
 const PATH_MODES: LegMode[] = ["eco", "fastest"];
@@ -268,19 +268,20 @@ export function PlanScreen() {
   const searchRoutes = useMemo(() => {
     const all: RoutedLeg[] = [];
     const seen = new Set<string>();
-    for (const mode of PATH_MODES) {
-      for (const r of routesFor(mode)) {
+    for (const mode of LEG_MODES) {
+      const pathM = pathMode(mode, cheapAvoidFees);
+      for (const r of routesFor(pathM)) {
         const a = r.path[0];
         const b = r.path.at(-1);
         if (!a || !b) continue;
-        const k = `${a.join()}-${b.join()}-${r.miles.toFixed(1)}`;
+        const k = `${pathM}-${a.join()}-${b.join()}-${r.miles.toFixed(0)}-${r.source}`;
         if (seen.has(k)) continue;
         seen.add(k);
         all.push(r);
       }
     }
     return all;
-  }, [routeMap, stops]);
+  }, [routeMap, stops, cheapAvoidFees]);
 
   const { chargers: routeChargers, loading: chargersLoading } = useRouteChargers(
     searchRoutes,
@@ -298,7 +299,6 @@ export function PlanScreen() {
     const paths = searchRoutes.map((r) => r.path).filter((p) => p.length >= 2);
     const europe = paths.some((p) => p.some(([lat, lng]) => lat > 34 && lng > -12 && lng < 42));
     const keep = locationsStored.filter((l) => {
-      if (l.id.startsWith("osm-")) return false;
       if (europe && l.preset && l.lng < -20) return false;
       if (l.kind === "home" || !l.preset) return true;
       return paths.some((p) => minDistToPathM(l.lat, l.lng, p) < 80_000);
@@ -312,11 +312,11 @@ export function PlanScreen() {
       const ranked = all
         .map((l) => ({ l, d: minDistToPathM(l.lat, l.lng, p) }))
         .sort((a, b) => a.d - b.d);
-      for (const s of ranked.slice(0, 24)) picked.set(s.l.id, s.l);
+      for (const s of ranked.slice(0, 40)) picked.set(s.l.id, s.l);
       const cheap = ranked
         .filter((s) => s.d < 50_000)
         .sort((a, b) => a.l.usdPerKwh - b.l.usdPerKwh)
-        .slice(0, 16);
+        .slice(0, 24);
       for (const s of cheap) picked.set(s.l.id, s.l);
     }
     return [...picked.values()];

@@ -196,7 +196,7 @@ export function cachedRoutes(): Record<string, RoutedLeg> {
 }
 
 export async function fetchRoute(from: PlanStop, to: PlanStop, mode: LegMode): Promise<RoutedLeg> {
-  const key = `${from.lat.toFixed(4)},${from.lng.toFixed(4)}|${to.lat.toFixed(4)},${to.lng.toFixed(4)}|${mode}|v6`;
+  const key = `${from.lat.toFixed(4)},${from.lng.toFixed(4)}|${to.lat.toFixed(4)},${to.lng.toFixed(4)}|${mode}|v7`;
   const hit = routeCache.get(key);
   if (hit && hit.source !== "air" && hit.path.length >= 3) return hit;
   try {
@@ -205,7 +205,7 @@ export async function fetchRoute(from: PlanStop, to: PlanStop, mode: LegMode): P
         from: `${from.lat.toFixed(4)},${from.lng.toFixed(4)}`,
         to: `${to.lat.toFixed(4)},${to.lng.toFixed(4)}`,
         mode,
-        v: "5",
+        v: "7",
       });
       let res = await fetchWithTimeout(`/api/drive?${qs}`, {
         headers: { Accept: "application/json" },
@@ -698,9 +698,9 @@ export function pricePlan(opts: {
     const { mode, route, userIndex, via } = job;
     const focus = job.focus;
     const kwh = driveKwh(route.miles, route.seconds, speedEff);
-    const fullArrive = 100 - (kwh / Math.max(usableKwh, 1)) * 100;
-    if (fullArrive < RESERVE_SOC && job.depth < 4) {
-      const budgetKwh = ((100 - RESERVE_SOC) / 100) * usableKwh * 0.9;
+    const rangeKwh = Math.max(8, ((soc - RESERVE_SOC) / 100) * usableKwh);
+    if (kwh > rangeKwh * 0.88 && job.depth < 8) {
+      const budgetKwh = rangeKwh * 0.85;
       const viaOpts = {
         path: route.path,
         locations,
