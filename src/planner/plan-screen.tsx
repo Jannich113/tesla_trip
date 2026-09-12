@@ -1311,7 +1311,7 @@ export function PlanScreen() {
           {timeline.map(({ stop, inbound, outbound, via, index: i }) => {
             const userI = outbound?.userIndex ?? inbound?.userIndex ?? Math.max(0, i - 1);
             const leg = inbound;
-            const chargedLeg = via ? inbound : inbound?.charge ? inbound : outbound;
+            const chargedLeg = outbound ?? inbound;
             const open = Boolean(openStops[stop.id]);
             const selectedHere =
               selected === stop.id ||
@@ -1378,11 +1378,11 @@ export function PlanScreen() {
                         ) : null}
                       </p>
                       {inbound && !open ? (
-                        inbound.charge ? (
-                          <p className="truncate text-[11px]" style={{ color: modeColor(inbound.mode) }}>
-                            {inbound.via ? "via " : ""}
-                            {inbound.charge.name}
-                            {` · ${formatNumber(inbound.charge.kwh, 0)} kWh · ${formatKrValue(inbound.charge.kr, 0)} kr`}
+                        chargedLeg?.charge ? (
+                          <p className="truncate text-[11px]" style={{ color: modeColor(chargedLeg.mode) }}>
+                            {via ? "via " : ""}
+                            {chargedLeg.charge.name}
+                            {` · ${formatNumber(chargedLeg.charge.kwh, 0)} kWh · ${formatKrValue(chargedLeg.charge.kr, 0)} kr`}
                           </p>
                         ) : (
                           <p className="truncate text-[11px] text-subtle">no charge</p>

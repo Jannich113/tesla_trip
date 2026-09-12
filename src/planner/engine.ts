@@ -707,8 +707,7 @@ export function pricePlan(opts: {
     const { mode, route, userIndex, via } = job;
     const focus = job.focus;
     const kwh = driveKwh(route.miles, route.seconds, speedEff);
-    const chargingStop = !via;
-    const packSoc = chargingStop && soc < REQUIRE_SOC ? Math.max(soc, TARGET_SOC) : soc;
+    const packSoc = soc < REQUIRE_SOC ? Math.max(soc, TARGET_SOC) : soc;
     const floorKwh = Math.max(4, ((packSoc - FLOOR_SOC) / 100) * usableKwh);
     const bandKwh = Math.max(0, ((packSoc - REQUIRE_SOC) / 100) * usableKwh);
     if (kwh > floorKwh * 0.98 && job.depth < 12) {
@@ -772,13 +771,12 @@ export function pricePlan(opts: {
     }
     const socAfter = soc - (kwh / usableKwh) * 100;
     const minArrive = FLOOR_SOC;
-    const required =
-      chargingStop && (socAfter < FLOOR_SOC || (soc < REQUIRE_SOC && jobs.length > 0));
+    const required = socAfter < FLOOR_SOC || (soc < REQUIRE_SOC && (jobs.length > 0 || kwh > floorKwh * 0.5));
     const searchHours = hoursFrom(hours, readyAt);
     const cheap = cheapestHour(searchHours);
     const goodPrice = Boolean(cheap && cheap.krPerKwh <= live * CHEAP_VS_LIVE);
     const inSuggestBand = soc >= SUGGEST_SOC_MIN && soc <= SUGGEST_SOC_MAX;
-    const suggested = chargingStop && !required && goodPrice && inSuggestBand;
+    const suggested = !required && goodPrice && inSuggestBand;
     const needForHop = minArrive + (kwh / usableKwh) * 100;
     const autoTarget = Math.min(
       100,
@@ -788,13 +786,14 @@ export function pricePlan(opts: {
       ),
     );
     const minTarget = Math.min(100, soc + MIN_ADD_SOC);
-    const rawTarget = via ? null : opts.chargeToSoc?.[userIndex];
+    const atViaFrom = job.from.id.startsWith("via-");
+    const rawTarget = atViaFrom || !via ? opts.chargeToSoc?.[userIndex] : null;
     const userTarget =
       rawTarget != null && Number.isFinite(rawTarget)
         ? Math.min(100, Math.max(minTarget, rawTarget))
         : null;
     const target = userTarget ?? autoTarget;
-    const wantCharge = chargingStop && (required || suggested || userTarget != null);
+    const wantCharge = required || suggested || userTarget != null;
     const kwhNeed = Math.max((target - soc) / 100, 0) * usableKwh;
     const autoKwh = Math.max((autoTarget - soc) / 100, 0) * usableKwh;
     const chargeMinEst = (Math.max(kwhNeed, 5) / 150) * 60;
@@ -831,21 +830,19 @@ export function pricePlan(opts: {
           speedEff,
           clockHhmm: readyAt,
           maxWaitMin,
-          backupId: via ? job.to.id.replace(/^via-/, "") : opts.backupIds?.[userIndex] ?? null,
-          preferId: opts.preferIds?.[userIndex] ?? null,
+          backupId: job.to.id.startsWith("via-")
+            ? job.to.id.replace(/^via-/, "")
+            : opts.backupIds?.[userIndex] ?? null,
+          preferId: atViaFrom
+            ? job.from.id.replace(/^via-/, "")
+            : opts.preferIds?.[userIndex] ?? null,
           memberships: opts.memberships,
           routeSeconds: route.seconds,
         })
       : null;
     const charge = pick?.primary ?? null;
     const backup = pick?.backup ?? null;
-    const advice: ChargeAdvice = !chargingStop
-      ? null
-      : required
-        ? "required"
-        : suggested
-          ? "suggested"
-          : null;
+    const advice: ChargeAdvice = required ? "required" : suggested ? "suggested" : null;
     const accepted =
       required ||
       Boolean(userTarget != null) ||
