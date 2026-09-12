@@ -185,6 +185,17 @@ function modeStopChain(legs: PricedLeg[]) {
   return out;
 }
 
+function modeStopSummary(legs: PricedLeg[]) {
+  const chain = modeStopChain(legs);
+  if (!chain.length) return "";
+  const start = chain[0]?.name;
+  const end = chain.at(-1)?.name;
+  const vias = chain.filter((s) => s.via).length;
+  if (chain.length <= 2) return chain.map((s) => s.name).join(" → ");
+  if (vias) return `${start} → ${vias} via → ${end}`;
+  return `${start} → ${chain.length - 2} stops → ${end}`;
+}
+
 type OptionRowView = {
   mode: LegMode;
   totals: ReturnType<typeof snapTotals> | null;
@@ -218,6 +229,8 @@ const OptionList = memo(function OptionList({
         const t = row.totals;
         const save = t && fastest && row.mode !== "fastest" ? detourSavings(fastest, t) : null;
         const slow = Boolean(t && fastest && row.mode === "eco" && timePenalized(fastest.driveMin, t.driveMin));
+        const chain = modeStopChain(row.legs);
+        const open = on && chain.length > 0;
         return (
           <li key={row.mode}>
             <div className={cn("px-3 py-3", on && "bg-background/40")}>
@@ -240,7 +253,12 @@ const OptionList = memo(function OptionList({
                 <span className="min-w-0 flex-1">
                   <span className="flex items-baseline justify-between gap-2">
                     <span className="text-sm font-medium">{modeLabel(row.mode)}</span>
-                    <span className="text-sm tabular-nums">{t ? `${formatKrValue(t.kr, 0)} kr` : "—"}</span>
+                    <span className="flex items-center gap-1.5">
+                      <span className="text-sm tabular-nums">{t ? `${formatKrValue(t.kr, 0)} kr` : "—"}</span>
+                      {chain.length ? (
+                        <ChevronDown className={cn("size-4 text-muted transition", open && "rotate-180")} />
+                      ) : null}
+                    </span>
                   </span>
                   {t ? (
                     <>
@@ -276,31 +294,34 @@ const OptionList = memo(function OptionList({
                           ? ` · ${t.waitMin > 0 ? minutesToHm(t.waitMin) : "no"} wait`
                           : ""}
                       </span>
+                      {!open && chain.length ? (
+                        <span className="mt-1 block truncate text-xs text-subtle">{modeStopSummary(row.legs)}</span>
+                      ) : null}
                     </>
                   ) : (
                     <span className="mt-0.5 block text-xs text-subtle">{routing ? "Routing…" : "Add a stop"}</span>
                   )}
-                  {row.legs.length ? (
-                    <ol className="mt-2 space-y-1">
-                      {modeStopChain(row.legs).map((s, i) => (
-                        <li key={`${row.mode}-${i}`} className="flex items-center gap-2 text-xs text-muted">
-                          <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-background text-[10px] tabular-nums">
-                            {i + 1}
-                          </span>
-                          <span className="truncate">
-                            {s.via ? (
-                              <span className="mr-1 text-[10px] font-medium uppercase tracking-wide text-amber-300">
-                                via
-                              </span>
-                            ) : null}
-                            {s.name}
-                          </span>
-                        </li>
-                      ))}
-                    </ol>
-                  ) : null}
                 </span>
               </button>
+              {open ? (
+                <ol className="mt-2 space-y-1 pl-5">
+                  {chain.map((s, i) => (
+                    <li key={`${row.mode}-${i}`} className="flex items-center gap-2 text-xs text-muted">
+                      <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-background text-[10px] tabular-nums">
+                        {i + 1}
+                      </span>
+                      <span className="truncate">
+                        {s.via ? (
+                          <span className="mr-1 text-[10px] font-medium uppercase tracking-wide text-amber-300">
+                            via
+                          </span>
+                        ) : null}
+                        {s.name}
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+              ) : null}
               {row.mode === "cheapest" ? <CheapAvoidToggles className="mt-2 pl-5" /> : null}
             </div>
           </li>
@@ -1246,6 +1267,84 @@ export function PlanScreen() {
       <>
 
       <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
+        <p className="text-sm font-medium">Stops</p>
+        <label className="mt-2 block text-xs text-muted">
+          Add stop
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Address or place"
+            className="mt-1 h-11 w-full rounded-md bg-surface-2 px-3 text-sm outline-none"
+          />
+        </label>
+        {hits.length ? (
+          <ul className="mt-2 divide-y divide-border rounded-xl bg-surface-2">
+            {hits.map((hit) => (
+              <li key={`${hit.lat},${hit.lng}`}>
+                <button
+                  type="button"
+                  onClick={() => addStop(hit)}
+                  className="flex w-full items-center gap-3 px-3 py-3 text-left"
+                >
+                  <Plus className="size-4 shrink-0 text-muted" />
+                  <span className="truncate text-sm">{hit.label}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <ul className="mt-2 flex flex-wrap gap-2">
+            {Object.entries(PLACES)
+              .filter(([name]) => {
+                if (name.includes("Supercharger") || name.includes("Wall")) return false;
+                if (name === "Home" && stops.some((s) => s.id === "home" || s.name === "Home")) return false;
+                return true;
+              })
+              .slice(0, 8)
+              .map(([name, g]) => (
+                <li key={name}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (name === "Home") {
+                        addStopToStore({ id: "home", name: "Home", lat: g.lat, lng: g.lng });
+                        return;
+                      }
+                      addStop({ label: name, lat: g.lat, lng: g.lng });
+                    }}
+                    className="h-9 rounded-full bg-surface-2 px-3 text-xs font-medium text-muted"
+                  >
+                    {g.short}
+                  </button>
+                </li>
+              ))}
+          </ul>
+        )}
+        {stops.length ? (
+          <ol className="mt-3">
+            {stops.map((stop, i) => (
+              <li key={stop.id} className="flex items-center gap-3 border-b border-border py-2 last:border-0">
+                <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-surface-2 text-xs tabular-nums text-muted">
+                  {i + 1}
+                </span>
+                <p className="min-w-0 flex-1 truncate text-sm">{stop.name}</p>
+                <button
+                  type="button"
+                  onClick={() => removeStop(stop.id)}
+                  className="flex size-9 shrink-0 items-center justify-center rounded-full text-muted"
+                  aria-label={`Remove ${stop.name}`}
+                >
+                  <Trash2 className="size-4" />
+                </button>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <p className="mt-3 text-sm text-muted">Add a start, then a destination.</p>
+        )}
+      </section>
+
+      <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -1506,87 +1605,6 @@ export function PlanScreen() {
         </Suspense>
       </div>
 
-
-      <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
-        <p className="text-sm font-medium">Stops</p>
-        <p className="mt-0.5 text-xs text-subtle">Start and destinations. Chargers for each mode sit in the list above.</p>
-        {stops.length ? (
-          <ol className="mt-2">
-            {stops.map((stop, i) => (
-              <li key={stop.id} className="flex items-center gap-3 border-b border-border py-3 last:border-0">
-                <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-surface-2 text-xs tabular-nums text-muted">
-                  {i + 1}
-                </span>
-                <p className="min-w-0 flex-1 truncate text-sm">{stop.name}</p>
-                <button
-                  type="button"
-                  onClick={() => removeStop(stop.id)}
-                  className="flex size-9 shrink-0 items-center justify-center rounded-full text-muted"
-                  aria-label={`Remove ${stop.name}`}
-                >
-                  <Trash2 className="size-4" />
-                </button>
-              </li>
-            ))}
-          </ol>
-        ) : (
-          <p className="mt-2 text-sm text-muted">Add a start, then a destination.</p>
-        )}
-        <div className="mt-3">
-          <label className="text-xs text-muted">
-            Add stop
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Address or place"
-              className="mt-1 h-11 w-full rounded-md bg-surface-2 px-3 text-sm outline-none"
-            />
-          </label>
-          {hits.length ? (
-            <ul className="mt-2 divide-y divide-border rounded-xl bg-surface-2">
-              {hits.map((hit) => (
-                <li key={`${hit.lat},${hit.lng}`}>
-                  <button
-                    type="button"
-                    onClick={() => addStop(hit)}
-                    className="flex w-full items-center gap-3 px-3 py-3 text-left"
-                  >
-                    <Plus className="size-4 shrink-0 text-muted" />
-                    <span className="truncate text-sm">{hit.label}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <ul className="mt-2 flex flex-wrap gap-2">
-              {Object.entries(PLACES)
-                .filter(([name]) => {
-                  if (name.includes("Supercharger") || name.includes("Wall")) return false;
-                  if (name === "Home" && stops.some((s) => s.id === "home" || s.name === "Home")) return false;
-                  return true;
-                })
-                .slice(0, 8)
-                .map(([name, g]) => (
-                  <li key={name}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (name === "Home") {
-                          addStopToStore({ id: "home", name: "Home", lat: g.lat, lng: g.lng });
-                          return;
-                        }
-                        addStop({ label: name, lat: g.lat, lng: g.lng });
-                      }}
-                      className="h-9 rounded-full bg-surface-2 px-3 text-xs font-medium text-muted"
-                    >
-                      {g.short}
-                    </button>
-                  </li>
-                ))}
-            </ul>
-          )}
-        </div>
-      </section>
       </>
       ) : pane === "advanced" ? (
       <>
