@@ -37,12 +37,12 @@ export function modeLabel(mode: LegMode) {
 }
 
 /** Do not redefine these.
- *  eco = avoid motorways, tolls, road fees as much as possible
+ *  eco = 80–100 km/t roads; skip motorways and tolls. 50–60 km/t crawls are rejected.
  *  fastest = earliest arrival; motorways and tolls are fine
  *  cheapest = lowest charging cost; optional avoid motorways / toll gates / road fees
  */
 export function modeHint(mode: LegMode) {
-  if (mode === "eco") return "Avoids motorways and tolls. Picks a quieter road even when it is slower.";
+  if (mode === "eco") return "80–100 km/t roads. Skips motorways and tolls. A 50–60 km/t crawl is rejected.";
   if (mode === "cheapest") return "Lowest charging cost. Max 15 km extra per leg; extra miles are subtracted from the save.";
   return "Motorways and tolls for earliest arrival.";
 }
@@ -158,8 +158,28 @@ export function detourSavings(base: { kr: number; tollKr: number; driveMin: numb
 
 export type AbSide = "a" | "b" | "tie";
 
-/** Eco (or any alt) is penalized when drive time is 2× the faster road. */
-export const SLOW_TIME_FACTOR = 2;
+/** Eco (or any alt) is penalized when drive time is 1.45× the faster road. */
+export const SLOW_TIME_FACTOR = 1.45;
+/** Eco must hold about 80–100 km/t. Below this is a village crawl. */
+export const ECO_SPEED_MIN = 75;
+export const ECO_SPEED_TARGET = 90;
+export const ECO_SPEED_MAX = 105;
+
+export function ecoPaceKmh(miles: number, seconds: number) {
+  return avgSpeedKmh(miles, seconds);
+}
+
+export function ecoPaceOk(miles: number, seconds: number) {
+  return ecoPaceKmh(miles, seconds) >= ECO_SPEED_MIN;
+}
+
+/** Lower is better. Huge penalty under 75 km/t; 80–100 is the sweet band. */
+export function ecoPaceScore(miles: number, seconds: number) {
+  const kmh = ecoPaceKmh(miles, seconds);
+  if (kmh < ECO_SPEED_MIN) return 1_000 + (ECO_SPEED_MIN - kmh) * 40;
+  if (kmh <= ECO_SPEED_MAX) return Math.abs(kmh - ECO_SPEED_TARGET);
+  return (kmh - ECO_SPEED_MAX) * 6;
+}
 
 export function timePenalized(fastMin: number, altMin: number) {
   return fastMin > 0 && altMin >= fastMin * SLOW_TIME_FACTOR;
@@ -449,9 +469,12 @@ export function costingFor(mode: LegMode, avoid: boolean | CheapAvoid = false): 
   if (mode === "eco" || (mode === "cheapest" && a.motorways)) {
     return {
       shortest: false,
-      use_highways: 0.25,
+      use_highways: 0.65,
       use_tolls: mode === "eco" || a.tolls ? 0 : 1,
       use_ferry: 0.2,
+      use_tracks: 0,
+      use_living_streets: 0,
+      top_speed: 100,
     };
   }
   return {

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   addMinutesHhmm,
+  avgSpeedKmh,
   chargeSearchKm,
   chargeFitScore,
   costingFor,
@@ -43,7 +44,8 @@ describe("leg modes", () => {
   it("eco avoids highways and tolls", () => {
     const c = costingFor("eco");
     assert.equal(c.shortest, false);
-    assert.equal(c.use_highways, 0.25);
+    assert.equal(c.use_highways, 0.65);
+    assert.equal(c.top_speed, 100);
     assert.equal(c.use_tolls, 0);
   });
 
@@ -100,11 +102,12 @@ describe("leg modes", () => {
     assert.equal(routeAb(fast, cheapWin).cost, "b");
   });
 
-  it("penalizes a route 2× slower than fastest", () => {
+  it("penalizes a route much slower than fastest", () => {
     const fast = { kr: 800, tollKr: 200, driveMin: 900, mi: 900 };
     const eco = { kr: 200, tollKr: 0, driveMin: 1800, mi: 1100 };
     assert.equal(timePenalized(900, 1800), true);
-    assert.equal(timePenalized(900, 1700), false);
+    assert.equal(timePenalized(900, 1200), false);
+    assert.equal(timePenalized(900, 1400), true);
     const ab = routeAb(fast, eco);
     assert.equal(ab.bSlow, true);
     assert.equal(ab.overall, "a");
@@ -141,7 +144,7 @@ describe("leg modes", () => {
     assert.equal(noTolls.use_highways, 1);
     assert.equal(noTolls.use_tolls, 0);
     const noMoto = costingFor("cheapest", { motorways: true });
-    assert.equal(noMoto.use_highways, 0.25);
+    assert.equal(noMoto.use_highways, 0.65);
   });
 
   it("cheapest skips a gate only if the detour stays under 15%", () => {
@@ -538,13 +541,15 @@ describe("leg modes", () => {
     assert.ok((picked?.seconds ?? 0) <= Math.min(a.seconds, b.seconds, c.seconds));
   });
 
-  it("eco drops a quiet road that is 2× slower than Fastest", () => {
+  it("eco drops a 50–60 km/t crawl and keeps an 80–100 km/t road", () => {
     const path = Array.from({ length: 12 }, (_, i) => [48.8 - i * 0.5, 2.3 + i * 0.8] as [number, number]);
     const highway = { miles: 890, seconds: 15 * 3600, path, source: "valhalla", tollKr: 400 };
     const crawl = { miles: 1100, seconds: 34 * 3600, path, source: "osrm", tollKr: 0 };
-    const reasonable = { miles: 980, seconds: 18 * 3600, path, source: "osrm", tollKr: 0 };
-    assert.equal(pickEcoRoute(highway, [crawl])?.seconds, crawl.seconds);
-    assert.equal(pickEcoRoute(highway, [crawl, reasonable])?.seconds, reasonable.seconds);
+    const national = { miles: 980, seconds: 18 * 3600, path, source: "osrm", tollKr: 0 };
+    assert.equal(pickEcoRoute(highway, [crawl])?.seconds, highway.seconds, "crawl ~52 km/t is not eco");
+    assert.equal(pickEcoRoute(highway, [crawl, national])?.seconds, national.seconds);
+    assert.ok(avgSpeedKmh(national.miles, national.seconds) >= 75);
+    assert.ok(avgSpeedKmh(crawl.miles, crawl.seconds) < 60);
   });
 
   it("finds a via on the Paris–Rome corridor for every mode", () => {

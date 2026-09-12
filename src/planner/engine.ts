@@ -211,7 +211,7 @@ export function cachedRoutes(): Record<string, RoutedLeg> {
 }
 
 export async function fetchRoute(from: PlanStop, to: PlanStop, mode: LegMode): Promise<RoutedLeg> {
-  const key = `${from.lat.toFixed(4)},${from.lng.toFixed(4)}|${to.lat.toFixed(4)},${to.lng.toFixed(4)}|${mode}|v11`;
+  const key = `${from.lat.toFixed(4)},${from.lng.toFixed(4)}|${to.lat.toFixed(4)},${to.lng.toFixed(4)}|${mode}|v12`;
   const hit = routeCache.get(key);
   if (hit && hit.source !== "air" && hit.path.length >= 3) return hit;
   try {
@@ -220,7 +220,7 @@ export async function fetchRoute(from: PlanStop, to: PlanStop, mode: LegMode): P
         from: `${from.lat.toFixed(4)},${from.lng.toFixed(4)}`,
         to: `${to.lat.toFixed(4)},${to.lng.toFixed(4)}`,
         mode,
-        v: "11",
+        v: "12",
       });
       let res = await fetchWithTimeout(`/api/drive?${qs}`, {
         headers: { Accept: "application/json" },

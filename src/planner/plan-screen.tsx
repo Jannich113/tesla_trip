@@ -994,7 +994,7 @@ export function PlanScreen() {
 
         <p className="mt-5 text-[11px] font-medium uppercase tracking-wide text-muted">Route options</p>
         <p className="mt-1 text-[11px] text-subtle">
-          Eco skips motorways and tolls. Fastest takes them. Cheapest hunts the lowest kWh.
+          Eco uses 80–100 km/t roads (not 50–60). Fastest takes motorways. Cheapest hunts the lowest kWh.
         </p>
         <ul className="mt-2 divide-y divide-border rounded-xl bg-surface-2">
           {optionRows.map((row) => {
