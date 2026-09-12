@@ -574,6 +574,58 @@ describe("leg modes", () => {
     assert.ok(energy >= 34 * 0.8, `fallback energy ${energy} snapped behind the window`);
   });
 
+  it("cheapest via picks the cheaper stall in the window, not the Tesla on the line", () => {
+    const path: [number, number][] = [
+      [55.4, 10.4],
+      [54.5, 10.1],
+      [53.5, 9.8],
+      [52.5, 9.5],
+      [51.5, 9.2],
+    ];
+    const tesla = {
+      id: "tesla-line",
+      lat: 53.5,
+      lng: 9.8,
+      kind: "supercharger" as const,
+      usdPerKwh: 0.6,
+      name: "Tesla",
+      short: "Tesla",
+      networkId: "tesla",
+    };
+    const cheap = {
+      id: "cheap-eon",
+      lat: 53.52,
+      lng: 9.72,
+      kind: "custom" as const,
+      usdPerKwh: 0.28,
+      name: "E.ON",
+      short: "E.ON",
+      networkId: "eon",
+    };
+    const via = pickViaOnPath({
+      path,
+      locations: [tesla, cheap],
+      budgetKwh: 50,
+      minKwh: 28,
+      totalKwh: 90,
+      mode: "cheapest",
+      focus: "pris",
+      detourKm: 15,
+    });
+    assert.equal(via?.id, "cheap-eon");
+    const fast = pickViaOnPath({
+      path,
+      locations: [tesla, cheap],
+      budgetKwh: 50,
+      minKwh: 28,
+      totalKwh: 90,
+      mode: "fastest",
+      focus: "time",
+      detourKm: 15,
+    });
+    assert.equal(fast?.id, "tesla-line");
+  });
+
   it("1200 mile trip inserts several charge vias", () => {
     const from = { lat: 55.4, lng: 10.4 };
     const to = { lat: 41.9, lng: 12.5 };

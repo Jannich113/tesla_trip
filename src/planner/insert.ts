@@ -191,7 +191,10 @@ export function pickViaOnPath(opts: {
     });
     const along = energyTo * 24;
     const unused = (budgetKwh - energyTo) * 10;
-    const score = along - unused - fit;
+    const score =
+      focus === "pris"
+        ? -(rate * 50 + extraKr) + energyTo * 0.05
+        : along - unused - fit;
     if (score > bestScore) {
       bestScore = score;
       best = loc;
@@ -209,17 +212,29 @@ export function pickViaAtRange(opts: Parameters<typeof pickViaOnPath>[0]): ViaLo
   const frac = Math.min(0.82, Math.max(0.08, targetKwh / Math.max(opts.totalKwh, 1)));
   const [lat, lng] = pointAlongPath(opts.path, frac);
   const exclude = new Set(opts.excludeIds ?? []);
+  const pris = opts.mode === "cheapest" || (opts.focus ?? defaultFocus(opts.mode)) === "pris";
+  const memberships = opts.memberships ?? {};
+  const locRate = (loc: ViaLoc) => {
+    const netId = networkIdFor(loc.kind, loc.networkId);
+    return (netId ? rateForNetwork(netId, Boolean(memberships[netId])) : null) ?? loc.usdPerKwh * 6.85;
+  };
   let best: ViaLoc | null = null;
-  let bestD =
-    opts.mode === "cheapest" || (opts.focus ?? defaultFocus(opts.mode)) === "pris"
-      ? CHEAP_STALL_KM * 1000
-      : 80_000;
+  let bestScore = Infinity;
+  let bestD = pris ? CHEAP_STALL_KM * 1000 : 80_000;
   for (const loc of opts.locations) {
     if (exclude.has(loc.id) || loc.kind === "home") continue;
     const energyTo = opts.totalKwh * alongFraction(opts.path, loc.lat, loc.lng);
     if (energyTo < minEnergy * 0.9 || energyTo > opts.budgetKwh * 1.02) continue;
     const d = haversineM({ lat, lng }, loc);
-    if (d < bestD) {
+    if (d > (pris ? CHEAP_STALL_KM * 1000 : 80_000)) continue;
+    if (pris) {
+      const cost = locRate(loc) * 50 + extraMileageKr(d);
+      if (cost < bestScore - 0.5 || (Math.abs(cost - bestScore) <= 0.5 && d < bestD)) {
+        bestScore = cost;
+        bestD = d;
+        best = loc;
+      }
+    } else if (d < bestD) {
       bestD = d;
       best = loc;
     }

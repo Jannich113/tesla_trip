@@ -626,7 +626,9 @@ export function pickCharges(opts: {
     preferId
       ? scored.find((s) => s.loc.id === preferId && s.distM <= Math.max(searchBand, 40_000))
       : null;
-  const primarySrc = forced ?? inSearch[0] ?? outside[0];
+  const primarySrc = preferCheap
+    ? (inSearch[0] ?? forced ?? outside[0])
+    : (forced ?? inSearch[0] ?? outside[0]);
   if (!primarySrc) return null;
 
   const backupSrc =
@@ -844,7 +846,7 @@ export function pricePlan(opts: {
           backupId: job.to.id.startsWith("via-")
             ? job.to.id.replace(/^via-/, "")
             : opts.backupIds?.[userIndex] ?? null,
-          preferId: atViaFrom
+          preferId: atViaFrom && mode !== "cheapest"
             ? job.from.id.replace(/^via-/, "")
             : opts.preferIds?.[userIndex] ?? null,
           memberships: opts.memberships,
