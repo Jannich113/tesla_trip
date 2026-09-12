@@ -199,10 +199,27 @@ export function airRoute(from: PlanStop, to: PlanStop): RoutedLeg {
 
 const routeCache = new Map<string, RoutedLeg>();
 
+export function corridorKey(
+  from: { lat: number; lng: number },
+  to: { lat: number; lng: number },
+  mode: LegMode,
+) {
+  return `${from.lat.toFixed(4)},${from.lng.toFixed(4)}|${to.lat.toFixed(4)},${to.lng.toFixed(4)}|${mode}`;
+}
+
+export function canonRouteKey(key: string) {
+  const parts = key.split("|");
+  if (parts.length >= 3) return `${parts[0]}|${parts[1]}|${parts[2]}`;
+  return key;
+}
+
 export function primeRouteCache(entries: Record<string, RoutedLeg>) {
   for (const [key, route] of Object.entries(entries)) {
     if (route?.source === "air") continue;
-    if (route?.path?.length >= 2 && Number.isFinite(route.miles)) routeCache.set(key, route);
+    if (!(route?.path?.length >= 2) || !Number.isFinite(route.miles)) continue;
+    routeCache.set(key, route);
+    const canon = canonRouteKey(key);
+    if (canon !== key) routeCache.set(canon, route);
   }
 }
 
@@ -210,17 +227,33 @@ export function cachedRoutes(): Record<string, RoutedLeg> {
   return Object.fromEntries(routeCache);
 }
 
-export async function fetchRoute(from: PlanStop, to: PlanStop, mode: LegMode): Promise<RoutedLeg> {
-  const key = `${from.lat.toFixed(4)},${from.lng.toFixed(4)}|${to.lat.toFixed(4)},${to.lng.toFixed(4)}|${mode}|v13`;
+export function lookupCachedRoute(
+  from: { lat: number; lng: number },
+  to: { lat: number; lng: number },
+  mode: LegMode,
+): RoutedLeg | undefined {
+  const key = corridorKey(from, to, mode);
   const hit = routeCache.get(key);
   if (hit && hit.source !== "air" && hit.path.length >= 3) return hit;
+  const prefix = key + "|";
+  for (const [k, r] of routeCache) {
+    if (k !== key && !k.startsWith(prefix)) continue;
+    if (r && r.source !== "air" && r.path.length >= 3) return r;
+  }
+  return undefined;
+}
+
+export async function fetchRoute(from: PlanStop, to: PlanStop, mode: LegMode): Promise<RoutedLeg> {
+  const key = corridorKey(from, to, mode);
+  const hit = lookupCachedRoute(from, to, mode);
+  if (hit) return hit;
   try {
     const body = await withRetry(async () => {
       const qs = new URLSearchParams({
         from: `${from.lat.toFixed(4)},${from.lng.toFixed(4)}`,
         to: `${to.lat.toFixed(4)},${to.lng.toFixed(4)}`,
         mode,
-        v: "13",
+        v: "1",
       });
       let res = await fetchWithTimeout(`/api/drive?${qs}`, {
         headers: { Accept: "application/json" },

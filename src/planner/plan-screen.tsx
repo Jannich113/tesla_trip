@@ -24,6 +24,8 @@ import {
   detourSavings,
   epaWhPerMi,
   fetchRoute,
+  corridorKey,
+  lookupCachedRoute,
   formatDateTime,
   formatDetour,
   formatWaitCap,
@@ -136,7 +138,7 @@ function routeKey(
   to: { lat: number; lng: number },
   mode: LegMode,
 ) {
-  return `${from.lat.toFixed(4)},${from.lng.toFixed(4)}|${to.lat.toFixed(4)},${to.lng.toFixed(4)}|${mode}|r7`;
+  return corridorKey(from, to, mode);
 }
 
 export function PlanScreen() {
@@ -211,7 +213,6 @@ export function PlanScreen() {
     void Promise.all([
       useVehicleStore.persist.rehydrate(),
       useChargeStore.persist.rehydrate(),
-      usePlanStore.persist.rehydrate(),
     ]).catch(() => {
       /* localStorage may be unavailable */
     });
@@ -232,40 +233,49 @@ export function PlanScreen() {
   useEffect(() => {
     if (stops.length < 2) return;
     let cancelled = false;
-    const jobs: { from: (typeof stops)[number]; to: (typeof stops)[number]; mode: LegMode; key: string }[] = [];
-    for (let i = 0; i < stops.length - 1; i++) {
-      for (const mode of pathModes) {
-        const from = stops[i];
-        const to = stops[i + 1];
-        jobs.push({ from, to, mode, key: routeKey(from, to, mode) });
-      }
-    }
-    const missing = jobs.some((job) => {
-      const hit = routeMap[job.key];
-      return !hit || hit.source === "air" || hit.path.length < 3;
-    });
-    if (missing) setRouting(true);
-    else setRouting(false);
+    const order: LegMode[] = ["fastest", "eco", "cheapest"];
     void (async () => {
-      const patch: Record<string, RoutedLeg> = {};
-      await Promise.all(
-        jobs.map(async (job) => {
-          const hit = routeMap[job.key];
-          if (hit && hit.source !== "air" && hit.path.length >= 3) return;
-          const route = await fetchRoute(job.from, job.to, job.mode);
+      for (const mode of order) {
+        if (cancelled) return;
+        const jobs: { from: (typeof stops)[number]; to: (typeof stops)[number]; mode: LegMode; key: string }[] = [];
+        for (let i = 0; i < stops.length - 1; i++) {
+          const from = stops[i];
+          const to = stops[i + 1];
+          const key = routeKey(from, to, mode);
+          const hit = routeMap[key] ?? lookupCachedRoute(from, to, mode);
+          if (hit && hit.source !== "air" && hit.path.length >= 3) {
+            if (!routeMap[key]) jobs.push({ from, to, mode, key });
+            continue;
+          }
+          jobs.push({ from, to, mode, key });
+        }
+        const needNet = jobs.filter((job) => {
+          const hit = routeMap[job.key] ?? lookupCachedRoute(job.from, job.to, job.mode);
+          return !hit || hit.source === "air" || hit.path.length < 3;
+        });
+        if (mode === "fastest" && needNet.length) setRouting(true);
+        else if (mode === "fastest") setRouting(false);
+        const patch: Record<string, RoutedLeg> = {};
+        for (const job of jobs) {
+          const cached = routeMap[job.key] ?? lookupCachedRoute(job.from, job.to, job.mode);
+          if (cached && cached.source !== "air" && cached.path.length >= 3) {
+            if (!routeMap[job.key]) patch[job.key] = cached;
+            continue;
+          }
           if (cancelled) return;
+          const route = await fetchRoute(job.from, job.to, job.mode);
+          if (cancelled || route.source === "air" || route.path.length < 3) continue;
           patch[job.key] = route;
-        }),
-      );
-      if (!cancelled) {
-        if (Object.keys(patch).length) setRouteCache(patch);
-        setRouting(false);
+        }
+        if (!cancelled && Object.keys(patch).length) setRouteCache(patch);
+        if (mode === "fastest" && !cancelled) setRouting(false);
+        if (mode !== "cheapest") await new Promise((r) => window.setTimeout(r, 40));
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [stops, setRouteCache, pathModes]);
+  }, [stops, setRouteCache]);
 
   useEffect(() => {
     setPrefer({});

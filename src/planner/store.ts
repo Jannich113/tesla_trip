@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { geo } from "@/lib/places";
-import { primeRouteCache, type LegMode, type LegWhen, type PlanStop, type RoutedLeg } from "./engine";
+import { primeRouteCache, canonRouteKey, type LegMode, type LegWhen, type PlanStop, type RoutedLeg } from "./engine";
 import { DEFAULT_DETOUR_KM, DEFAULT_WAIT_MIN, kwhPerMiFrom100km, normalizeMode, type SpeedEff } from "./modes";
 import { simplifyPath } from "./polyline";
 import { cacheInvalidate } from "./cache";
@@ -42,11 +42,15 @@ export type PlanSummary = {
 function slimRoutes(routes: Record<string, RoutedLeg> | undefined) {
   if (!routes) return routes;
   const out: Record<string, RoutedLeg> = {};
-  const keys = Object.keys(routes).slice(-40);
-  for (const key of keys) {
-    const route = routes[key];
-    if (!route?.path?.length || route.source === "air" || route.path.length < 3) continue;
-    out[key] = { ...route, path: simplifyPath(route.path, 48) };
+  const entries = Object.entries(routes).filter(
+    ([, route]) => Boolean(route?.path?.length && route.source !== "air" && route.path.length >= 3),
+  );
+  const corridors = entries.filter(([key]) => /\|(eco|fastest|cheapest)$/.test(canonRouteKey(key)));
+  const rest = entries.filter(([key]) => !corridors.some(([k]) => k === key)).slice(-16);
+  for (const [key, route] of [...corridors, ...rest]) {
+    const slim = { ...route, path: simplifyPath(route.path, 48) };
+    out[key] = slim;
+    out[canonRouteKey(key)] = slim;
   }
   return out;
 }
@@ -108,6 +112,40 @@ type PlanStore = PlanState & {
   reset: () => void;
 };
 
+function readDraft(): Partial<PlanState> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = localStorage.getItem("juniper-planner-draft");
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as { state?: PlanState };
+    const s = parsed.state ?? (parsed as PlanState);
+    if (!s || typeof s !== "object") return {};
+    const routeCache = slimRoutes(s.routeCache) ?? {};
+    primeRouteCache(routeCache);
+    return {
+      name: s.name,
+      stops: Array.isArray(s.stops) && s.stops.length ? s.stops : undefined,
+      modes: s.modes,
+      cheapAvoidMotorways: s.cheapAvoidMotorways,
+      cheapAvoidTolls: s.cheapAvoidTolls,
+      cheapAvoidRoadFees: s.cheapAvoidRoadFees,
+      detours: s.detours,
+      waits: s.waits,
+      whenKind: s.whenKind,
+      when: s.when,
+      legWhen: s.legWhen,
+      whPerMi: s.whPerMi,
+      speedEff: s.speedEff,
+      networkAbo: s.networkAbo,
+      routeCache,
+      saved: s.saved,
+      seq: s.seq,
+    };
+  } catch {
+    return {};
+  }
+}
+
 const empty = (): PlanState => ({
   name: "",
   stops: [homeStop()],
@@ -128,10 +166,15 @@ const empty = (): PlanState => ({
   seq: 0,
 });
 
+const boot = (): PlanState => {
+  const seed = readDraft();
+  return { ...empty(), ...seed, stops: seed.stops?.length ? seed.stops : empty().stops };
+};
+
 export const usePlanStore = create<PlanStore>()(
   persist(
     (set, get) => ({
-      ...empty(),
+      ...boot(),
 
       setName: (name) => set({ name }),
       setWhenKind: (whenKind) => set({ whenKind }),
@@ -146,6 +189,7 @@ export const usePlanStore = create<PlanStore>()(
         for (const [key, route] of Object.entries(patch)) {
           if (!route || route.source === "air" || (route.path?.length ?? 0) < 3) continue;
           clean[key] = route;
+          clean[canonRouteKey(key)] = route;
         }
         if (!Object.keys(clean).length) return;
         const routeCache = { ...get().routeCache, ...clean };
