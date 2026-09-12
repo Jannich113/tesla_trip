@@ -452,7 +452,7 @@ export function PlanScreen() {
   const totals = useMemo(() => planTotals(viewLegs), [viewLegs]);
 
   const optionRows = useMemo(() => {
-    return LEG_MODES.map((mode) => {
+    const rows = LEG_MODES.map((mode) => {
       const avoid = mode === "cheapest" ? cheapAvoid : { motorways: false, tolls: false, roadFees: false };
       const optionRoutes = routesFor(pathMode(mode, avoid));
       if (optionRoutes.length !== Math.max(0, stops.length - 1) || stops.length < 2) {
@@ -485,6 +485,18 @@ export function PlanScreen() {
         kmh,
         kwhPerMi: interpolateWhPerMi(speedEff, kmh) / 1000,
         legs,
+      };
+    });
+    const fast = rows.find((r) => r.mode === "fastest")?.totals;
+    return rows.map((row) => {
+      if (row.mode !== "cheapest" || !row.totals || !fast) return row;
+      if (row.totals.driveMin >= fast.driveMin - 0.4) return row;
+      const driveMin = fast.driveMin;
+      const seconds = driveMin * 60;
+      return {
+        ...row,
+        totals: { ...row.totals, driveMin },
+        kmh: avgSpeedKmh(row.totals.mi, seconds),
       };
     });
   }, [routeMap, stops, detours, waits, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc, prefer, networkAbo, cheapAvoid]);

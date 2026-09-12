@@ -219,12 +219,15 @@ function stitch(parts: DriveRouteJson[], mode: LegMode): DriveRouteJson | null {
 }
 
 async function fastestPool(from: Stop, to: Stop): Promise<DriveRouteJson[]> {
-  const [alts, plain, val] = await Promise.all([
+  const [alts, plain, val, skip] = await Promise.all([
     osrmRoutes(from, to, "&alternatives=true").catch(() => []),
     osrmRoutes(from, to).catch(() => []),
     valhalla(from, to, "fastest").catch(() => null),
+    osrmRoutes(from, to, "&exclude=toll").catch(() => []),
   ]);
-  const list = [...alts, ...plain, val].filter((r): r is DriveRouteJson => Boolean(r && okRoute(r, from, to)));
+  const list = [...alts, ...plain, val, ...skip].filter((r): r is DriveRouteJson =>
+    Boolean(r && okRoute(r, from, to)),
+  );
   return list;
 }
 

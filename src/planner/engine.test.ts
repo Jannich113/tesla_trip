@@ -159,6 +159,12 @@ describe("leg modes", () => {
     const far = { miles: 40, seconds: 2000, path: skipPath, source: "osrm", hasToll: false };
     assert.equal(pickCheapAvoidRoute(fast, [near], { tolls: true })?.source, "valhalla");
     assert.equal(pickCheapAvoidRoute(fast, [far], { tolls: true })?.source, "osrm");
+    const quicker = { miles: 11, seconds: 800, path: skipPath, source: "valhalla" as const, hasToll: false };
+    assert.equal(
+      pickCheapAvoidRoute(fast, [quicker], { tolls: true })?.seconds,
+      1000,
+      "a quicker no-toll road is Fastest's job, not a cheap detour",
+    );
   });
 
   it("time takes the highway corridor at 130 km/t", () => {

@@ -56,8 +56,9 @@ export function pickCheapAvoidRoute<T extends DriveCandidate>(
   let bestFee = fee(fast);
   for (const r of cands) {
     if (r.path.length < 3 || r.seconds <= 0 || r.seconds > cap) continue;
+    if (r.seconds + 30 < fast.seconds) continue;
     const f = fee(r);
-    if (f < bestFee - 15 || (f <= bestFee && r.seconds + 60 < best.seconds)) {
+    if (f < bestFee - 15) {
       best = r;
       bestFee = f;
     }
