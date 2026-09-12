@@ -16,6 +16,8 @@ import {
   chargeFitScore,
   defaultFocus,
   DEFAULT_DETOUR_KM,
+  STALL_SAVE_KR,
+  STALL_SAVE_WEIGHT,
   dkNowDateTime,
   dkNowParts,
   driveKwhAtSpeed,
@@ -545,10 +547,10 @@ export function pickCharges(opts: {
           locRate(s.loc) > 0.3),
     );
   const rankedNear = preferCheap
-    ? [...nearby].sort((a, b) => a.distM - b.distM).slice(0, 16)
+    ? [...nearby].sort((a, b) => locRate(a.loc) - locRate(b.loc) || a.distM - b.distM).slice(0, 36)
     : [...nearby].sort((a, b) => a.distM - b.distM).slice(0, 24);
   const cheapPool = preferCheap
-    ? [...nearby].sort((a, b) => locRate(a.loc) - locRate(b.loc) || a.distM - b.distM).slice(0, 20)
+    ? [...nearby].sort((a, b) => locRate(a.loc) - locRate(b.loc) || a.distM - b.distM).slice(0, 28)
     : [];
   const seen = new Set<string>();
   const pool = [...rankedNear, ...cheapPool].filter((s) => {
@@ -582,6 +584,7 @@ export function pickCharges(opts: {
   };
 
   const byRank = (a: (typeof scored)[0], b: (typeof scored)[0]) => {
+    if (preferCheap) return a.priced.kr - b.priced.kr || a.distM - b.distM;
     const as = chargeFitScore(focus, {
       distM: a.distM,
       kr: a.priced.kr,
@@ -608,6 +611,8 @@ export function pickCharges(opts: {
           stallKr: s.priced.kr,
           extraKr: extraDriveKr(s.distM),
           distM: s.distM,
+          minSave: STALL_SAVE_KR,
+          weight: STALL_SAVE_WEIGHT,
         }),
       )
     : scored;

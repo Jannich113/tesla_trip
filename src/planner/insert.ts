@@ -1,4 +1,4 @@
-import { chargeFitScore, chargeSearchKm, defaultFocus, detourPays, type LegMode, type ModeFocus } from "./modes.ts";
+import { chargeFitScore, chargeSearchKm, defaultFocus, detourPays, STALL_SAVE_KR, STALL_SAVE_WEIGHT, type LegMode, type ModeFocus } from "./modes.ts";
 import { networkIdFor, rateForNetwork } from "./networks.ts";
 
 export type ViaLoc = {
@@ -189,7 +189,14 @@ export function pickViaOnPath(opts: {
     const extraKr = (distM / 1000) * 1.2;
     if (
       focus === "pris" &&
-      !detourPays({ baseKr: baseRate * 20, stallKr: rate * 20, extraKr, distM })
+      !detourPays({
+        baseKr: baseRate * 20,
+        stallKr: rate * 20,
+        extraKr,
+        distM,
+        minSave: STALL_SAVE_KR,
+        weight: STALL_SAVE_WEIGHT,
+      })
     ) {
       continue;
     }

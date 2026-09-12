@@ -108,17 +108,29 @@ export const CHEAP_TIME_FRAC = 0.15;
 /** Net save must be at least this many times the extra drive cost. */
 export const SAVE_WEIGHT = 3;
 export const MIN_SAVE_KR = 25;
+/** Cheapest may leave the line for a smaller kWh save than A/B route compare. */
+export const STALL_SAVE_KR = 8;
+export const STALL_SAVE_WEIGHT = 1.1;
 
 export function cheapDetourKm(routeSeconds: number) {
   const km = (Math.max(0, routeSeconds) / 3600) * CHEAP_TIME_FRAC * 80;
-  return Math.min(80, Math.max(12, Math.round(km)));
+  return Math.min(100, Math.max(18, Math.round(km)));
 }
 
 /** Leave the motorway only if net save beats extra drive by SAVE_WEIGHT. */
-export function detourPays(opts: { baseKr: number; stallKr: number; extraKr: number; distM: number }) {
-  if (opts.distM <= 4000) return true;
+export function detourPays(opts: {
+  baseKr: number;
+  stallKr: number;
+  extraKr: number;
+  distM: number;
+  minSave?: number;
+  weight?: number;
+}) {
+  if (opts.distM <= 5000) return true;
+  const minSave = opts.minSave ?? MIN_SAVE_KR;
+  const weight = opts.weight ?? SAVE_WEIGHT;
   const net = opts.baseKr - opts.stallKr - opts.extraKr;
-  return net >= MIN_SAVE_KR && net >= opts.extraKr * SAVE_WEIGHT;
+  return net >= minSave && net >= opts.extraKr * weight;
 }
 
 export function detourSavings(base: { kr: number; tollKr: number; driveMin: number; mi: number }, alt: { kr: number; tollKr: number; driveMin: number; mi: number }) {
@@ -163,8 +175,8 @@ export function chargeSearchKm(mode: LegMode, detourKm: number, focus?: ModeFocu
   const km = Math.max(8, detourKm);
   if (mode === "eco" || focus === "distance") return Math.max(30, Math.round(km * 2.2));
   if (mode === "cheapest" || focus === "pris") {
-    const timeKm = routeSeconds != null ? cheapDetourKm(routeSeconds) : 40;
-    return Math.max(km, timeKm);
+    const timeKm = routeSeconds != null ? cheapDetourKm(routeSeconds) : 50;
+    return Math.max(km * 1.8, timeKm, 28);
   }
   return Math.max(18, km);
 }
@@ -182,7 +194,7 @@ export function chargeFitScore(
     const detourMin = (distKm / kmh) * 60;
     return detourMin + (opts.dc ? 0 : 14);
   }
-  if (focus === "pris") return kr * 8 + extra * SAVE_WEIGHT + distKm * SAVE_WEIGHT * 0.25;
+  if (focus === "pris") return kr * 14 + extra * STALL_SAVE_WEIGHT + distKm * 0.12;
   return distKm * 14 + (opts.dc ? 1.5 : 0) + kr * 0.04;
 }
 

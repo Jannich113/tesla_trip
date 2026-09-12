@@ -69,7 +69,7 @@ describe("leg modes", () => {
 
   it("cheapest may detour up to 15% of fastest time", () => {
     assert.equal(cheapDetourKm(2 * 3600), 24);
-    assert.equal(cheapDetourKm(15 * 3600), 80);
+    assert.equal(cheapDetourKm(15 * 3600), 100);
     assert.ok(chargeSearchKm("cheapest", 12, "pris", 2 * 3600) >= 24);
     assert.ok(chargeSearchKm("cheapest", 12, "pris", 15 * 3600) >= 80);
   });
@@ -110,6 +110,10 @@ describe("leg modes", () => {
     assert.equal(detourPays({ baseKr: 100, stallKr: 90, extraKr: 8, distM: 12000 }), false);
     assert.equal(detourPays({ baseKr: 100, stallKr: 40, extraKr: 12, distM: 12000 }), true);
     assert.equal(detourPays({ baseKr: 100, stallKr: 50, extraKr: 20, distM: 12000 }), false);
+    assert.equal(
+      detourPays({ baseKr: 140, stallKr: 118, extraKr: 8, distM: 12000, minSave: 8, weight: 1.1 }),
+      true,
+    );
   });
 
   it("eco and cheapest search farther for chargers than fastest", () => {
