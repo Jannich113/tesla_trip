@@ -173,16 +173,49 @@ export function formatWaitCap(min: number) {
 
 export const SPEED_KMH = [50, 80, 110, 130] as const;
 export type SpeedKmh = (typeof SPEED_KMH)[number];
-/** Wh per mile at each posted speed. */
+/** kWh / 100 km at each posted speed. */
 export type SpeedEff = Record<SpeedKmh, number>;
 
+/** 1 kWh/100 km = 0.0161 kWh/mile */
+export const KWH_100KM_TO_KWH_MI = 0.0161;
+
+export function kwhPerMiFrom100km(kwhPer100km: number) {
+  return Math.max(0, kwhPer100km) * KWH_100KM_TO_KWH_MI;
+}
+
 export function defaultSpeedEff(epaWhPerMi: number): SpeedEff {
-  const base = epaWhPerMi > 0 ? epaWhPerMi : 240;
+  const kwhMi = (epaWhPerMi > 0 ? epaWhPerMi : 240) / 1000;
+  const base = kwhMi / KWH_100KM_TO_KWH_MI;
   return {
-    50: Math.round(base * 0.78),
-    80: Math.round(base * 0.95),
-    110: Math.round(base * 1.18),
-    130: Math.round(base * 1.42),
+    50: round1(base * 0.82),
+    80: round1(base),
+    110: round1(base * 1.18),
+    130: round1(base * 1.38),
+  };
+}
+
+function round1(n: number) {
+  return Math.round(n * 10) / 10;
+}
+
+/** Old drafts stored Wh/mi (~180–340). New values are kWh/100 km (~8–30). */
+export function normalizeSpeedEff(raw: SpeedEff | null | undefined, epaWhPerMi: number): SpeedEff {
+  const fallback = defaultSpeedEff(epaWhPerMi);
+  if (!raw) return fallback;
+  const sample = raw[80] ?? raw[110] ?? 0;
+  if (sample > 40) {
+    return {
+      50: round1((raw[50] / 1000) / KWH_100KM_TO_KWH_MI),
+      80: round1((raw[80] / 1000) / KWH_100KM_TO_KWH_MI),
+      110: round1((raw[110] / 1000) / KWH_100KM_TO_KWH_MI),
+      130: round1((raw[130] / 1000) / KWH_100KM_TO_KWH_MI),
+    };
+  }
+  return {
+    50: raw[50] ?? fallback[50],
+    80: raw[80] ?? fallback[80],
+    110: raw[110] ?? fallback[110],
+    130: raw[130] ?? fallback[130],
   };
 }
 
@@ -191,7 +224,7 @@ export function avgSpeedKmh(miles: number, seconds: number) {
   return (miles * 1.609344) / (seconds / 3600);
 }
 
-export function interpolateWhPerMi(eff: SpeedEff, kmh: number) {
+export function interpolateKwhPer100km(eff: SpeedEff, kmh: number) {
   const pts = SPEED_KMH.map((k) => [k, eff[k]] as const);
   if (kmh <= pts[0][0]) return pts[0][1];
   const last = pts[pts.length - 1];
@@ -207,9 +240,13 @@ export function interpolateWhPerMi(eff: SpeedEff, kmh: number) {
   return last[1];
 }
 
+export function interpolateWhPerMi(eff: SpeedEff, kmh: number) {
+  return kwhPerMiFrom100km(interpolateKwhPer100km(eff, kmh)) * 1000;
+}
+
 export function driveKwhAtSpeed(miles: number, seconds: number, eff: SpeedEff) {
   const kmh = avgSpeedKmh(miles, seconds);
-  return (miles * interpolateWhPerMi(eff, kmh)) / 1000;
+  return miles * kwhPerMiFrom100km(interpolateKwhPer100km(eff, kmh));
 }
 
 export function epaWhPerMi(usableKwh: number, epaRangeMi: number) {

@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { geo } from "@/lib/places";
 import { primeRouteCache, type LegMode, type LegWhen, type PlanStop, type RoutedLeg } from "./engine";
-import { DEFAULT_DETOUR_KM, DEFAULT_WAIT_MIN, normalizeMode, type SpeedEff } from "./modes";
+import { DEFAULT_DETOUR_KM, DEFAULT_WAIT_MIN, kwhPerMiFrom100km, normalizeMode, type SpeedEff } from "./modes";
 import { simplifyPath } from "./polyline";
 import { cacheInvalidate } from "./cache";
 
@@ -130,7 +130,7 @@ export const usePlanStore = create<PlanStore>()(
       setWhenKind: (whenKind) => set({ whenKind }),
       setWhen: (when) => set({ when }),
       setWhPerMi: (whPerMi) => set({ whPerMi }),
-      setSpeedEff: (speedEff) => set({ speedEff, whPerMi: speedEff ? speedEff[80] : null }),
+      setSpeedEff: (speedEff) => set({ speedEff, whPerMi: speedEff ? kwhPerMiFrom100km(speedEff[80]) * 1000 : null }),
       setNetworkAbo: (id, on) =>
         set({ networkAbo: { ...get().networkAbo, [id]: on } }),
 

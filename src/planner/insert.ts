@@ -70,6 +70,49 @@ export function alongFraction(path: [number, number][], lat: number, lng: number
   return pathMeters(path.slice(0, idx + 1)) / total;
 }
 
+export function pointAlongPath(path: [number, number][], frac: number): [number, number] {
+  if (path.length === 0) return [0, 0];
+  if (path.length === 1 || frac <= 0) return path[0];
+  const target = pathMeters(path) * Math.min(1, Math.max(0, frac));
+  let acc = 0;
+  for (let i = 1; i < path.length; i++) {
+    const d = haversineM(
+      { lat: path[i - 1][0], lng: path[i - 1][1] },
+      { lat: path[i][0], lng: path[i][1] },
+    );
+    if (acc + d >= target) {
+      const t = d > 0 ? (target - acc) / d : 0;
+      return [
+        path[i - 1][0] + (path[i][0] - path[i - 1][0]) * t,
+        path[i - 1][1] + (path[i][1] - path[i - 1][1]) * t,
+      ];
+    }
+    acc += d;
+  }
+  return path[path.length - 1];
+}
+
+/** Keep stalls spread along the corridor, not the 40 nearest (those all sit in one country). */
+export function spreadAlongPath<T extends { id: string; lat: number; lng: number }>(
+  locations: T[],
+  path: [number, number][],
+  buckets = 24,
+  maxM = 50_000,
+): T[] {
+  if (!locations.length || path.length < 2) return [];
+  const chosen = new Map<number, { loc: T; d: number }>();
+  for (const loc of locations) {
+    const d = minDistToPathM(loc.lat, loc.lng, path);
+    if (d > maxM) continue;
+    const frac = alongFraction(path, loc.lat, loc.lng);
+    if (frac < 0.02 || frac > 0.98) continue;
+    const b = Math.min(buckets - 1, Math.floor(frac * buckets));
+    const prev = chosen.get(b);
+    if (!prev || d < prev.d) chosen.set(b, { loc, d });
+  }
+  return [...chosen.values()].map((x) => x.loc);
+}
+
 export function splitRoutedLeg(route: SplitRoute, lat: number, lng: number): { before: SplitRoute; after: SplitRoute } | null {
   if (route.path.length < 2) return null;
   let idx = closestPathIndex(route.path, lat, lng);
@@ -132,12 +175,12 @@ export function pickViaOnPath(opts: {
     const distM = minDistToPathM(loc.lat, loc.lng, path);
     if (distM > searchBand) continue;
     const frac = alongFraction(path, loc.lat, loc.lng);
-    if (frac < 0.04 || frac > 0.94) continue;
+    if (frac < 0.02 || frac > 0.92) continue;
     const energyTo = totalKwh * frac;
-    if (energyTo > budgetKwh * 0.95) continue;
-    if (energyTo < budgetKwh * 0.2) continue;
+    if (energyTo > budgetKwh * 0.98) continue;
+    if (energyTo < budgetKwh * 0.08) continue;
     const rate = locRate(loc);
-    if (!(rate > 0.3)) continue;
+    if (!(rate > 0)) continue;
     const extraMin = (distM / 1000 / 80) * 60;
     if (focus === "pris" && extraMin > Math.max(12, (detourKm / 80) * 60)) continue;
     const extraKr = (distM / 1000) * 1.2;
@@ -162,4 +205,33 @@ export function pickViaOnPath(opts: {
     }
   }
   return best;
+}
+
+/** If nothing sits in the energy window, take the stall nearest the remaining-range point. */
+export function pickViaAtRange(opts: Parameters<typeof pickViaOnPath>[0]): ViaLoc | null {
+  const hit = pickViaOnPath(opts);
+  if (hit) return hit;
+  const frac = Math.min(0.82, Math.max(0.08, (opts.budgetKwh * 0.75) / Math.max(opts.totalKwh, 1)));
+  const [lat, lng] = pointAlongPath(opts.path, frac);
+  const exclude = new Set(opts.excludeIds ?? []);
+  let best: ViaLoc | null = null;
+  let bestD = 80_000;
+  for (const loc of opts.locations) {
+    if (exclude.has(loc.id) || loc.kind === "home") continue;
+    const d = haversineM({ lat, lng }, loc);
+    if (d < bestD) {
+      bestD = d;
+      best = loc;
+    }
+  }
+  if (best) return best;
+  return {
+    id: `range-${lat.toFixed(3)},${lng.toFixed(3)}`,
+    lat,
+    lng,
+    kind: "custom",
+    usdPerKwh: 0.48,
+    name: "Charge",
+    short: "Charge",
+  };
 }

@@ -11,6 +11,8 @@ import {
   formatWaitCap,
   hoursFrom,
   interpolateWhPerMi,
+  kwhPerMiFrom100km,
+  KWH_100KM_TO_KWH_MI,
   waitMinUntil,
   waitMinUntilDated,
   addMinutesDateTime,
@@ -27,7 +29,7 @@ import {
 } from "./modes.ts";
 import { rateForNetwork, networkIdFor, roamExtra, EU_NETWORKS, EU_REGIONS, regionalOwn, regionalRoam } from "./networks.ts";
 import { pickEcoRoute, pickRouted } from "./pick-route.ts";
-import { alongFraction, pickViaOnPath, splitRoutedLeg } from "./insert.ts";
+import { alongFraction, pickViaAtRange, pickViaOnPath, splitRoutedLeg } from "./insert.ts";
 import { networkFromOsmTags, isDcStation, networkFromOperator } from "./osm-operator.ts";
 import { estimateTolls, gatesOnPath } from "./tolls.ts";
 import { seedsAlongPath } from "./seed-chargers.ts";
@@ -162,22 +164,20 @@ describe("leg modes", () => {
     assert.equal(Math.round(epaWhPerMi(75, 327)), 229);
   });
 
-  it("interpolates kWh/mi between 50, 80, 110 and 130 km/t", () => {
-    const eff = { 50: 180, 80: 220, 110: 280, 130: 340 };
-    assert.equal(interpolateWhPerMi(eff, 50), 180);
-    assert.equal(interpolateWhPerMi(eff, 130), 340);
-    assert.equal(interpolateWhPerMi(eff, 80), 220);
-    assert.equal(Math.round(interpolateWhPerMi(eff, 95)), 250);
-    assert.ok(interpolateWhPerMi(eff, 40) === 180);
-    assert.ok(interpolateWhPerMi(eff, 140) === 340);
+  it("1 kWh/100 km is 0.0161 kWh/mile", () => {
+    assert.equal(kwhPerMiFrom100km(1), 0.0161);
+    assert.equal(KWH_100KM_TO_KWH_MI, 0.0161);
+    const eff = { 50: 16.1, 80: 16.1, 110: 16.1, 130: 16.1 };
+    const seconds = (100 * 1.609344) / 80 * 3600;
+    assert.ok(Math.abs(driveKwhAtSpeed(100, seconds, eff) - 25.921) < 0.02);
   });
 
-  it("faster average speed uses more kWh", () => {
-    const eff = defaultSpeedEff(240);
-    const miles = 50;
-    const at50 = driveKwhAtSpeed(miles, (miles * 1.609344) / 50 * 3600, eff);
-    const at130 = driveKwhAtSpeed(miles, (miles * 1.609344) / 130 * 3600, eff);
-    assert.ok(at130 > at50);
+  it("interpolates kWh/100 km between 50, 80, 110 and 130 km/t", () => {
+    const eff = { 50: 12, 80: 16, 110: 19, 130: 22 };
+    assert.ok(Math.abs(interpolateWhPerMi(eff, 80) - 16 * 16.1) < 0.2);
+    const slow = driveKwhAtSpeed(50, (50 * 1.609344) / 50 * 3600, defaultSpeedEff(240));
+    const fast = driveKwhAtSpeed(50, (50 * 1.609344) / 130 * 3600, defaultSpeedEff(240));
+    assert.ok(fast > slow);
   });
 
   it("waitMinUntil is 0 in the current hour and counts to a later cheap hour", () => {
@@ -470,5 +470,58 @@ describe("leg modes", () => {
     assert.ok(near, "via within current SOC range");
     const frac = alongFraction(path, near!.lat, near!.lng);
     assert.ok(frac * 200 <= 36 * 0.96, `via at ${frac} uses too much energy`);
+  });
+
+  it("1200 mile trip inserts several charge vias", () => {
+    const from = { lat: 55.4, lng: 10.4 };
+    const to = { lat: 41.9, lng: 12.5 };
+    const path: [number, number][] = [];
+    for (let i = 0; i <= 14; i++) {
+      const t = i / 14;
+      path.push([from.lat + (to.lat - from.lat) * t, from.lng + (to.lng - from.lng) * t]);
+    }
+    const locations = path.slice(1, -1).map((p, i) => ({
+      id: `sc-${i}`,
+      lat: p[0],
+      lng: p[1],
+      kind: "supercharger" as const,
+      usdPerKwh: 0.4,
+      name: `SC ${i}`,
+      short: `SC${i}`,
+    }));
+    const eff = defaultSpeedEff(240);
+    let route: { miles: number; seconds: number; path: [number, number][]; source: "osrm" | "valhalla" | "air" } = {
+      miles: 1200,
+      seconds: 18 * 3600,
+      path,
+      source: "osrm",
+    };
+    let soc = 68;
+    const used = new Set<string>();
+    const vias: string[] = [];
+    for (let d = 0; d < 12; d++) {
+      const kwh = driveKwhAtSpeed(route.miles, route.seconds, eff);
+      const rangeKwh = Math.max(8, ((soc - 15) / 100) * 75);
+      if (kwh <= rangeKwh * 0.88) break;
+      const via = pickViaAtRange({
+        path: route.path,
+        locations,
+        budgetKwh: rangeKwh * 0.85,
+        totalKwh: kwh,
+        mode: "fastest",
+        detourKm: 18,
+        excludeIds: used,
+      });
+      if (!via) break;
+      const split = splitRoutedLeg(route, via.lat, via.lng);
+      if (!split) break;
+      used.add(via.id);
+      vias.push(via.id);
+      const usedKwh = driveKwhAtSpeed(split.before.miles, split.before.seconds, eff);
+      soc = Math.max(15, soc - (usedKwh / 75) * 100);
+      soc = 70;
+      route = split.after;
+    }
+    assert.ok(vias.length >= 4, `vias ${vias.length}`);
   });
 });

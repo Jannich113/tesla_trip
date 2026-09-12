@@ -21,7 +21,6 @@ import {
   chargeSearchKm,
   DKK_PER_USD,
   dkNowDateTime,
-  defaultSpeedEff,
   detourSavings,
   epaWhPerMi,
   fetchRoute,
@@ -29,6 +28,7 @@ import {
   formatDetour,
   formatWaitCap,
   interpolateWhPerMi,
+  normalizeSpeedEff,
   avgSpeedKmh,
   minutesToHm,
   modeColor,
@@ -56,7 +56,7 @@ import { useChargeStore } from "@/store/charge-store";
 import { useElprisStore } from "@/store/elpris-store";
 import { NETWORK_NATIVE, scaleCatalogKr, type FxTable } from "./charge-fx";
 import { countryProfile } from "./country-profiles";
-import { minDistToPathM } from "./insert";
+import { minDistToPathM, spreadAlongPath } from "./insert";
 import { simplifyPath } from "./polyline";
 import { useRouteChargers } from "./use-route-chargers";
 import { useChargePrices } from "./use-charge-prices";
@@ -224,7 +224,10 @@ export function PlanScreen() {
   }, [stops, detours]);
 
   const carWhPerMi = epaWhPerMi(profile.usableKwh, profile.epaRangeMi);
-  const speedEff = speedEffOverride ?? defaultSpeedEff(whPerMiOverride && whPerMiOverride > 0 ? whPerMiOverride : carWhPerMi);
+  const speedEff = normalizeSpeedEff(
+    speedEffOverride,
+    whPerMiOverride && whPerMiOverride > 0 ? whPerMiOverride : carWhPerMi,
+  );
   const clock = asDateTime(when || dkNowDateTime());
 
   const hours = useMemo(() => {
@@ -309,15 +312,13 @@ export function PlanScreen() {
     if (!paths.length) return all;
     const picked = new Map<string, ChargeLocation>();
     for (const p of paths) {
+      for (const l of spreadAlongPath(all, p, 28, 55_000)) picked.set(l.id, l);
       const ranked = all
         .map((l) => ({ l, d: minDistToPathM(l.lat, l.lng, p) }))
-        .sort((a, b) => a.d - b.d);
-      for (const s of ranked.slice(0, 40)) picked.set(s.l.id, s.l);
-      const cheap = ranked
         .filter((s) => s.d < 50_000)
         .sort((a, b) => a.l.usdPerKwh - b.l.usdPerKwh)
-        .slice(0, 24);
-      for (const s of cheap) picked.set(s.l.id, s.l);
+        .slice(0, 12);
+      for (const s of ranked) picked.set(s.l.id, s.l);
     }
     return [...picked.values()];
   }, [locationsStored, routeChargers, searchRoutes]);
@@ -789,7 +790,7 @@ export function PlanScreen() {
       {pane === "advanced" ? (
         <div className="space-y-4">
           <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-muted">kWh / mi at speed</p>
+            <p className="text-[11px] font-medium uppercase tracking-wide text-muted">kWh / 100 km at speed</p>
             <div className="mt-3 grid grid-cols-4 gap-2">
               {SPEED_KMH.map((kmh) => (
                 <label key={kmh} className="text-center text-[11px] text-muted">
@@ -798,14 +799,14 @@ export function PlanScreen() {
                   <input
                     type="number"
                     inputMode="decimal"
-                    min={0.08}
-                    max={0.6}
-                    step={0.005}
-                    value={(speedEff[kmh] / 1000).toFixed(3)}
+                    min={8}
+                    max={30}
+                    step={0.1}
+                    value={speedEff[kmh].toFixed(1)}
                     onChange={(e) => {
                       const n = Number(e.target.value);
                       if (!Number.isFinite(n) || n <= 0) return;
-                      setSpeedEff({ ...speedEff, [kmh]: n * 1000 });
+                      setSpeedEff({ ...speedEff, [kmh]: n });
                     }}
                     className="mt-1 h-11 w-full rounded-xl bg-surface-2 px-2 text-center text-sm tabular-nums text-foreground outline-none"
                   />
@@ -813,7 +814,7 @@ export function PlanScreen() {
               ))}
             </div>
             <p className="mt-2 text-[11px] text-subtle">
-              From each leg’s average speed · EPA {formatEfficiency(carWhPerMi, units)}
+              kWh/mi = (kWh/100 km) × 0.0161 · EPA {formatEfficiency(carWhPerMi, units)}
               {speedEffOverride ? (
                 <>
                   {" · "}

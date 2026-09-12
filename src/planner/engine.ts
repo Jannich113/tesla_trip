@@ -32,13 +32,14 @@ import {
   alongFraction,
   haversineM,
   minDistToPathM,
-  pickViaOnPath,
+  pickViaAtRange,
   splitRoutedLeg,
+  spreadAlongPath,
 } from "./insert";
 import { estimateTolls } from "./tolls";
 import { withRetry, fetchWithTimeout } from "./retry";
 
-export { alongFraction, haversineM, minDistToPathM, pathMeters, pickViaOnPath, splitRoutedLeg } from "./insert";
+export { alongFraction, haversineM, minDistToPathM, pathMeters, pickViaAtRange, pickViaOnPath, pointAlongPath, splitRoutedLeg, spreadAlongPath } from "./insert";
 
 export {
   DEFAULT_DETOUR_KM,
@@ -61,6 +62,8 @@ export {
   formatWaitCap,
   hoursFrom,
   interpolateWhPerMi,
+  kwhPerMiFrom100km,
+  normalizeSpeedEff,
   avgSpeedKmh,
   splitDateTime,
   modeColor,
@@ -693,13 +696,13 @@ export function pricePlan(opts: {
   }));
   const usedVias = new Set<string>(stops.map((s) => s.id));
   const out: PricedLeg[] = [];
-  while (jobs.length && out.length < 24) {
+  while (jobs.length && out.length < 32) {
     const job = jobs.shift()!;
     const { mode, route, userIndex, via } = job;
     const focus = job.focus;
     const kwh = driveKwh(route.miles, route.seconds, speedEff);
     const rangeKwh = Math.max(8, ((soc - RESERVE_SOC) / 100) * usableKwh);
-    if (kwh > rangeKwh * 0.88 && job.depth < 8) {
+    if (kwh > rangeKwh * 0.88 && job.depth < 12) {
       const budgetKwh = rangeKwh * 0.85;
       const viaOpts = {
         path: route.path,
@@ -713,10 +716,10 @@ export function pricePlan(opts: {
         memberships: opts.memberships,
       };
       const viaLoc =
-        pickViaOnPath(viaOpts) ??
-        pickViaOnPath({
+        pickViaAtRange(viaOpts) ??
+        pickViaAtRange({
           ...viaOpts,
-          detourKm: Math.max(viaOpts.detourKm, 40),
+          detourKm: Math.max(viaOpts.detourKm, 50),
         });
       const split = viaLoc ? splitRoutedLeg(route, viaLoc.lat, viaLoc.lng) : null;
       if (viaLoc && split) {
