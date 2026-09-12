@@ -6,7 +6,7 @@ import { type ElprisData, fetchElpris } from "@/lib/elpris";
 const POLL_MS = 60_000;
 
 export function useLiveElpris(area: PriceArea) {
-  const cached = cacheGet<ElprisData>("elpris", area);
+  const cached = cacheGet<ElprisData>("elpris", area, { stale: true });
   const [data, setData] = useState<ElprisData | null>(cached ?? null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(!cached);
@@ -14,7 +14,7 @@ export function useLiveElpris(area: PriceArea) {
 
   const load = useCallback(
     async (isRefresh = false) => {
-      const hit = cacheGet<ElprisData>("elpris", area);
+      const hit = cacheGet<ElprisData>("elpris", area, { stale: true });
       if (hit && !isRefresh) {
         setData(hit);
         setLoading(false);

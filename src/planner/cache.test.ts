@@ -20,6 +20,15 @@ describe("cache invalidation", () => {
     assert.equal(cacheGet("t", "b"), undefined);
   });
 
+  it("serves stale after ttl when asked", async () => {
+    cacheSet("t", "s", 7, 20);
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(cacheGet("t", "s"), undefined);
+    cacheSet("t", "s", 7, 20);
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(cacheGet("t", "s", { stale: true }), 7);
+  });
+
   it("elpris ttl never crosses the next hour", () => {
     const at = Date.parse("2026-09-11T10:58:00Z");
     const ttl = elprisTtlMs(at);

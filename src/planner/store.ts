@@ -41,18 +41,89 @@ export type PlanSummary = {
 
 function slimRoutes(routes: Record<string, RoutedLeg> | undefined) {
   if (!routes) return routes;
+  const byMode = new Map<string, { key: string; route: RoutedLeg; miles: number }[]>();
+  for (const [key, route] of Object.entries(routes)) {
+    if (!route?.path?.length || route.source === "air" || route.path.length < 3) continue;
+    const canon = canonRouteKey(key);
+    const mode = canon.split("|")[2] ?? "";
+    if (mode !== "eco" && mode !== "fastest" && mode !== "cheapest") continue;
+    const list = byMode.get(mode) ?? [];
+    list.push({ key: canon, route, miles: route.miles });
+    byMode.set(mode, list);
+  }
   const out: Record<string, RoutedLeg> = {};
-  const entries = Object.entries(routes).filter(
-    ([, route]) => Boolean(route?.path?.length && route.source !== "air" && route.path.length >= 3),
-  );
-  const corridors = entries.filter(([key]) => /\|(eco|fastest|cheapest)$/.test(canonRouteKey(key)));
-  const rest = entries.filter(([key]) => !corridors.some(([k]) => k === key)).slice(-16);
-  for (const [key, route] of [...corridors, ...rest]) {
-    const slim = { ...route, path: simplifyPath(route.path, 48) };
-    out[key] = slim;
-    out[canonRouteKey(key)] = slim;
+  for (const list of byMode.values()) {
+    list.sort((a, b) => b.miles - a.miles);
+    for (const row of list.slice(0, 2)) {
+      out[row.key] = { ...row.route, path: simplifyPath(row.route.path, 40) };
+    }
   }
   return out;
+}
+
+function safeStorage(): {
+  getItem: (name: string) => string | null;
+  setItem: (name: string, value: string) => void;
+  removeItem: (name: string) => void;
+} {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let pending: { name: string; value: string } | null = null;
+  const write = (name: string, value: string) => {
+    if (typeof localStorage === "undefined") return;
+    try {
+      localStorage.setItem(name, value);
+    } catch {
+      try {
+        for (const k of Object.keys(localStorage)) {
+          if (k.startsWith("juniper-cache:")) localStorage.removeItem(k);
+        }
+        localStorage.setItem(name, value);
+      } catch {
+        try {
+          const parsed = JSON.parse(value) as { state?: { saved?: unknown[]; routeCache?: unknown } };
+          if (parsed.state) {
+            parsed.state.saved = [];
+            parsed.state.routeCache = {};
+            localStorage.setItem(name, JSON.stringify(parsed));
+          }
+        } catch {
+          try {
+            localStorage.removeItem(name);
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+    }
+  };
+  return {
+    getItem: (name) => {
+      if (typeof localStorage === "undefined") return null;
+      try {
+        return localStorage.getItem(name);
+      } catch {
+        return null;
+      }
+    },
+    setItem: (name, value) => {
+      pending = { name, value };
+      if (timer) return;
+      timer = setTimeout(() => {
+        timer = null;
+        const job = pending;
+        pending = null;
+        if (job) write(job.name, job.value);
+      }, 450);
+    },
+    removeItem: (name) => {
+      if (typeof localStorage === "undefined") return;
+      try {
+        localStorage.removeItem(name);
+      } catch {
+        /* ignore */
+      }
+    },
+  };
 }
 
 function homeStop(): PlanStop {
@@ -386,7 +457,7 @@ export const usePlanStore = create<PlanStore>()(
     {
       name: "juniper-planner-draft",
       version: 2,
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(() => safeStorage()),
       skipHydration: true,
       migrate: (persisted, version) => {
         const p = persisted as SavedPlan & PlanState & { cheapAvoidFees?: boolean };
@@ -414,7 +485,10 @@ export const usePlanStore = create<PlanStore>()(
         speedEff: s.speedEff,
         networkAbo: s.networkAbo,
         routeCache: slimRoutes(s.routeCache) ?? {},
-        saved: s.saved.map((plan) => ({ ...plan, routes: slimRoutes(plan.routes) })),
+        saved: s.saved.slice(-8).map((plan) => ({
+          ...plan,
+          routes: slimRoutes(plan.routes),
+        })),
         seq: s.seq,
       }),
       onRehydrateStorage: () => (state) => {
