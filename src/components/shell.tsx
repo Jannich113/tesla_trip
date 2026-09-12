@@ -1,11 +1,14 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { toast, Toaster } from "sonner";
 import { Car, CircleDollarSign, House, RotateCw, Route, Zap } from "lucide-react";
-import { HomeScreen } from "@/components/home-screen";
 import { type Tab, VEHICLE } from "@/lib/vehicle";
 import { cn } from "@/lib/utils";
 import { useVehicleProfile } from "@/hooks/use-vehicle-profile";
 import { useVehicleStore } from "@/store/vehicle-store";
+
+const HomeScreen = lazy(() =>
+  import("@/components/home-screen").then((m) => ({ default: m.HomeScreen })),
+);
 const TripsScreen = lazy(() =>
   import("@/components/trips-screen").then((m) => ({ default: m.TripsScreen })),
 );
@@ -19,14 +22,15 @@ const VehicleScreen = lazy(() =>
   import("@/components/vehicle-screen").then((m) => ({ default: m.VehicleScreen })),
 );
 
-const TAB_LOADERS: Record<Exclude<Tab, "home">, () => Promise<unknown>> = {
+const TAB_LOADERS: Record<Tab, () => Promise<unknown>> = {
+  home: () => import("@/components/home-screen"),
   trips: () => import("@/components/trips-screen"),
   costs: () => import("@/components/charge-screen"),
   elpris: () => import("@/components/elpris-screen"),
   vehicle: () => import("@/components/vehicle-screen"),
 };
 
-const WARM_ORDER: Exclude<Tab, "home">[] = ["trips", "costs", "elpris", "vehicle"];
+const WARM_ORDER: Tab[] = ["home", "trips", "costs", "elpris", "vehicle"];
 const warmed = new Set<string>();
 
 function saveDataOn() {
@@ -35,7 +39,7 @@ function saveDataOn() {
   return Boolean(conn?.saveData) || conn?.effectiveType === "slow-2g" || conn?.effectiveType === "2g";
 }
 
-function warmTab(id: Exclude<Tab, "home">) {
+function warmTab(id: Tab) {
   if (warmed.has(id)) return Promise.resolve();
   warmed.add(id);
   return TAB_LOADERS[id]()
@@ -47,7 +51,7 @@ function warmTab(id: Exclude<Tab, "home">) {
 
 function warmTabsInIdle(first?: Tab) {
   if (typeof window === "undefined" || saveDataOn()) return () => {};
-  const order = first && first !== "home" ? [first, ...WARM_ORDER.filter((id) => id !== first)] : [...WARM_ORDER];
+  const order = first ? [first, ...WARM_ORDER.filter((id) => id !== first)] : [...WARM_ORDER];
   let i = 0;
   let idleId = 0;
   let timer = 0;
@@ -76,7 +80,7 @@ function warmTabsInIdle(first?: Tab) {
     }
   };
 
-  timer = window.setTimeout(schedule, 2800);
+  timer = window.setTimeout(schedule, 0);
   return () => {
     stopped = true;
     if (idleId && typeof cancelIdleCallback === "function") cancelIdleCallback(idleId);
@@ -126,22 +130,26 @@ function writeTabToLocation(next: Tab) {
 
 export function Dashboard() {
   const [tab, setTab] = useState<Tab>("home");
+  const [ready, setReady] = useState(false);
   const wake = useVehicleStore((s) => s.wake);
   const waking = useVehicleStore((s) => s.waking);
   const tick = useVehicleStore((s) => s.tick);
   const { profile } = useVehicleProfile();
 
   const selectTab = (next: Tab) => {
-    if (next !== "home") void warmTab(next);
+    void warmTab(next);
     setTab(next);
     writeTabToLocation(next);
   };
 
   useEffect(() => {
+    setReady(true);
     const initial = readTabFromLocation();
     if (initial !== "home") {
       setTab(initial);
       void warmTab(initial);
+    } else {
+      void warmTab("home");
     }
     const onPop = () => setTab(readTabFromLocation());
     window.addEventListener("popstate", onPop);
@@ -216,15 +224,16 @@ export function Dashboard() {
         </header>
 
         <main className="flex-1 overflow-y-auto pb-32">
-          {tab === "home" ? (
-            <HomeScreen />
-          ) : (
+          {ready ? (
             <Suspense fallback={<TabFallback />}>
+              {tab === "home" && <HomeScreen />}
               {tab === "trips" && <TripsScreen />}
               {tab === "costs" && <ChargeScreen />}
               {tab === "elpris" && <ElprisScreen />}
               {tab === "vehicle" && <VehicleScreen />}
             </Suspense>
+          ) : (
+            <TabFallback />
           )}
         </main>
 
@@ -243,16 +252,14 @@ export function Dashboard() {
                     type="button"
                     onPointerDown={(e) => {
                       if (e.button !== 0) return;
-                      if (item.id !== "home") void warmTab(item.id);
+                      void warmTab(item.id);
                       selectTab(item.id);
                     }}
                     onClick={(e) => {
                       e.preventDefault();
                       selectTab(item.id);
                     }}
-                    onPointerEnter={() => {
-                      if (item.id !== "home") void warmTab(item.id);
-                    }}
+                    onPointerEnter={() => void warmTab(item.id)}
                     className={cn(
                       "flex h-14 w-full touch-manipulation flex-col items-center justify-center gap-0.5 text-[10px] font-medium",
                       "transition-[color,scale] duration-150 ease-[var(--ease-out)] active:scale-[0.96]",

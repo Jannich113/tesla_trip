@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { MapPin, MapPinned } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { BatteryBar } from "@/components/battery-bar";
@@ -10,14 +10,12 @@ import {
   relativeTime,
 } from "@/lib/vehicle";
 import {
-  chargeTotalsFrom,
   estimateRegenKwh,
   formatUsd,
+  homeStats,
   petrolSavings,
-  tripTotals,
 } from "@/lib/history";
 import { cn } from "@/lib/utils";
-import { pricedSessions, useChargeStore } from "@/store/charge-store";
 import { useVehicleProfile } from "@/hooks/use-vehicle-profile";
 import { useVehicleStore } from "@/store/vehicle-store";
 
@@ -33,13 +31,11 @@ export function HomeScreen() {
   const range = ratedRangeMi(s.soc);
   const image = s.mode === "charging" ? heroes.rear || heroes.front : heroes.front;
   const [now, setNow] = useState(0);
-  const todayTrips = tripTotals("day");
-  const lifetimeTrips = tripTotals("total");
-  const locations = useChargeStore((st) => st.locations);
-  const logged = useChargeStore((st) => st.logged);
-  const sessions = useMemo(() => pricedSessions(locations, logged), [locations, logged]);
-  const todayCost = useMemo(() => chargeTotalsFrom(sessions, "day"), [sessions]);
-  const lifetimeCharge = useMemo(() => chargeTotalsFrom(sessions, "total"), [sessions]);
+  const stats = homeStats();
+  const todayTrips = stats.todayTrips;
+  const lifetimeTrips = stats.lifetimeTrips;
+  const todayCost = stats.todayCharge;
+  const lifetimeCharge = stats.lifetimeCharge;
   const regenKwh = estimateRegenKwh(lifetimeTrips.kwh);
   const savingsUsd = petrolSavings(lifetimeTrips.mi, lifetimeCharge.usd);
 

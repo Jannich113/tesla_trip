@@ -308,14 +308,67 @@ function buildHistory() {
 
   trips.sort((a, b) => (a.day === b.day ? b.hour - a.hour : a.day < b.day ? 1 : -1));
   charges.sort((a, b) => (a.day === b.day ? b.hour - a.hour : a.day < b.day ? 1 : -1));
-  return { trips, charges };
+
+  const home = {
+    todayTrips: sumTrips(trips.filter((t) => t.day === today)),
+    lifetimeTrips: sumTrips(trips),
+    todayCharge: sumCharges(charges.filter((c) => c.day === today)),
+    lifetimeCharge: sumCharges(charges),
+  };
+  return { trips, charges, home };
 }
 
-let CACHE: { trips: Trip[]; charges: ChargeSession[] } | null = null;
+function sumTrips(list: Trip[]): TripTotals {
+  return list.reduce(
+    (acc, t) => {
+      acc.count += 1;
+      acc.mi += t.mi;
+      acc.kwh += t.kwh;
+      acc.min += t.min;
+      return acc;
+    },
+    { count: 0, mi: 0, kwh: 0, min: 0 },
+  );
+}
+
+function sumCharges(list: ChargeSession[]): ChargeTotals {
+  return list.reduce((acc, c) => {
+    acc.count += 1;
+    acc.kwh += c.kwh;
+    acc.usd += c.usd;
+    acc.addedMi += c.addedMi;
+    if (c.kind === "home") {
+      acc.homeKwh += c.kwh;
+      acc.homeUsd += c.usd;
+    } else if (c.kind === "supercharger") {
+      acc.scKwh += c.kwh;
+      acc.scUsd += c.usd;
+    } else {
+      acc.otherKwh += c.kwh;
+      acc.otherUsd += c.usd;
+    }
+    return acc;
+  }, emptyChargeTotals());
+}
+
+let CACHE: {
+  trips: Trip[];
+  charges: ChargeSession[];
+  home: {
+    todayTrips: TripTotals;
+    lifetimeTrips: TripTotals;
+    todayCharge: ChargeTotals;
+    lifetimeCharge: ChargeTotals;
+  };
+} | null = null;
 
 function loadHistory() {
   if (!CACHE) CACHE = buildHistory();
   return CACHE;
+}
+
+export function homeStats() {
+  return loadHistory().home;
 }
 
 export function getTrips() {
@@ -325,8 +378,6 @@ export function getTrips() {
 export function getCharges() {
   return loadHistory().charges;
 }
-
-if (typeof window !== "undefined") loadHistory();
 
 export function tripsIn(period: Period, today = laDayString()) {
   return getTrips().filter((t) => inPeriod(t.day, period, today));
