@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useDeferredValue, lazy, Suspense } from "react";
+import { useEffect, useMemo, useState, useDeferredValue, useRef, lazy, Suspense, memo, startTransition } from "react";
 import { ChevronDown, ChevronUp, Navigation, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import type { MapMarker, MapRoute } from "@/components/bay-map";
@@ -51,7 +51,7 @@ import { formatKrPerKwh, formatKrValue, type HourPrice } from "@/lib/elpris";
 import { applyTillægToHours, providerById } from "@/lib/el-providers";
 import { PLACES } from "@/lib/places";
 import { cn } from "@/lib/utils";
-import { formatDistance, formatEfficiency, formatNumber } from "@/lib/vehicle";
+import { formatDistance, formatEfficiency, formatNumber, type Units } from "@/lib/vehicle";
 import { HOME_USD_PER_KWH } from "@/lib/history";
 import { type ChargeLocation } from "@/lib/charge-locations";
 import { useChargeStore } from "@/store/charge-store";
@@ -160,6 +160,129 @@ function snapTotals(snap: OptionSnap) {
     charges: snap.charges,
   };
 }
+
+function sameLastOptions(
+  prev: { key: string; rows: Partial<Record<LegMode, OptionSnap>> } | null,
+  next: { key: string; rows: Partial<Record<LegMode, OptionSnap>> },
+) {
+  if (!prev || prev.key !== next.key) return false;
+  for (const mode of LEG_MODES) {
+    const a = prev.rows[mode];
+    const b = next.rows[mode];
+    if (!a && !b) continue;
+    if (!a || !b) return false;
+    if (a.mi !== b.mi || a.kr !== b.kr || a.driveMin !== b.driveMin || a.charges !== b.charges || a.tollKr !== b.tollKr) {
+      return false;
+    }
+  }
+  return true;
+}
+
+type OptionRowView = {
+  mode: LegMode;
+  totals: ReturnType<typeof snapTotals> | null;
+  kmh: number;
+  kwhPerMi: number;
+  legs: PricedLeg[];
+};
+
+const OptionList = memo(function OptionList({
+  rows,
+  mixed,
+  active,
+  routing,
+  units,
+  cheapAvoid,
+  onPick,
+}: {
+  rows: OptionRowView[];
+  mixed: boolean;
+  active: LegMode;
+  routing: boolean;
+  units: Units;
+  cheapAvoid: { motorways: boolean; tolls: boolean; roadFees: boolean };
+  onPick: (mode: LegMode) => void;
+}) {
+  const fastest = rows.find((r) => r.mode === "fastest")?.totals;
+  return (
+    <ul className="mt-2 divide-y divide-border rounded-xl bg-surface-2">
+      {rows.map((row) => {
+        const on = !mixed && active === row.mode;
+        const t = row.totals;
+        const save = t && fastest && row.mode !== "fastest" ? detourSavings(fastest, t) : null;
+        const slow = Boolean(t && fastest && row.mode === "eco" && timePenalized(fastest.driveMin, t.driveMin));
+        return (
+          <li key={row.mode}>
+            <div className={cn("px-3 py-3", on && "bg-background/40")}>
+              <button
+                type="button"
+                onPointerDown={(e) => {
+                  if (e.button !== 0) return;
+                  onPick(row.mode);
+                }}
+                onClick={(e) => {
+                  e.preventDefault();
+                  onPick(row.mode);
+                }}
+                className="flex w-full items-start gap-3 text-left"
+              >
+                <span
+                  className="mt-1.5 size-2.5 shrink-0 rounded-full"
+                  style={{ background: modeColor(row.mode) }}
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-baseline justify-between gap-2">
+                    <span className="text-sm font-medium">{modeLabel(row.mode)}</span>
+                    <span className="text-sm tabular-nums">{t ? `${formatKrValue(t.kr, 0)} kr` : "—"}</span>
+                  </span>
+                  {t ? (
+                    <>
+                      <span className="mt-0.5 block text-xs text-muted">
+                        {formatDistance(t.mi, units, t.mi >= 100 ? 0 : 1)}
+                        <span className="text-subtle"> · </span>
+                        {minutesToHm(t.driveMin)} drive
+                        <span className="text-subtle"> · </span>
+                        avg {formatNumber(row.kmh, 0)} km/t
+                        {slow ? " · 2× slower" : ""}
+                        {row.mode === "cheapest"
+                          ? (() => {
+                              const bits = [
+                                cheapAvoid.motorways && "no motorways",
+                                cheapAvoid.tolls && t.tollKr < 1 && "no toll gates",
+                                cheapAvoid.roadFees && "no road fees",
+                              ].filter(Boolean);
+                              return bits.length ? ` · ${bits.join(" · ")}` : " · cheapest stalls";
+                            })()
+                          : ""}
+                      </span>
+                      <span className="mt-0.5 block text-xs text-muted">
+                        {t.charges > 0
+                          ? `${t.charges} ${t.charges === 1 ? "charge" : "charges"} · ${formatKrValue(Math.max(0, t.kr - t.tollKr), 0)} kr`
+                          : "no charge"}
+                        {t.tollKr >= 1 ? ` · toll ${formatKrValue(t.tollKr, 0)} kr` : " · no toll"}
+                        {save && save.significant
+                          ? ` · saves ${formatKrValue(save.net, 0)} kr${save.extraMin >= 1 ? ` for +${minutesToHm(save.extraMin)}` : ""}`
+                          : save && save.net <= -1
+                            ? ` · ${formatKrValue(-save.net, 0)} kr more`
+                            : ""}
+                        {row.mode === "cheapest" || t.waitMin > 0
+                          ? ` · ${t.waitMin > 0 ? minutesToHm(t.waitMin) : "no"} wait`
+                          : ""}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="mt-0.5 block text-xs text-subtle">{routing ? "Routing…" : "Add a stop"}</span>
+                  )}
+                </span>
+              </button>
+              {row.mode === "cheapest" ? <CheapAvoidToggles className="mt-2 pl-5" /> : null}
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
+});
 
 const BayMap = lazy(() => import("@/components/bay-map").then((m) => ({ default: m.BayMap })));
 
@@ -294,8 +417,10 @@ export function PlanScreen() {
           if (cancelled || route.source === "air" || route.path.length < 3) continue;
           patch[job.key] = route;
         }
-        if (!cancelled && Object.keys(patch).length) setRouteCache(patch);
-        if (mode === "fastest" && !cancelled) setRouting(false);
+        if (!cancelled && Object.keys(patch).length) {
+          startTransition(() => setRouteCache(patch));
+        }
+        if (mode === "fastest" && !cancelled) startTransition(() => setRouting(false));
         if (mode !== "cheapest") await new Promise((r) => window.setTimeout(r, 40));
       }
     })();
@@ -439,14 +564,130 @@ export function PlanScreen() {
     avoid: cheapAvoid,
   };
 
+  const corridorStamp = useMemo(() => {
+    if (stops.length < 2) return "";
+    let stamp = "";
+    for (let i = 0; i < stops.length - 1; i++) {
+      for (const mode of pathModes) {
+        const hit = routeMap[routeKey(stops[i], stops[i + 1], mode)];
+        stamp += hit && hit.source !== "air" ? `${mode}:${hit.miles.toFixed(1)}:${hit.seconds}|` : `${mode}:-|`;
+      }
+    }
+    return stamp;
+  }, [stops, pathModes, routeMap]);
+
+  const deferredMap = useDeferredValue(routeMap);
+
+  const pricedMemo = useRef(new Map<string, PricedLeg[]>());
+
+  const pricedRows = useMemo(() => {
+    if (!live) {
+      return LEG_MODES.map((mode) => ({
+        mode,
+        priced: [] as PricedLeg[],
+        avoid: mode === "cheapest" ? cheapAvoid : { motorways: false, tolls: false, roadFees: false },
+      }));
+    }
+    return LEG_MODES.map((mode) => {
+      const avoid = mode === "cheapest" ? cheapAvoid : { motorways: false, tolls: false, roadFees: false };
+      const optionRoutes = routesFor(pathMode(mode, avoid));
+      if (optionRoutes.length !== Math.max(0, stops.length - 1) || stops.length < 2) {
+        return { mode, priced: [] as PricedLeg[], avoid };
+      }
+      const cacheKey = `${mode}|${corridorStamp}|${soc}|${locations.length}|${hours.length}|${avoid.motorways}|${avoid.tolls}|${avoid.roadFees}`;
+      const cached = pricedMemo.current.get(cacheKey);
+      if (cached) return { mode, avoid, priced: cached };
+      const priced = pricePlan({
+        ...planArgs,
+        modes: stops.slice(1).map(() => mode),
+        focuses: stops.slice(1).map(() => (mode === "cheapest" ? "pris" : mode === "eco" ? "distance" : "time")),
+        detours: planArgs.detours.map((d) => (mode === "cheapest" ? 15 : d)),
+        routes: optionRoutes,
+        locations: locationsForRoutes(locations, optionRoutes),
+        avoid,
+      });
+      pricedMemo.current.set(cacheKey, priced);
+      if (pricedMemo.current.size > 12) {
+        const first = pricedMemo.current.keys().next().value;
+        if (first) pricedMemo.current.delete(first);
+      }
+      return { mode, avoid, priced };
+    });
+  }, [live, corridorStamp, stops, detours, waits, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc, prefer, networkAbo, cheapAvoid]);
+
+  const optionRows = useMemo(() => {
+    const rows = pricedRows.map(({ mode, priced, avoid }) => {
+      const legs = applyLiveRoutes(
+        priced,
+        (from, to, m) => {
+          const pathM = pathMode(m, m === "cheapest" ? cheapAvoid : false);
+          return deferredMap[routeKey(from, to, pathM)] ?? deferredMap[routeKey(from, to, m)];
+        },
+        speedEff,
+        avoid,
+      );
+      const miles = legs.reduce((n, l) => n + l.route.miles, 0);
+      const seconds = legs.reduce((n, l) => n + l.route.seconds, 0);
+      const kmh = avgSpeedKmh(miles, seconds);
+      const liveTotals = legs.length ? planTotals(legs) : null;
+      const snap =
+        !liveTotals && lastOptions?.key === stopsKey(stops) ? lastOptions.rows[mode] : undefined;
+      return {
+        mode,
+        totals: liveTotals ?? (snap ? snapTotals(snap) : null),
+        kmh: liveTotals ? kmh : (snap?.kmh ?? kmh),
+        kwhPerMi: interpolateWhPerMi(speedEff, liveTotals ? kmh : (snap?.kmh ?? kmh)) / 1000,
+        legs,
+      };
+    });
+    const fast = rows.find((r) => r.mode === "fastest")?.totals;
+    return rows.map((row) => {
+      if (row.mode !== "cheapest" || !row.totals || !fast) return row;
+      if (!row.legs.length) return row;
+      if (row.totals.driveMin >= fast.driveMin - 0.4) return row;
+      const driveMin = fast.driveMin;
+      const seconds = driveMin * 60;
+      return {
+        ...row,
+        totals: { ...row.totals, driveMin },
+        kmh: avgSpeedKmh(row.totals.mi, seconds),
+      };
+    });
+  }, [pricedRows, deferredMap, speedEff, cheapAvoid, stops]);
+
+  useEffect(() => {
+    if (!live) return;
+    const key = stopsKey(stops);
+    const rows: NonNullable<typeof lastOptions>["rows"] = {};
+    for (const row of optionRows) {
+      if (!row.totals || !row.legs.length) continue;
+      rows[row.mode] = {
+        mi: row.totals.mi,
+        kr: row.totals.kr,
+        driveMin: row.totals.driveMin,
+        charges: row.totals.charges,
+        tollKr: row.totals.tollKr,
+        kmh: row.kmh,
+      };
+    }
+    if (!Object.keys(rows).length) return;
+    const next = { key, rows };
+    if (sameLastOptions(lastOptions, next)) return;
+    setLastOptions(next);
+  }, [live, optionRows, stops, lastOptions, setLastOptions]);
+
   const legs: PricedLeg[] = useMemo(() => {
+    if (!mixed) {
+      const row = optionRows.find((r) => r.mode === (activeModes[0] ?? "fastest"));
+      return row?.legs ?? [];
+    }
     if (stops.length < 2 || selectedRoutes.length !== stops.length - 1) return [];
     return pricePlan({
       ...planArgs,
       modes: activeModes,
       routes: selectedRoutes,
     });
-  }, [stops, activeModes, cheapAvoid, detours, waits, selectedRoutes, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc, prefer, networkAbo]);
+  }, [mixed, optionRows, activeModes, stops, selectedRoutes]);
 
   const viewLegs = useMemo(() => {
     return legs.map((leg, i) => {
@@ -489,109 +730,6 @@ export function PlanScreen() {
   }, [viewLegs, stops]);
 
   const totals = useMemo(() => planTotals(viewLegs), [viewLegs]);
-
-  const corridorStamp = useMemo(() => {
-    if (stops.length < 2) return "";
-    let stamp = "";
-    for (let i = 0; i < stops.length - 1; i++) {
-      for (const mode of pathModes) {
-        const hit = routeMap[routeKey(stops[i], stops[i + 1], mode)];
-        stamp += hit && hit.source !== "air" ? `${mode}:${hit.miles.toFixed(1)}:${hit.seconds}|` : `${mode}:-|`;
-      }
-    }
-    return stamp;
-  }, [stops, pathModes, routeMap]);
-
-  const deferredMap = useDeferredValue(routeMap);
-
-  const pricedRows = useMemo(() => {
-    if (!live) {
-      return LEG_MODES.map((mode) => ({
-        mode,
-        priced: [] as PricedLeg[],
-        avoid: mode === "cheapest" ? cheapAvoid : { motorways: false, tolls: false, roadFees: false },
-      }));
-    }
-    return LEG_MODES.map((mode) => {
-      const avoid = mode === "cheapest" ? cheapAvoid : { motorways: false, tolls: false, roadFees: false };
-      const optionRoutes = routesFor(pathMode(mode, avoid));
-      if (optionRoutes.length !== Math.max(0, stops.length - 1) || stops.length < 2) {
-        return { mode, priced: [] as PricedLeg[], avoid };
-      }
-      return {
-        mode,
-        avoid,
-        priced: pricePlan({
-          ...planArgs,
-          modes: stops.slice(1).map(() => mode),
-          focuses: stops.slice(1).map(() => (mode === "cheapest" ? "pris" : mode === "eco" ? "distance" : "time")),
-          detours: planArgs.detours.map((d) => (mode === "cheapest" ? 15 : d)),
-          routes: optionRoutes,
-          locations: locationsForRoutes(locations, optionRoutes),
-          avoid,
-        }),
-      };
-    });
-  }, [live, corridorStamp, stops, detours, waits, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc, prefer, networkAbo, cheapAvoid]);
-
-  const optionRows = useMemo(() => {
-    const rows = pricedRows.map(({ mode, priced, avoid }) => {
-      const legs = applyLiveRoutes(
-        priced,
-        (from, to, m) => {
-          const pathM = pathMode(m, m === "cheapest" ? cheapAvoid : false);
-          return deferredMap[routeKey(from, to, pathM)] ?? deferredMap[routeKey(from, to, m)];
-        },
-        speedEff,
-        avoid,
-      );
-      const miles = legs.reduce((n, l) => n + l.route.miles, 0);
-      const seconds = legs.reduce((n, l) => n + l.route.seconds, 0);
-      const kmh = avgSpeedKmh(miles, seconds);
-      const liveTotals = legs.length ? planTotals(legs) : null;
-      const snap =
-        !liveTotals && lastOptions?.key === stopsKey(stops) ? lastOptions.rows[mode] : undefined;
-      return {
-        mode,
-        totals: liveTotals ?? (snap ? snapTotals(snap) : null),
-        kmh: liveTotals ? kmh : (snap?.kmh ?? kmh),
-        kwhPerMi: interpolateWhPerMi(speedEff, liveTotals ? kmh : (snap?.kmh ?? kmh)) / 1000,
-        legs,
-      };
-    });
-    const fast = rows.find((r) => r.mode === "fastest")?.totals;
-    return rows.map((row) => {
-      if (row.mode !== "cheapest" || !row.totals || !fast) return row;
-      if (!row.legs.length) return row;
-      if (row.totals.driveMin >= fast.driveMin - 0.4) return row;
-      const driveMin = fast.driveMin;
-      const seconds = driveMin * 60;
-      return {
-        ...row,
-        totals: { ...row.totals, driveMin },
-        kmh: avgSpeedKmh(row.totals.mi, seconds),
-      };
-    });
-  }, [pricedRows, deferredMap, speedEff, cheapAvoid, lastOptions, stops]);
-
-  useEffect(() => {
-    if (!live) return;
-    const key = stopsKey(stops);
-    const rows: NonNullable<typeof lastOptions>["rows"] = {};
-    for (const row of optionRows) {
-      if (!row.totals || !row.legs.length) continue;
-      rows[row.mode] = {
-        mi: row.totals.mi,
-        kr: row.totals.kr,
-        driveMin: row.totals.driveMin,
-        charges: row.totals.charges,
-        tollKr: row.totals.tollKr,
-        kmh: row.kmh,
-      };
-    }
-    if (!Object.keys(rows).length) return;
-    setLastOptions({ key, rows });
-  }, [live, optionRows, stops, setLastOptions]);
 
   const hopKey = optionRows
     .map((row) =>
@@ -1065,83 +1203,15 @@ export function PlanScreen() {
         <p className="mt-1 text-[11px] text-subtle">
           Eco uses 80–100 km/t roads (not 50–60). Fastest takes motorways. Cheapest hunts the lowest kWh.
         </p>
-        <ul className="mt-2 divide-y divide-border rounded-xl bg-surface-2">
-          {optionRows.map((row) => {
-            const on = !mixed && activeModes[0] === row.mode;
-            const t = row.totals;
-            const fastest = optionRows.find((r) => r.mode === "fastest")?.totals;
-            const save = t && fastest && row.mode !== "fastest" ? detourSavings(fastest, t) : null;
-            const slow = Boolean(t && fastest && row.mode === "eco" && timePenalized(fastest.driveMin, t.driveMin));
-            return (
-              <li key={row.mode}>
-                <div className={cn("px-3 py-3", on && "bg-background/40")}>
-                <button
-                  type="button"
-                  onPointerDown={(e) => {
-                    if (e.button !== 0) return;
-                    setAllModes(row.mode);
-                  }}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    setAllModes(row.mode);
-                  }}
-                  className="flex w-full items-start gap-3 text-left"
-                >
-                  <span
-                    className="mt-1.5 size-2.5 shrink-0 rounded-full"
-                    style={{ background: modeColor(row.mode) }}
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="flex items-baseline justify-between gap-2">
-                      <span className="text-sm font-medium">{modeLabel(row.mode)}</span>
-                      <span className="text-sm tabular-nums">{t ? `${formatKrValue(t.kr, 0)} kr` : "—"}</span>
-                    </span>
-                    {t ? (
-                      <>
-                        <span className="mt-0.5 block text-xs text-muted">
-                          {formatDistance(t.mi, units, t.mi >= 100 ? 0 : 1)}
-                          <span className="text-subtle"> · </span>
-                          {minutesToHm(t.driveMin)} drive
-                          <span className="text-subtle"> · </span>
-                          avg {formatNumber(row.kmh, 0)} km/t
-                          {slow ? " · 2× slower" : ""}
-                          {row.mode === "cheapest"
-                            ? (() => {
-                                const bits = [
-                                  cheapAvoid.motorways && "no motorways",
-                                  cheapAvoid.tolls && t.tollKr < 1 && "no toll gates",
-                                  cheapAvoid.roadFees && "no road fees",
-                                ].filter(Boolean);
-                                return bits.length ? ` · ${bits.join(" · ")}` : " · cheapest stalls";
-                              })()
-                            : ""}
-                        </span>
-                        <span className="mt-0.5 block text-xs text-muted">
-                          {t.charges > 0
-                            ? `${t.charges} ${t.charges === 1 ? "charge" : "charges"} · ${formatKrValue(Math.max(0, t.kr - t.tollKr), 0)} kr`
-                            : "no charge"}
-                          {t.tollKr >= 1 ? ` · toll ${formatKrValue(t.tollKr, 0)} kr` : " · no toll"}
-                          {save && save.significant
-                            ? ` · saves ${formatKrValue(save.net, 0)} kr${save.extraMin >= 1 ? ` for +${minutesToHm(save.extraMin)}` : ""}`
-                            : save && save.net <= -1
-                              ? ` · ${formatKrValue(-save.net, 0)} kr more`
-                              : ""}
-                          {row.mode === "cheapest" || t.waitMin > 0
-                            ? ` · ${t.waitMin > 0 ? minutesToHm(t.waitMin) : "no"} wait`
-                            : ""}
-                        </span>
-                      </>
-                    ) : (
-                      <span className="mt-0.5 block text-xs text-subtle">{routing ? "Routing…" : "Add a stop"}</span>
-                    )}
-                  </span>
-                </button>
-                {row.mode === "cheapest" ? <CheapAvoidToggles className="mt-2 pl-5" /> : null}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+        <OptionList
+          rows={optionRows}
+          mixed={mixed}
+          active={activeModes[0] ?? "fastest"}
+          routing={routing}
+          units={units}
+          cheapAvoid={cheapAvoid}
+          onPick={setAllModes}
+        />
 
         {(() => {
           const rowA = optionRows.find((r) => r.mode === abA);
