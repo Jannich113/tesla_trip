@@ -30,7 +30,7 @@ import {
 } from "./modes.ts";
 import { rateForNetwork, networkIdFor, roamExtra, EU_NETWORKS, EU_REGIONS, regionalOwn, regionalRoam } from "./networks.ts";
 import { pickCheapAvoidRoute, pickEcoRoute, pickFastestRoute, pickRouted } from "./pick-route.ts";
-import { alongFraction, pickViaAtRange, pickViaOnPath, splitRoutedLeg } from "./insert.ts";
+import { alongFraction, haversineM, pickViaAtRange, pickViaOnPath, splitRoutedLeg } from "./insert.ts";
 import { networkFromOsmTags, isDcStation, networkFromOperator } from "./osm-operator.ts";
 import { estimateTolls, gatesOnPath } from "./tolls.ts";
 import { seedsAlongPath } from "./seed-chargers.ts";
@@ -446,6 +446,26 @@ describe("leg modes", () => {
       8,
     );
     assert.equal(kept.length, 1);
+  });
+
+  it("distance uses a fast formula that stays close to classic haversine", () => {
+    const classic = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {
+      const R = 6371000;
+      const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+      const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+      const s =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos((a.lat * Math.PI) / 180) * Math.cos((b.lat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+      return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
+    };
+    const a = { lat: 55.4038, lng: 10.4024 };
+    const b = { lat: 41.9028, lng: 12.4964 };
+    const near = { lat: 55.41, lng: 10.41 };
+    const far = haversineM(a, b);
+    const close = haversineM(a, near);
+    assert.ok(Math.abs(far - classic(a, b)) / classic(a, b) < 0.012);
+    assert.ok(Math.abs(close - classic(a, near)) / classic(a, near) < 0.006);
+    assert.ok(far > 1_400_000 && far < 1_900_000);
   });
 
   it("simplifies a dense path without dropping the ends", () => {

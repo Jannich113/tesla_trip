@@ -1,4 +1,4 @@
-import { haversineM, minDistToPathM } from "./insert.ts";
+import { haversineM, minDistToPathM, pathMeters } from "./insert.ts";
 
 /** Google encoded polyline (precision 5), as used by OpenChargeMap `polyline`. */
 
@@ -56,11 +56,7 @@ export function decodePolyline(encoded: string, precision = 5): [number, number]
 }
 
 export function pathLengthKm(path: [number, number][]) {
-  let m = 0;
-  for (let i = 1; i < path.length; i++) {
-    m += haversineM({ lat: path[i - 1][0], lng: path[i - 1][1] }, { lat: path[i][0], lng: path[i][1] });
-  }
-  return m / 1000;
+  return pathMeters(path) / 1000;
 }
 
 /**
@@ -91,10 +87,7 @@ export function simplifyPath(path: [number, number][], maxPts = 160): [number, n
   const out: [number, number][] = [path[0]];
   let acc = 0;
   for (let i = 1; i < path.length - 1; i++) {
-    acc += haversineM(
-      { lat: path[i - 1][0], lng: path[i - 1][1] },
-      { lat: path[i][0], lng: path[i][1] },
-    );
+    acc += haversineM({ lat: path[i - 1][0], lng: path[i - 1][1] }, { lat: path[i][0], lng: path[i][1] });
     if (acc >= every) {
       out.push(path[i]);
       acc = 0;

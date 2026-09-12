@@ -19,22 +19,32 @@ export type SplitRoute = {
   source: "valhalla" | "osrm" | "air";
 };
 
-export function haversineM(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
-  const R = 6371000;
-  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
-  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
-  const s =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((a.lat * Math.PI) / 180) * Math.cos((b.lat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
-}
+const DEG = Math.PI / 180;
+const M_PER_DEG = 111_320;
+const HALF_DEG = DEG / 2;
 
-/** Equirectangular meters — enough to rank chargers vs a path. */
+/** Equirectangular meters. Right for charger ranking and path length in Europe. */
 function approxM(lat: number, lng: number, plat: number, plng: number) {
   const dLat = plat - lat;
-  const dLng = (plng - lng) * Math.cos((lat * Math.PI) / 180);
-  return Math.hypot(dLat, dLng) * 111_320;
+  const dLng = (plng - lng) * Math.cos((lat + plat) * HALF_DEG);
+  return Math.hypot(dLat, dLng) * M_PER_DEG;
 }
+
+/** Local: equirectangular. Long haul (>15°): spherical law of cosines. */
+export function haversineM(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
+  const dLat = b.lat - a.lat;
+  const dLng = b.lng - a.lng;
+  if (dLat < 15 && dLat > -15 && dLng < 15 && dLng > -15) {
+    return approxM(a.lat, a.lng, b.lat, b.lng);
+  }
+  const lat1 = a.lat * DEG;
+  const lat2 = b.lat * DEG;
+  const cos =
+    Math.sin(lat1) * Math.sin(lat2) + Math.cos(lat1) * Math.cos(lat2) * Math.cos(dLng * DEG);
+  return 6_371_000 * Math.acos(Math.min(1, Math.max(-1, cos)));
+}
+
+export const distanceM = haversineM;
 
 const cumCache = new WeakMap<[number, number][], number[]>();
 
@@ -97,21 +107,19 @@ export function alongFraction(path: [number, number][], lat: number, lng: number
 export function pointAlongPath(path: [number, number][], frac: number): [number, number] {
   if (path.length === 0) return [0, 0];
   if (path.length === 1 || frac <= 0) return path[0];
-  const target = pathMeters(path) * Math.min(1, Math.max(0, frac));
-  let acc = 0;
+  const cum = cumMeters(path);
+  const total = cum[cum.length - 1] ?? 0;
+  if (total <= 0) return path[0];
+  const target = total * Math.min(1, Math.max(0, frac));
   for (let i = 1; i < path.length; i++) {
-    const d = haversineM(
-      { lat: path[i - 1][0], lng: path[i - 1][1] },
-      { lat: path[i][0], lng: path[i][1] },
-    );
-    if (acc + d >= target) {
-      const t = d > 0 ? (target - acc) / d : 0;
+    if (cum[i] >= target) {
+      const span = cum[i] - cum[i - 1];
+      const t = span > 0 ? (target - cum[i - 1]) / span : 0;
       return [
         path[i - 1][0] + (path[i][0] - path[i - 1][0]) * t,
         path[i - 1][1] + (path[i][1] - path[i - 1][1]) * t,
       ];
     }
-    acc += d;
   }
   return path[path.length - 1];
 }
@@ -249,7 +257,7 @@ export function pickViaAtRange(opts: Parameters<typeof pickViaOnPath>[0]): ViaLo
     if (exclude.has(loc.id) || loc.kind === "home") continue;
     const energyTo = opts.totalKwh * alongFraction(opts.path, loc.lat, loc.lng);
     if (energyTo < minEnergy * 0.9 || energyTo > opts.budgetKwh * 1.02) continue;
-    const d = haversineM({ lat, lng }, loc);
+    const d = approxM(lat, lng, loc.lat, loc.lng);
     if (d > (pris ? CHEAP_STALL_KM * 1000 : 80_000)) continue;
     if (pris) {
       const cost = locRate(loc) * 50 + extraMileageKr(d);
