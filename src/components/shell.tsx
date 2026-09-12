@@ -1,14 +1,11 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { toast, Toaster } from "sonner";
 import { Car, CircleDollarSign, House, RotateCw, Route, Zap } from "lucide-react";
+import { HomeScreen } from "@/components/home-screen";
 import { type Tab, VEHICLE } from "@/lib/vehicle";
 import { cn } from "@/lib/utils";
 import { useVehicleProfile } from "@/hooks/use-vehicle-profile";
 import { useVehicleStore } from "@/store/vehicle-store";
-
-const HomeScreen = lazy(() =>
-  import("@/components/home-screen").then((m) => ({ default: m.HomeScreen })),
-);
 const TripsScreen = lazy(() =>
   import("@/components/trips-screen").then((m) => ({ default: m.TripsScreen })),
 );
@@ -219,13 +216,16 @@ export function Dashboard() {
         </header>
 
         <main className="flex-1 overflow-y-auto pb-32">
-          <Suspense fallback={<TabFallback />}>
-            {tab === "home" && <HomeScreen />}
-            {tab === "trips" && <TripsScreen />}
-            {tab === "costs" && <ChargeScreen />}
-            {tab === "elpris" && <ElprisScreen />}
-            {tab === "vehicle" && <VehicleScreen />}
-          </Suspense>
+          {tab === "home" ? (
+            <HomeScreen />
+          ) : (
+            <Suspense fallback={<TabFallback />}>
+              {tab === "trips" && <TripsScreen />}
+              {tab === "costs" && <ChargeScreen />}
+              {tab === "elpris" && <ElprisScreen />}
+              {tab === "vehicle" && <VehicleScreen />}
+            </Suspense>
+          )}
         </main>
 
         <nav

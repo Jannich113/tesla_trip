@@ -326,6 +326,8 @@ export function getCharges() {
   return loadHistory().charges;
 }
 
+if (typeof window !== "undefined") loadHistory();
+
 export function tripsIn(period: Period, today = laDayString()) {
   return getTrips().filter((t) => inPeriod(t.day, period, today));
 }

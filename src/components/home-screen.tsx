@@ -45,7 +45,7 @@ export function HomeScreen() {
 
   useEffect(() => {
     setNow(Date.now());
-    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    const id = window.setInterval(() => setNow(Date.now()), 15000);
     return () => window.clearInterval(id);
   }, []);
 
