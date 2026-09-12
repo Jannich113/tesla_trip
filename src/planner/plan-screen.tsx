@@ -450,7 +450,7 @@ export function PlanScreen() {
         ...planArgs,
         modes: stops.slice(1).map(() => mode),
         focuses: stops.slice(1).map(() => (mode === "cheapest" ? "pris" : mode === "eco" ? "distance" : "time")),
-        detours: planArgs.detours.map((d) => (mode === "cheapest" ? Math.max(d, 30) : d)),
+        detours: planArgs.detours.map((d) => (mode === "cheapest" ? 15 : d)),
         routes: optionRoutes,
       });
       const legs = applyLiveRoutes(

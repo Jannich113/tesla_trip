@@ -43,7 +43,7 @@ export function modeLabel(mode: LegMode) {
  */
 export function modeHint(mode: LegMode) {
   if (mode === "eco") return "Avoids motorways and tolls. Picks a quieter road even when it is slower.";
-  if (mode === "cheapest") return "Lowest charging cost. May detour up to 15% extra time for a cheaper stall. Motorways, toll gates and road fees are separate toggles.";
+  if (mode === "cheapest") return "Lowest charging cost. Max 15 km extra per leg; extra miles are subtracted from the save.";
   return "Motorways and tolls for earliest arrival.";
 }
 
@@ -103,18 +103,30 @@ export function pathMode(mode: LegMode, avoid: boolean | CheapAvoid = false): Le
 
 /** Extra drive time cheapest may spend vs Fastest to skip a gate or road fee. */
 export const CHEAP_AVOID_FRAC = 0.15;
-/** Extra drive time cheapest may spend vs Fastest to reach a cheaper stall. */
+/** Hard cap: cheapest will not add more than this many km per leg for a stall. */
+export const CHEAP_STALL_KM = 15;
+/** Extra drive time cheapest may spend vs Fastest to skip a gate or road fee (corridor). */
 export const CHEAP_TIME_FRAC = 0.15;
 /** Net save must be at least this many times the extra drive cost. */
 export const SAVE_WEIGHT = 3;
 export const MIN_SAVE_KR = 25;
-/** Cheapest may leave the line for a smaller kWh save than A/B route compare. */
-export const STALL_SAVE_KR = 8;
-export const STALL_SAVE_WEIGHT = 1.1;
+/** Cheapest takes a stall if net save (after extra miles) is at least this. */
+export const STALL_SAVE_KR = 1;
+export const STALL_SAVE_WEIGHT = 1;
+/** Wear / inconvenience of each extra km, added on top of energy. */
+export const EXTRA_KM_KR = 0.6;
 
 export function cheapDetourKm(routeSeconds: number) {
   const km = (Math.max(0, routeSeconds) / 3600) * CHEAP_TIME_FRAC * 80;
   return Math.min(100, Math.max(18, Math.round(km)));
+}
+
+/** Energy + km penalty for leaving the line. */
+export function extraMileageKr(distM: number, opts?: { acKr?: number; kwh?: number }) {
+  const km = Math.max(0, distM) / 1000;
+  const acKr = opts?.acKr ?? 2.5;
+  const kwh = opts?.kwh ?? km * 0.2;
+  return kwh * Math.max(acKr, 1) + km * EXTRA_KM_KR;
 }
 
 /** Leave the motorway only if net save beats extra drive by SAVE_WEIGHT. */
@@ -174,10 +186,7 @@ export function routeAb(
 export function chargeSearchKm(mode: LegMode, detourKm: number, focus?: ModeFocus, routeSeconds?: number) {
   const km = Math.max(8, detourKm);
   if (mode === "eco" || focus === "distance") return Math.max(30, Math.round(km * 2.2));
-  if (mode === "cheapest" || focus === "pris") {
-    const timeKm = routeSeconds != null ? cheapDetourKm(routeSeconds) : 50;
-    return Math.max(km * 1.8, timeKm, 28);
-  }
+  if (mode === "cheapest" || focus === "pris") return CHEAP_STALL_KM;
   return Math.max(18, km);
 }
 
@@ -194,7 +203,7 @@ export function chargeFitScore(
     const detourMin = (distKm / kmh) * 60;
     return detourMin + (opts.dc ? 0 : 14);
   }
-  if (focus === "pris") return kr * 14 + extra * STALL_SAVE_WEIGHT + distKm * 0.12;
+  if (focus === "pris") return kr + extra;
   return distKm * 14 + (opts.dc ? 1.5 : 0) + kr * 0.04;
 }
 

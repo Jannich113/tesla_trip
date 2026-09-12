@@ -1,4 +1,4 @@
-import { chargeFitScore, chargeSearchKm, defaultFocus, detourPays, STALL_SAVE_KR, STALL_SAVE_WEIGHT, type LegMode, type ModeFocus } from "./modes.ts";
+import { chargeFitScore, chargeSearchKm, CHEAP_STALL_KM, defaultFocus, extraMileageKr, type LegMode, type ModeFocus } from "./modes.ts";
 import { networkIdFor, rateForNetwork } from "./networks.ts";
 
 export type ViaLoc = {
@@ -157,19 +157,14 @@ export function pickViaOnPath(opts: {
   const memberships = opts.memberships ?? {};
   if (totalKwh <= 0 || budgetKwh <= 0 || path.length < 2) return null;
   const exclude = new Set(opts.excludeIds ?? []);
-  const searchBand = Math.max(chargeSearchKm(mode, detourKm, focus) * 1000, 12_000);
+  const searchBand =
+    mode === "cheapest" || focus === "pris"
+      ? CHEAP_STALL_KM * 1000
+      : Math.max(chargeSearchKm(mode, detourKm, focus) * 1000, 12_000);
   const locRate = (loc: ViaLoc) => {
     const netId = networkIdFor(loc.kind, loc.networkId);
     return (netId ? rateForNetwork(netId, Boolean(memberships[netId])) : null) ?? loc.usdPerKwh * 6.85;
   };
-  let baseRate = Infinity;
-  for (const loc of locations) {
-    if (exclude.has(loc.id) || loc.kind === "home") continue;
-    const distM = minDistToPathM(loc.lat, loc.lng, path);
-    const rate = locRate(loc);
-    if (distM <= 5000 && rate > 0.3) baseRate = Math.min(baseRate, rate);
-  }
-  if (!Number.isFinite(baseRate)) baseRate = 4;
   let best: ViaLoc | null = null;
   let bestScore = -Infinity;
   for (const loc of locations) {
@@ -184,22 +179,9 @@ export function pickViaOnPath(opts: {
     if (energyTo < minEnergy) continue;
     const rate = locRate(loc);
     if (!(rate > 0)) continue;
-    const extraMin = (distM / 1000 / 80) * 60;
-    if (focus === "pris" && extraMin > Math.max(12, (detourKm / 80) * 60)) continue;
-    const extraKr = (distM / 1000) * 1.2;
-    if (
-      focus === "pris" &&
-      !detourPays({
-        baseKr: baseRate * 20,
-        stallKr: rate * 20,
-        extraKr,
-        distM,
-        minSave: STALL_SAVE_KR,
-        weight: STALL_SAVE_WEIGHT,
-      })
-    ) {
-      continue;
-    }
+    const extraKm = distM / 1000;
+    if (focus === "pris" && extraKm > CHEAP_STALL_KM) continue;
+    const extraKr = extraMileageKr(distM);
     const fit = chargeFitScore(focus, {
       distM,
       kr: rate * 20,
@@ -228,7 +210,10 @@ export function pickViaAtRange(opts: Parameters<typeof pickViaOnPath>[0]): ViaLo
   const [lat, lng] = pointAlongPath(opts.path, frac);
   const exclude = new Set(opts.excludeIds ?? []);
   let best: ViaLoc | null = null;
-  let bestD = 80_000;
+  let bestD =
+    opts.mode === "cheapest" || (opts.focus ?? defaultFocus(opts.mode)) === "pris"
+      ? CHEAP_STALL_KM * 1000
+      : 80_000;
   for (const loc of opts.locations) {
     if (exclude.has(loc.id) || loc.kind === "home") continue;
     const energyTo = opts.totalKwh * alongFraction(opts.path, loc.lat, loc.lng);

@@ -19,7 +19,8 @@ import {
   minutesBetweenDateTime,
   asDateTime,
   waitDelayMin,
-  cheapDetourKm,
+  extraMileageKr,
+  CHEAP_STALL_KM,
   detourPays,
   detourSavings,
   pathMode,
@@ -59,7 +60,7 @@ describe("leg modes", () => {
   });
 
   it("charge search is wider for eco and cheapest", () => {
-    assert.ok(chargeSearchKm("cheapest", 12) >= 40);
+    assert.equal(chargeSearchKm("cheapest", 12), CHEAP_STALL_KM);
     assert.ok(chargeSearchKm("eco", 8) >= 30);
     assert.ok(chargeSearchKm("fastest", 18) >= 18);
     assert.equal(formatWaitCap(0), "0");
@@ -67,11 +68,14 @@ describe("leg modes", () => {
     assert.equal(formatWaitCap(120), "2h");
   });
 
-  it("cheapest may detour up to 15% of fastest time", () => {
-    assert.equal(cheapDetourKm(2 * 3600), 24);
-    assert.equal(cheapDetourKm(15 * 3600), 100);
-    assert.ok(chargeSearchKm("cheapest", 12, "pris", 2 * 3600) >= 24);
-    assert.ok(chargeSearchKm("cheapest", 12, "pris", 15 * 3600) >= 80);
+  it("cheapest may detour up to 15 km extra per leg", () => {
+    assert.equal(chargeSearchKm("cheapest", 12, "pris", 2 * 3600), CHEAP_STALL_KM);
+    assert.equal(chargeSearchKm("cheapest", 40, "pris", 15 * 3600), CHEAP_STALL_KM);
+    const near = extraMileageKr(2_000, { acKr: 2.5 });
+    const far = extraMileageKr(14_000, { acKr: 2.5 });
+    assert.ok(far > near);
+    const save = 20;
+    assert.ok(save - near > save - far);
   });
 
   it("detour savings is net kr vs extra drive time", () => {
@@ -118,7 +122,7 @@ describe("leg modes", () => {
 
   it("eco and cheapest search farther for chargers than fastest", () => {
     assert.ok(chargeSearchKm("eco", 12) > chargeSearchKm("fastest", 12));
-    assert.ok(chargeSearchKm("cheapest", 12) > chargeSearchKm("fastest", 12));
+    assert.equal(chargeSearchKm("cheapest", 12), CHEAP_STALL_KM);
     assert.ok(chargeSearchKm("eco", 12) >= 30);
   });
 
@@ -481,7 +485,7 @@ describe("leg modes", () => {
     const locations = seedsAlongPath(path, 40_000);
     assert.ok(locations.length >= 4, `seeds ${locations.length}`);
     for (const mode of ["eco", "fastest", "cheapest"] as const) {
-      const via = pickViaOnPath({
+      const via = pickViaAtRange({
         path,
         locations,
         budgetKwh: 60,

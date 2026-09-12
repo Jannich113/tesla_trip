@@ -12,12 +12,12 @@ import {
   asDateTime,
   chargeSearchKm,
   cheapDetourKm,
-  detourPays,
+  extraMileageKr,
   chargeFitScore,
   defaultFocus,
   DEFAULT_DETOUR_KM,
+  CHEAP_STALL_KM,
   STALL_SAVE_KR,
-  STALL_SAVE_WEIGHT,
   dkNowDateTime,
   dkNowParts,
   driveKwhAtSpeed,
@@ -525,12 +525,11 @@ export function pickCharges(opts: {
   const focus = opts.focus ?? defaultFocus(mode);
   if (kwhNeed <= 0.05 || !locations.length) return null;
   const preferCheap = focus === "pris";
-  const userBand = Math.max(detourKm * 1000, 80);
-  const searchBand = Math.max(chargeSearchKm(mode, detourKm, focus, opts.routeSeconds) * 1000, userBand);
-  const maxExtraMin =
-    preferCheap && opts.routeSeconds
-      ? (opts.routeSeconds * 0.15) / 60
-      : Infinity;
+  const userBand = Math.max(Math.min(detourKm, CHEAP_STALL_KM) * 1000, 80);
+  const searchBand = preferCheap
+    ? CHEAP_STALL_KM * 1000
+    : Math.max(chargeSearchKm(mode, detourKm, focus, opts.routeSeconds) * 1000, userBand);
+  const maxExtraMin = preferCheap ? (CHEAP_STALL_KM / 80) * 60 : Infinity;
   const locRate = (loc: ChargeLocation) => {
     const id = networkIdFor(loc.kind, loc.networkId);
     return (id ? rateForNetwork(id, Boolean(memberships[id])) : null) ?? usdToKr(loc.usdPerKwh);
@@ -542,7 +541,7 @@ export function pickCharges(opts: {
       (s) =>
         s.loc.id === preferId ||
         s.loc.id === backupId ||
-        (s.distM <= Math.max(searchBand, 40_000) &&
+        (s.distM <= (preferCheap ? CHEAP_STALL_KM * 1000 : Math.max(searchBand, 40_000)) &&
           (s.distM / 1000 / 80) * 60 <= maxExtraMin &&
           locRate(s.loc) > 0.3),
     );
@@ -580,11 +579,17 @@ export function pickCharges(opts: {
   const extraDriveKr = (distM: number) => {
     const miles = distM / 1609.344;
     const seconds = ((miles * 1.609344) / 80) * 3600;
-    return driveKwh(miles, seconds, speedEff) * acKr;
+    return extraMileageKr(distM, {
+      acKr,
+      kwh: driveKwh(miles, seconds, speedEff),
+    });
   };
+  const onPath = [...scored].filter((s) => s.distM <= 5000).sort((a, b) => a.priced.kr - b.priced.kr || a.distM - b.distM);
+  const baselineKr = onPath[0]?.priced.kr ?? [...scored].sort((a, b) => a.distM - b.distM)[0]?.priced.kr ?? 0;
+  const netSave = (s: (typeof scored)[0]) => baselineKr - s.priced.kr - extraDriveKr(s.distM);
 
   const byRank = (a: (typeof scored)[0], b: (typeof scored)[0]) => {
-    if (preferCheap) return a.priced.kr - b.priced.kr || a.distM - b.distM;
+    if (preferCheap) return netSave(b) - netSave(a) || a.distM - b.distM;
     const as = chargeFitScore(focus, {
       distM: a.distM,
       kr: a.priced.kr,
@@ -602,19 +607,8 @@ export function pickCharges(opts: {
     return as - bs || a.distM - b.distM;
   };
 
-  const onPath = [...scored].filter((s) => s.distM <= 5000).sort((a, b) => a.priced.kr - b.priced.kr || a.distM - b.distM);
-  const baselineKr = onPath[0]?.priced.kr ?? [...scored].sort((a, b) => a.distM - b.distM)[0]?.priced.kr ?? 0;
   const worth = preferCheap
-    ? scored.filter((s) =>
-        detourPays({
-          baseKr: baselineKr,
-          stallKr: s.priced.kr,
-          extraKr: extraDriveKr(s.distM),
-          distM: s.distM,
-          minSave: STALL_SAVE_KR,
-          weight: STALL_SAVE_WEIGHT,
-        }),
-      )
+    ? scored.filter((s) => s.distM <= CHEAP_STALL_KM * 1000 && netSave(s) >= STALL_SAVE_KR)
     : scored;
   const rankedPool = worth.length ? worth : scored;
 
@@ -734,7 +728,7 @@ export function pricePlan(opts: {
         totalKwh: kwh,
         mode,
         focus,
-        detourKm: mode === "cheapest" ? Math.max(job.detourKm, cheapDetourKm(route.seconds)) : job.detourKm,
+        detourKm: mode === "cheapest" ? CHEAP_STALL_KM : job.detourKm,
         excludeIds: usedVias,
         memberships: opts.memberships,
       };
@@ -837,7 +831,7 @@ export function pricePlan(opts: {
       ? pickCharges({
           kwhNeed: Math.max(kwhNeed, 5),
           path: route.path,
-          detourKm: mode === "cheapest" ? Math.max(job.detourKm, cheapDetourKm(route.seconds)) : job.detourKm,
+          detourKm: mode === "cheapest" ? CHEAP_STALL_KM : job.detourKm,
           mode,
           focus,
           locations,
