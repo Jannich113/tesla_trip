@@ -239,6 +239,22 @@ export function driveKwh(miles: number, seconds: number, speedEff: SpeedEff) {
   return driveKwhAtSpeed(miles, seconds, speedEff);
 }
 
+/** Swap geometric via splits for a real road through the charger (Tesla-style). */
+export function applyLiveRoutes(
+  legs: PricedLeg[],
+  lookup: (from: PlanStop, to: PlanStop, mode: LegMode) => RoutedLeg | undefined,
+  speedEff: SpeedEff,
+): PricedLeg[] {
+  return legs.map((leg) => {
+    const live = lookup(leg.from, leg.to, leg.mode);
+    if (!live || live.source === "air" || live.path.length < 3) return leg;
+    const kwh = driveKwh(live.miles, live.seconds, speedEff);
+    const toll = estimateTolls(live.path, live.miles, Boolean(live.hasToll), leg.mode);
+    const chargeKr = Math.max(0, leg.kr - (leg.tollKr ?? 0));
+    return { ...leg, route: live, kwh, tollKr: toll.kr, tollLabel: toll.label, kr: chargeKr + toll.kr };
+  });
+}
+
 export function dkNowHhmm() {
   return dkNowParts().hhmm;
 }

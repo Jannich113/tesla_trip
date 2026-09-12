@@ -16,6 +16,7 @@ import {
   type PricedLeg,
   type RoutedLeg,
   addMinutesDateTime,
+  applyLiveRoutes,
   asDateTime,
   chargeSearchKm,
   DKK_PER_USD,
@@ -411,18 +412,63 @@ export function PlanScreen() {
         detours: planArgs.detours.map((d) => (mode === "cheapest" ? Math.max(d, 30) : d)),
         routes: optionRoutes,
       });
-      const miles = optionRoutes.reduce((n, r) => n + r.miles, 0);
-      const seconds = optionRoutes.reduce((n, r) => n + r.seconds, 0);
+      const legs = applyLiveRoutes(
+        priced,
+        (from, to, m) =>
+          routeMap[routeKey(from, to, pathMode(m, cheapAvoidFees))] ?? routeMap[routeKey(from, to, m)],
+        speedEff,
+      );
+      const miles = legs.reduce((n, l) => n + l.route.miles, 0);
+      const seconds = legs.reduce((n, l) => n + l.route.seconds, 0);
       const kmh = avgSpeedKmh(miles, seconds);
       return {
         mode,
-        totals: planTotals(priced),
+        totals: planTotals(legs),
         kmh,
         kwhPerMi: interpolateWhPerMi(speedEff, kmh) / 1000,
-        legs: priced,
+        legs,
       };
     });
   }, [routeMap, stops, detours, waits, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc, prefer, networkAbo, cheapAvoidFees]);
+
+  const hopKey = optionRows
+    .map((row) =>
+      row.legs
+        .map(
+          (l) =>
+            `${row.mode}:${l.from.lat.toFixed(3)},${l.from.lng.toFixed(3)}>${l.to.lat.toFixed(3)},${l.to.lng.toFixed(3)}`,
+        )
+        .join(";"),
+    )
+    .join("|");
+
+  useEffect(() => {
+    if (!hopKey) return;
+    let cancelled = false;
+    const jobs: { from: PlanStop; to: PlanStop; mode: LegMode; key: string }[] = [];
+    const seen = new Set<string>();
+    for (const row of optionRows) {
+      const m = pathMode(row.mode, cheapAvoidFees);
+      for (const leg of row.legs) {
+        const key = routeKey(leg.from, leg.to, m);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const hit = routeMap[key] ?? routeMap[routeKey(leg.from, leg.to, row.mode)];
+        if (hit && hit.source !== "air" && hit.path.length >= 3) continue;
+        jobs.push({ from: leg.from, to: leg.to, mode: m, key });
+      }
+    }
+    if (!jobs.length) return;
+    void Promise.all(
+      jobs.map(async (job) => {
+        const route = await fetchRoute(job.from, job.to, job.mode);
+        if (!cancelled) setRouteCache({ [job.key]: route });
+      }),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [hopKey, cheapAvoidFees]);
 
   function addStop(hit: AddressHit) {
     addStopToStore({ name: hit.label.split(",")[0] || hit.label, lat: hit.lat, lng: hit.lng });
@@ -631,20 +677,41 @@ export function PlanScreen() {
     if (stops.length < 2) return out;
     const draw = showAllRoutes ? LEG_MODES : [mapMode];
     for (const mode of draw) {
-      for (let i = 0; i < stops.length - 1; i++) {
-        const hit =
-          routeMap[routeKey(stops[i], stops[i + 1], pathMode(mode, cheapAvoidFees))] ??
-          routeMap[routeKey(stops[i], stops[i + 1], mode)] ??
-          (mode === "cheapest" ? routeMap[routeKey(stops[i], stops[i + 1], "fastest")] : undefined);
-        if (!hit) continue;
-        const raw =
-          hit.path.length >= 2
-            ? simplifyPath(hit.path, 48)
-            : ([[stops[i].lat, stops[i].lng], [stops[i + 1].lat, stops[i + 1].lng]] as [number, number][]);
+      const row = optionRows.find((r) => r.mode === mode);
+      const hops = row?.legs.length
+        ? row.legs.map((leg) => ({
+            from: leg.from,
+            to: leg.to,
+            path: (routeMap[routeKey(leg.from, leg.to, pathMode(mode, cheapAvoidFees))] ??
+              routeMap[routeKey(leg.from, leg.to, mode)] ??
+              leg.route
+            ).path,
+          }))
+        : stops.slice(0, -1).map((_, i) => {
+            const hit =
+              routeMap[routeKey(stops[i], stops[i + 1], pathMode(mode, cheapAvoidFees))] ??
+              routeMap[routeKey(stops[i], stops[i + 1], mode)] ??
+              (mode === "cheapest" ? routeMap[routeKey(stops[i], stops[i + 1], "fastest")] : undefined);
+            return hit
+              ? { from: stops[i], to: stops[i + 1], path: hit.path }
+              : {
+                  from: stops[i],
+                  to: stops[i + 1],
+                  path: [
+                    [stops[i].lat, stops[i].lng],
+                    [stops[i + 1].lat, stops[i + 1].lng],
+                  ] as [number, number][],
+                };
+          });
+      for (const [i, hop] of hops.entries()) {
+        const raw = hop.path.length >= 2 ? simplifyPath(hop.path, 48) : ([
+          [hop.from.lat, hop.from.lng],
+          [hop.to.lat, hop.to.lng],
+        ] as [number, number][]);
         out.push({
           id: `opt-${mode}-${i}`,
-          from: [stops[i].lat, stops[i].lng],
-          to: [stops[i + 1].lat, stops[i + 1].lng],
+          from: [hop.from.lat, hop.from.lng],
+          to: [hop.to.lat, hop.to.lng],
           weight: showAllRoutes && mode !== mapMode ? 2.4 : 3.2,
           path: offsetPath(raw, showAllRoutes ? ROUTE_OFFSET_M[mode] : 0),
           color: modeColor(mode),
@@ -652,7 +719,7 @@ export function PlanScreen() {
       }
     }
     return out;
-  }, [stops, routeMap, cheapAvoidFees, mapMode, showAllRoutes]);
+  }, [stops, routeMap, cheapAvoidFees, mapMode, showAllRoutes, optionRows]);
 
   const mapMarkers: MapMarker[] = useMemo(() => {
     const chargerMarkers: MapMarker[] = [];
