@@ -19,16 +19,17 @@ import {
   withRadius,
 } from "@/lib/charge-locations";
 import {
-  CHARGES,
   type ChargeSession,
   type Period,
   chargeRanksFrom,
   chargeTotalsFrom,
   formatCents,
   formatUsd,
+  getCharges,
   laDayString,
 } from "@/lib/history";
-import { energyKwh } from "@/lib/vehicle";
+import { VEHICLE, energyKwh } from "@/lib/vehicle";
+import { bindChargeBridge } from "@/store/vehicle-store";
 
 export type LoggedSession = ChargeSession & { locationId: string };
 
@@ -93,10 +94,17 @@ function priceSession(session: ChargeSession & { locationId?: string }, location
   };
 }
 
+let pricedCache: { locations: ChargeLocation[]; logged: LoggedSession[]; rows: ChargeSession[] } | null = null;
+
 export function pricedSessions(locations: ChargeLocation[], logged: LoggedSession[]): ChargeSession[] {
+  if (pricedCache && pricedCache.locations === locations && pricedCache.logged === logged) {
+    return pricedCache.rows;
+  }
   const extra = logged.map((s) => priceSession(s, locations));
-  const hist = CHARGES.map((s) => priceSession(s, locations));
-  return [...extra, ...hist].sort((a, b) => (a.day === b.day ? b.hour - a.hour : a.day < b.day ? 1 : -1));
+  const hist = getCharges().map((s) => priceSession(s, locations));
+  const rows = [...extra, ...hist].sort((a, b) => (a.day === b.day ? b.hour - a.hour : a.day < b.day ? 1 : -1));
+  pricedCache = { locations, logged, rows };
+  return rows;
 }
 
 export const useChargeStore = create<ChargeStore>()(
@@ -264,6 +272,15 @@ export const useChargeStore = create<ChargeStore>()(
     },
   ),
 );
+
+bindChargeBridge({
+  beginCharge: (soc) => useChargeStore.getState().beginCharge(soc),
+  endCharge: (soc, where) => useChargeStore.getState().endCharge(soc, where),
+  siteLabel: () => {
+    const s = useChargeStore.getState();
+    return s.locations.find((l) => l.id === s.chargeAtId)?.short ?? VEHICLE.home.label;
+  },
+});
 
 export function ranksFor(
   locations: ChargeLocation[],

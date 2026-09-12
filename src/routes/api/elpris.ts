@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { noStore, publicCache } from "@/lib/http-cache";
 
 type EdsRecord = {
   TimeDK: string;
@@ -151,19 +152,17 @@ export const Route = createFileRoute("/api/elpris")({
           if (!res.ok) {
             return Response.json(
               { error: `Energi Data Service returned ${res.status}` },
-              { status: 502 },
+              { status: 502, headers: noStore },
             );
           }
           const body = (await res.json()) as { records?: EdsRecord[] };
           const records = Array.isArray(body.records) ? body.records : [];
           return Response.json(buildPayload(records, area), {
-            headers: {
-              "Cache-Control": "public, max-age=60",
-            },
+            headers: publicCache(120, 600),
           });
         } catch (err) {
           const message = err instanceof Error ? err.message : "Failed to fetch prices";
-          return Response.json({ error: message }, { status: 502 });
+          return Response.json({ error: message }, { status: 502, headers: noStore });
         }
       },
     },

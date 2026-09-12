@@ -4,20 +4,21 @@ import { Car, CircleDollarSign, House, RotateCw, Route, Zap } from "lucide-react
 import { HomeScreen } from "@/components/home-screen";
 import { TripsScreen } from "@/components/trips-screen";
 import { ChargeScreen } from "@/components/charge-screen";
-import { VehicleScreen } from "@/components/vehicle-screen";
 import { ElprisScreen } from "@/components/elpris-screen";
+import { VehicleScreen } from "@/components/vehicle-screen";
 import { type Tab, VEHICLE } from "@/lib/vehicle";
 import { cn } from "@/lib/utils";
+import { useVehicleProfile } from "@/hooks/use-vehicle-profile";
+import { useVehicleStore } from "@/store/vehicle-store";
 import { useChargeStore } from "@/store/charge-store";
 import { useTripStore } from "@/store/trip-store";
-import { useVehicleStore } from "@/store/vehicle-store";
 
-const TABS: { id: Tab; label: string; icon: typeof House }[] = [
+const TABS: { id: Tab; label?: string; icon: typeof House }[] = [
   { id: "home", label: "Home", icon: House },
   { id: "trips", label: "Trips", icon: Route },
   { id: "costs", label: "Costs", icon: CircleDollarSign },
   { id: "elpris", label: "Elpris", icon: Zap },
-  { id: "vehicle", label: "Juniper", icon: Car },
+  { id: "vehicle", icon: Car },
 ];
 
 function LightBar() {
@@ -41,51 +42,74 @@ function readTabFromLocation(): Tab {
 }
 
 function writeTabToLocation(next: Tab) {
+  if (typeof window === "undefined") return;
   const url = new URL(window.location.href);
   if (next === "home") url.searchParams.delete("tab");
   else url.searchParams.set("tab", next);
-  // Keep other query params (e.g. tesla=) until the toast effect clears them.
   window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
-export function Dashboard() {
-  const [tab, setTab] = useState<Tab>(() => readTabFromLocation());
+function tabHref(id: Tab) {
+  return id === "home" ? "/" : `/?tab=${id}`;
+}
+
+export function Dashboard({ startTab = "home" }: { startTab?: Tab }) {
+  const [tab, setTab] = useState<Tab>(startTab);
+  const [pending, setPending] = useState<Tab | null>(null);
+  const [opened, setOpened] = useState<Tab[]>([startTab]);
   const wake = useVehicleStore((s) => s.wake);
   const waking = useVehicleStore((s) => s.waking);
   const tick = useVehicleStore((s) => s.tick);
+  const { profile } = useVehicleProfile();
+  const shown = pending ?? tab;
 
   const selectTab = (next: Tab) => {
+    if (next === shown) return;
+    setPending(next);
     setTab(next);
+    setOpened((cur) => (cur.includes(next) ? cur : [...cur, next]));
     writeTabToLocation(next);
   };
 
   useEffect(() => {
-    void Promise.all([
-      useVehicleStore.persist.rehydrate(),
-      useChargeStore.persist.rehydrate(),
-      useTripStore.persist.rehydrate(),
-    ]).catch(() => {
-      /* localStorage may be unavailable; stores keep defaults */
-    });
-    const params = new URLSearchParams(window.location.search);
-    const tesla = params.get("tesla");
-    if (!tesla) return;
-    const messages: Record<string, string> = {
-      ok: "Juniper linked to the owner Tesla account",
-      not_owner: "That Tesla account does not own Juniper",
-      driver: "Driver access is blocked — owner only",
-      denied: "Tesla sign-in was cancelled",
-      error: "Tesla owner sign-in failed",
-      not_configured: "Tesla owner credentials are not on this app yet",
-    };
-    toast(messages[tesla] ?? "Tesla owner sign-in did not complete");
-    params.delete("tesla");
-    const qs = params.toString();
-    window.history.replaceState({}, "", qs ? `/?${qs}` : "/");
+    const initial = readTabFromLocation();
+    if (initial !== "home") {
+      setTab(initial);
+      setOpened((cur) => (cur.includes(initial) ? cur : [...cur, initial]));
+    }
+    const onPop = () => setTab(readTabFromLocation());
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
   }, []);
 
   useEffect(() => {
-    const id = window.setInterval(() => tick(), 1000);
+    void Promise.resolve(useVehicleStore.persist.rehydrate()).catch(() => {});
+    void Promise.resolve(useChargeStore.persist.rehydrate()).catch(() => {});
+    void Promise.resolve(useTripStore.persist.rehydrate()).catch(() => {});
+    const params = new URLSearchParams(window.location.search);
+    const tesla = params.get("tesla");
+    if (tesla) {
+      const messages: Record<string, string> = {
+        ok: "Juniper linked to the owner Tesla account",
+        not_owner: "That Tesla account does not own Juniper",
+        driver: "Driver access is blocked — owner only",
+        denied: "Tesla sign-in was cancelled",
+        error: "Tesla owner sign-in failed",
+        not_configured: "Tesla owner credentials are not on this app yet",
+      };
+      toast(messages[tesla] ?? "Tesla owner sign-in did not complete");
+      params.delete("tesla");
+      const qs = params.toString();
+      window.history.replaceState({}, "", qs ? `/?${qs}` : "/");
+    }
+  }, []);
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      const mode = useVehicleStore.getState().mode;
+      if (mode === "parked") return;
+      tick();
+    }, 1000);
     return () => window.clearInterval(id);
   }, [tick]);
 
@@ -115,25 +139,46 @@ export function Dashboard() {
         </header>
 
         <main className="flex-1 overflow-y-auto pb-32">
-          {tab === "home" && <HomeScreen />}
-          {tab === "trips" && <TripsScreen />}
-          {tab === "costs" && <ChargeScreen />}
-          {tab === "elpris" && <ElprisScreen />}
-          {tab === "vehicle" && <VehicleScreen />}
+          {opened.includes("home") && (
+            <div className={tab === "home" ? undefined : "pointer-events-none hidden"} aria-hidden={tab !== "home"}>
+              <HomeScreen />
+            </div>
+          )}
+          {opened.includes("trips") && (
+            <div className={tab === "trips" ? undefined : "pointer-events-none hidden"} aria-hidden={tab !== "trips"}>
+              <TripsScreen visible={tab === "trips"} />
+            </div>
+          )}
+          {opened.includes("costs") && (
+            <div className={tab === "costs" ? undefined : "pointer-events-none hidden"} aria-hidden={tab !== "costs"}>
+              <ChargeScreen visible={tab === "costs"} />
+            </div>
+          )}
+          {opened.includes("elpris") && (
+            <div className={tab === "elpris" ? undefined : "pointer-events-none hidden"} aria-hidden={tab !== "elpris"}>
+              <ElprisScreen />
+            </div>
+          )}
+          {opened.includes("vehicle") && (
+            <div className={tab === "vehicle" ? undefined : "pointer-events-none hidden"} aria-hidden={tab !== "vehicle"}>
+              <VehicleScreen />
+            </div>
+          )}
         </main>
 
         <nav
-          className="fixed inset-x-0 bottom-0 z-20 mx-auto max-w-lg border-t border-border bg-background/95 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-1 backdrop-blur-sm"
+          className="fixed inset-x-0 bottom-0 z-[100] mx-auto max-w-lg border-t border-border bg-background/95 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-1 backdrop-blur-sm"
           aria-label="Primary"
         >
           <ul className="grid grid-cols-5">
             {TABS.map((item) => {
               const Icon = item.icon;
-              const active = tab === item.id;
+              const current = shown === item.id;
+              const label = item.id === "vehicle" ? profile.name : item.label!;
               return (
                 <li key={item.id}>
-                  <button
-                    type="button"
+                  <a
+                    href={tabHref(item.id)}
                     onPointerDown={(e) => {
                       if (e.button !== 0) return;
                       selectTab(item.id);
@@ -143,15 +188,16 @@ export function Dashboard() {
                       selectTab(item.id);
                     }}
                     className={cn(
-                      "flex h-14 w-full touch-manipulation flex-col items-center justify-center gap-0.5 text-[11px] font-medium",
+                      "flex h-14 w-full touch-manipulation flex-col items-center justify-center gap-0.5 text-[10px] font-medium no-underline",
                       "transition-[color,scale] duration-150 ease-[var(--ease-out)] active:scale-[0.96]",
-                      active ? "text-foreground" : "text-muted",
+                      current ? "text-foreground" : "text-muted",
                     )}
-                    aria-current={active ? "page" : undefined}
+                    aria-current={current ? "page" : undefined}
+                    aria-label={label}
                   >
-                    <Icon className="size-5" strokeWidth={active ? 2.2 : 1.8} />
-                    {item.label}
-                  </button>
+                    <Icon className="size-5" strokeWidth={current ? 2.2 : 1.8} />
+                    <span className="max-w-full truncate px-0.5">{label}</span>
+                  </a>
                 </li>
               );
             })}

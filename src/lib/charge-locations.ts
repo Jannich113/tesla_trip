@@ -13,6 +13,7 @@ export type ChargeLocation = {
   kind: ChargeKind;
   preset: boolean;
   radiusM: number;
+  networkId?: string | null;
 };
 
 export const HOME_LOCATION_ID = "loc-home";

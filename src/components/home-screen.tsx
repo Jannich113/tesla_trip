@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
-import { MapPin } from "lucide-react";
+import { useEffect, useState } from "react";
+import { MapPin, MapPinned } from "lucide-react";
+import { Link } from "@tanstack/react-router";
 import { BatteryBar } from "@/components/battery-bar";
 import {
   formatDistance,
@@ -9,14 +10,12 @@ import {
   relativeTime,
 } from "@/lib/vehicle";
 import {
-  chargeTotalsFrom,
   estimateRegenKwh,
   formatUsd,
+  homeStats,
   petrolSavings,
-  tripTotals,
 } from "@/lib/history";
 import { cn } from "@/lib/utils";
-import { pricedSessions, useChargeStore } from "@/store/charge-store";
 import { useVehicleProfile } from "@/hooks/use-vehicle-profile";
 import { useVehicleStore } from "@/store/vehicle-store";
 
@@ -32,19 +31,17 @@ export function HomeScreen() {
   const range = ratedRangeMi(s.soc);
   const image = s.mode === "charging" ? heroes.rear || heroes.front : heroes.front;
   const [now, setNow] = useState(0);
-  const todayTrips = tripTotals("day");
-  const lifetimeTrips = tripTotals("total");
-  const locations = useChargeStore((st) => st.locations);
-  const logged = useChargeStore((st) => st.logged);
-  const sessions = useMemo(() => pricedSessions(locations, logged), [locations, logged]);
-  const todayCost = useMemo(() => chargeTotalsFrom(sessions, "day"), [sessions]);
-  const lifetimeCharge = useMemo(() => chargeTotalsFrom(sessions, "total"), [sessions]);
+  const stats = homeStats();
+  const todayTrips = stats.todayTrips;
+  const lifetimeTrips = stats.lifetimeTrips;
+  const todayCost = stats.todayCharge;
+  const lifetimeCharge = stats.lifetimeCharge;
   const regenKwh = estimateRegenKwh(lifetimeTrips.kwh);
   const savingsUsd = petrolSavings(lifetimeTrips.mi, lifetimeCharge.usd);
 
   useEffect(() => {
     setNow(Date.now());
-    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    const id = window.setInterval(() => setNow(Date.now()), 15000);
     return () => window.clearInterval(id);
   }, []);
 
@@ -65,6 +62,7 @@ export function HomeScreen() {
         <img
           src={image}
           loading="eager"
+          decoding="async"
           alt={`${profile.year} ${profile.model} in ${profile.color}`}
           className={cn(
             "car-hero h-full w-full object-cover object-center transition-[opacity,filter] duration-500 ease-[var(--ease-out)]",
@@ -125,6 +123,19 @@ export function HomeScreen() {
             hint="Benzin savings"
           />
         </div>
+
+        <Link
+          to="/plan"
+          className="flex items-center gap-3 rounded-xl bg-surface px-4 py-4 shadow-[var(--shadow-border)]"
+        >
+          <span className="flex size-10 items-center justify-center rounded-lg bg-surface-2 text-muted">
+            <MapPinned className="size-4" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium">Trip planner</p>
+            <p className="truncate text-xs text-muted">Eco, fastest or cheapest per stop</p>
+          </div>
+        </Link>
 
         <div className="flex items-center gap-3 rounded-xl bg-surface px-4 py-4 shadow-[var(--shadow-border)]">
           <span className="flex size-10 items-center justify-center rounded-lg bg-surface-2 text-muted">

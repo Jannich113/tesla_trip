@@ -1,9 +1,9 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import {
-  CHARGES,
+  getCharges,
+  getTrips,
   HOME_USD_PER_KWH,
-  TRIPS,
   type ChargeSession,
   type Trip,
   formatDayLabel,
@@ -80,7 +80,7 @@ type TripStore = TripState & {
 };
 
 function uniqueIds(ids: string[]) {
-  return [...new Set(ids.filter((id) => TRIPS.some((t) => t.id === id)))];
+  return [...new Set(ids.filter((id) => getTrips().some((t) => t.id === id)))];
 }
 
 /** Safe storage for SSR / private mode — never throws on get/set. */
@@ -145,12 +145,12 @@ function linked(a: string, b: string) {
 
 export function albumTrips(album: TripAlbum): Trip[] {
   const set = new Set(album.tripIds);
-  return TRIPS.filter((t) => set.has(t.id));
+  return getTrips().filter((t) => set.has(t.id));
 }
 
 export function albumInsight(
   trips: Trip[],
-  sessions: ChargeSession[] = CHARGES,
+  sessions: ChargeSession[] = getCharges(),
   today = trips[0]?.day ?? "",
 ): AlbumInsight | null {
   if (!trips.length) return null;
