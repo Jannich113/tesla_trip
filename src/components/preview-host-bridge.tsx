@@ -5,15 +5,14 @@
 
 import { useEffect } from "react";
 import { useRouter } from "@tanstack/react-router";
-import {
-  collectRoutePathsFromTree,
-  installPreviewHostBridge,
-} from "@/lib/preview-host-bridge";
+import { collectRoutePathsFromTree, installPreviewHostBridge } from "@/lib/preview-host-bridge";
+import { registerServiceWorker } from "@/lib/register-sw";
 
 export function PreviewHostBridge() {
   const router = useRouter();
 
   useEffect(() => {
+    registerServiceWorker();
     return installPreviewHostBridge({
       navigate: (path) => {
         const url = new URL(path, window.location.origin);
