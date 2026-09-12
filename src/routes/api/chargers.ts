@@ -307,7 +307,7 @@ export const Route = createFileRoute("/api/chargers")({
           let live = 0;
           let samples = 0;
           let source = "none";
-          let bufferKm = chunks[0]?.bufferKm;
+          const bufferKm = chunks[0]?.bufferKm;
           for (const chunk of chunks) {
             chargers = mergeChargers(chargers, chunk.chargers);
             seed += chunk.seed;
