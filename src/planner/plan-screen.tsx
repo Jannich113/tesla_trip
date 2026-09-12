@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useDeferredValue } from "react";
 import { ChevronDown, ChevronUp, Navigation, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { BayMap, type MapMarker, type MapRoute } from "@/components/bay-map";
@@ -451,27 +451,50 @@ export function PlanScreen() {
 
   const totals = useMemo(() => planTotals(viewLegs), [viewLegs]);
 
-  const optionRows = useMemo(() => {
-    const rows = LEG_MODES.map((mode) => {
+  const corridorStamp = useMemo(() => {
+    if (stops.length < 2) return "";
+    let stamp = "";
+    for (let i = 0; i < stops.length - 1; i++) {
+      for (const mode of pathModes) {
+        const hit = routeMap[routeKey(stops[i], stops[i + 1], mode)];
+        stamp += hit && hit.source !== "air" ? `${mode}:${hit.miles.toFixed(1)}:${hit.seconds}|` : `${mode}:-|`;
+      }
+    }
+    return stamp;
+  }, [stops, pathModes, routeMap]);
+
+  const deferredMap = useDeferredValue(routeMap);
+
+  const pricedRows = useMemo(() => {
+    return LEG_MODES.map((mode) => {
       const avoid = mode === "cheapest" ? cheapAvoid : { motorways: false, tolls: false, roadFees: false };
       const optionRoutes = routesFor(pathMode(mode, avoid));
       if (optionRoutes.length !== Math.max(0, stops.length - 1) || stops.length < 2) {
-        return { mode, totals: null as ReturnType<typeof planTotals> | null, kmh: 0, kwhPerMi: 0, legs: [] as PricedLeg[] };
+        return { mode, priced: [] as PricedLeg[], avoid };
       }
-      const priced = pricePlan({
-        ...planArgs,
-        modes: stops.slice(1).map(() => mode),
-        focuses: stops.slice(1).map(() => (mode === "cheapest" ? "pris" : mode === "eco" ? "distance" : "time")),
-        detours: planArgs.detours.map((d) => (mode === "cheapest" ? 15 : d)),
-        routes: optionRoutes,
-        locations: locationsForRoutes(locations, optionRoutes),
+      return {
+        mode,
         avoid,
-      });
+        priced: pricePlan({
+          ...planArgs,
+          modes: stops.slice(1).map(() => mode),
+          focuses: stops.slice(1).map(() => (mode === "cheapest" ? "pris" : mode === "eco" ? "distance" : "time")),
+          detours: planArgs.detours.map((d) => (mode === "cheapest" ? 15 : d)),
+          routes: optionRoutes,
+          locations: locationsForRoutes(locations, optionRoutes),
+          avoid,
+        }),
+      };
+    });
+  }, [corridorStamp, stops, detours, waits, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc, prefer, networkAbo, cheapAvoid]);
+
+  const optionRows = useMemo(() => {
+    const rows = pricedRows.map(({ mode, priced, avoid }) => {
       const legs = applyLiveRoutes(
         priced,
         (from, to, m) => {
           const pathM = pathMode(m, m === "cheapest" ? cheapAvoid : false);
-          return routeMap[routeKey(from, to, pathM)] ?? routeMap[routeKey(from, to, m)];
+          return deferredMap[routeKey(from, to, pathM)] ?? deferredMap[routeKey(from, to, m)];
         },
         speedEff,
         avoid,
@@ -481,7 +504,7 @@ export function PlanScreen() {
       const kmh = avgSpeedKmh(miles, seconds);
       return {
         mode,
-        totals: planTotals(legs),
+        totals: legs.length ? planTotals(legs) : null,
         kmh,
         kwhPerMi: interpolateWhPerMi(speedEff, kmh) / 1000,
         legs,
@@ -499,7 +522,7 @@ export function PlanScreen() {
         kmh: avgSpeedKmh(row.totals.mi, seconds),
       };
     });
-  }, [routeMap, stops, detours, waits, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc, prefer, networkAbo, cheapAvoid]);
+  }, [pricedRows, deferredMap, speedEff, cheapAvoid]);
 
   const hopKey = optionRows
     .map((row) =>
@@ -515,34 +538,42 @@ export function PlanScreen() {
   useEffect(() => {
     if (!hopKey) return;
     let cancelled = false;
-    const jobs: { from: PlanStop; to: PlanStop; mode: LegMode; key: string }[] = [];
-    const seen = new Set<string>();
-    for (const row of optionRows) {
-      const m = pathMode(row.mode, row.mode === "cheapest" ? cheapAvoid : false);
-      for (const leg of row.legs) {
-        const key = routeKey(leg.from, leg.to, m);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        const hit = routeMap[key] ?? routeMap[routeKey(leg.from, leg.to, row.mode)];
-        if (hit && hit.source !== "air" && hit.path.length >= 3) continue;
-        if (!leg.via && leg.route.path.length >= 8 && leg.route.miles > 80) continue;
-        jobs.push({ from: leg.from, to: leg.to, mode: m, key });
+    const timer = window.setTimeout(() => {
+      const jobs: { from: PlanStop; to: PlanStop; mode: LegMode; key: string }[] = [];
+      const seen = new Set<string>();
+      for (const row of optionRows) {
+        const m = pathMode(row.mode, row.mode === "cheapest" ? cheapAvoid : false);
+        for (const leg of row.legs) {
+          const key = routeKey(leg.from, leg.to, m);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          const hit = routeMap[key] ?? routeMap[routeKey(leg.from, leg.to, row.mode)];
+          if (hit && hit.source !== "air" && hit.path.length >= 3) continue;
+          if (!leg.via && leg.route.path.length >= 8 && leg.route.miles > 80) continue;
+          jobs.push({ from: leg.from, to: leg.to, mode: m, key });
+          if (jobs.length >= 6) break;
+        }
+        if (jobs.length >= 6) break;
       }
-    }
-    if (!jobs.length) return;
-    void (async () => {
-      const patch: Record<string, RoutedLeg> = {};
-      await Promise.all(
-        jobs.map(async (job) => {
-          const route = await fetchRoute(job.from, job.to, job.mode);
-          if (cancelled || route.source === "air" || route.path.length < 3) return;
-          patch[job.key] = route;
-        }),
-      );
-      if (!cancelled && Object.keys(patch).length) setRouteCache(patch);
-    })();
+      if (!jobs.length || cancelled) return;
+      void (async () => {
+        const patch: Record<string, RoutedLeg> = {};
+        for (let i = 0; i < jobs.length; i += 2) {
+          if (cancelled) return;
+          await Promise.all(
+            jobs.slice(i, i + 2).map(async (job) => {
+              const route = await fetchRoute(job.from, job.to, job.mode);
+              if (cancelled || route.source === "air" || route.path.length < 3) return;
+              patch[job.key] = route;
+            }),
+          );
+        }
+        if (!cancelled && Object.keys(patch).length) setRouteCache(patch);
+      })();
+    }, 450);
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
   }, [hopKey, cheapAvoid]);
 

@@ -219,6 +219,11 @@ function stitch(parts: DriveRouteJson[], mode: LegMode): DriveRouteJson | null {
 }
 
 async function fastestPool(from: Stop, to: Stop): Promise<DriveRouteJson[]> {
+  const km = haversineM(from, to) / 1000;
+  if (km < 320) {
+    const os = await osrm(from, to).catch(() => null);
+    return os && okRoute(os, from, to) ? [os] : [];
+  }
   const [alts, plain, val, skip] = await Promise.all([
     osrmRoutes(from, to, "&alternatives=true").catch(() => []),
     osrmRoutes(from, to).catch(() => []),
@@ -278,6 +283,10 @@ export async function routeDrive(from: Stop, to: Stop, mode: LegMode): Promise<D
   }
   if (mode === "cheapest") {
     const km = haversineM(from, to) / 1000;
+    if (km < 320) {
+      const os = await osrm(from, to).catch(() => null);
+      if (os && okRoute(os, from, to)) return withTolls(os, "cheapest", Boolean(os.hasToll));
+    }
     if (km > 1300) {
       const long = await routeChunked(from, to, "cheapest");
       if (long) return withTolls(long, "cheapest", Boolean(long.hasToll));
