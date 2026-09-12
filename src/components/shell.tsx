@@ -1,38 +1,17 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { toast, Toaster } from "sonner";
 import { Car, CircleDollarSign, House, RotateCw, Route, Zap } from "lucide-react";
 import { HomeScreen } from "@/components/home-screen";
+import { TripsScreen } from "@/components/trips-screen";
+import { ChargeScreen } from "@/components/charge-screen";
+import { VehicleScreen } from "@/components/vehicle-screen";
+import { ElprisScreen } from "@/components/elpris-screen";
 import { type Tab, VEHICLE } from "@/lib/vehicle";
 import { cn } from "@/lib/utils";
 import { useVehicleProfile } from "@/hooks/use-vehicle-profile";
 import { useChargeStore } from "@/store/charge-store";
 import { useTripStore } from "@/store/trip-store";
 import { useVehicleStore } from "@/store/vehicle-store";
-
-const TripsScreen = lazy(() =>
-  import("@/components/trips-screen").then((m) => ({ default: m.TripsScreen })),
-);
-const ChargeScreen = lazy(() =>
-  import("@/components/charge-screen").then((m) => ({ default: m.ChargeScreen })),
-);
-const ElprisScreen = lazy(() =>
-  import("@/components/elpris-screen").then((m) => ({ default: m.ElprisScreen })),
-);
-const VehicleScreen = lazy(() =>
-  import("@/components/vehicle-screen").then((m) => ({ default: m.VehicleScreen })),
-);
-
-const PRELOAD: Record<Tab, () => void> = {
-  home: () => {},
-  trips: () => void import("@/components/trips-screen"),
-  costs: () => void import("@/components/charge-screen"),
-  elpris: () => void import("@/components/elpris-screen"),
-  vehicle: () => void import("@/components/vehicle-screen"),
-};
-
-function TabFallback() {
-  return <div className="mx-4 mt-4 h-72 animate-pulse rounded-xl bg-surface" />;
-}
 
 const TABS: { id: Tab; label?: string; icon: typeof House }[] = [
   { id: "home", label: "Home", icon: House },
@@ -149,16 +128,11 @@ export function Dashboard() {
         </header>
 
         <main className="flex-1 overflow-y-auto pb-32">
-          {tab === "home" ? (
-            <HomeScreen />
-          ) : (
-            <Suspense fallback={<TabFallback />}>
-              {tab === "trips" && <TripsScreen />}
-              {tab === "costs" && <ChargeScreen />}
-              {tab === "elpris" && <ElprisScreen />}
-              {tab === "vehicle" && <VehicleScreen />}
-            </Suspense>
-          )}
+          {tab === "home" && <HomeScreen />}
+          {tab === "trips" && <TripsScreen />}
+          {tab === "costs" && <ChargeScreen />}
+          {tab === "elpris" && <ElprisScreen />}
+          {tab === "vehicle" && <VehicleScreen />}
         </main>
 
         <nav
@@ -178,8 +152,6 @@ export function Dashboard() {
                       if (e.button !== 0) return;
                       selectTab(item.id);
                     }}
-                    onPointerEnter={() => PRELOAD[item.id]()}
-                    onFocus={() => PRELOAD[item.id]()}
                     onClick={(e) => {
                       e.preventDefault();
                       selectTab(item.id);

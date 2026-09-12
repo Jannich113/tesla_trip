@@ -153,177 +153,220 @@ export function formatCents(n: number) {
   return `${(n * 100).toFixed(1)}¢/kWh`;
 }
 
-function buildHistory() {
-  const today = laDayString();
-  const rand = rng(184273);
+function hashDay(day: string) {
+  let h = 184273;
+  for (let i = 0; i < day.length; i++) h = Math.imul(h, 31) + day.charCodeAt(i);
+  return h >>> 0;
+}
+
+function buildDay(day: string, today: string): { trips: Trip[]; charges: ChargeSession[] } {
+  const rand = rng(hashDay(day));
   const trips: Trip[] = [];
   const charges: ChargeSession[] = [];
+  const wd = weekday(day);
+  const r = rand();
   let tripN = 0;
   let chargeN = 0;
-  let longTripCounter = 0;
 
   const pushTrip = (t: Omit<Trip, "id">) => {
     tripN += 1;
-    trips.push({ id: `t${tripN}`, ...t });
+    trips.push({ id: `t:${day}:${tripN}`, ...t });
   };
   const pushCharge = (c: Omit<ChargeSession, "id" | "usd" | "addedMi">) => {
     chargeN += 1;
     const rate = c.kind === "home" ? HOME_USD_PER_KWH : SC_USD_PER_KWH;
     charges.push({
-      id: `c${chargeN}`,
+      id: `c:${day}:${chargeN}`,
       ...c,
       addedMi: Math.round(c.kwh / 0.241),
       usd: Math.round(c.kwh * rate * 100) / 100,
     });
   };
 
-  for (let day = DELIVERED_DAY; day <= today; day = addDays(day, 1)) {
-    const wd = weekday(day);
-    const r = rand();
+  if (day === today) {
+    pushTrip({
+      day,
+      hour: 8,
+      minute: 41,
+      from: "Home",
+      to: "Work · Mountain View",
+      mi: 11.8,
+      kwh: 2.84,
+      min: 22,
+    });
+    pushTrip({
+      day,
+      hour: 18,
+      minute: 14,
+      from: "Home",
+      to: "Whole Foods, Los Altos",
+      mi: 4.2,
+      kwh: 0.98,
+      min: 12,
+    });
+    pushCharge({
+      day,
+      hour: 2,
+      minute: 10,
+      where: "Home Wall Connector",
+      kwh: 28.4,
+      min: 154,
+      peakKw: 11.5,
+      kind: "home",
+    });
+    return { trips, charges };
+  }
 
-    if (day === today) {
+  if (wd >= 1 && wd <= 5 && !isHoliday(day)) {
+    const amJitter = Math.floor(rand() * 18);
+    const pmJitter = Math.floor(rand() * 28);
+    const miOut = 11.4 + rand() * 1.3;
+    const miIn = 11.5 + rand() * 1.4;
+    pushTrip({
+      day,
+      hour: 8,
+      minute: 22 + amJitter,
+      from: "Home",
+      to: "Work · Mountain View",
+      mi: Math.round(miOut * 10) / 10,
+      kwh: Math.round(miOut * 0.241 * 100) / 100,
+      min: 18 + Math.floor(rand() * 10),
+    });
+    pushTrip({
+      day,
+      hour: 17,
+      minute: 40 + (pmJitter % 20),
+      from: "Work · Mountain View",
+      to: "Home",
+      mi: Math.round(miIn * 10) / 10,
+      kwh: Math.round(miIn * 0.241 * 100) / 100,
+      min: 19 + Math.floor(rand() * 12),
+    });
+    if (r > 0.82) {
+      const extra = WEEKEND[Math.floor(rand() * 4)];
       pushTrip({
         day,
-        hour: 8,
-        minute: 41,
-        from: "Home",
-        to: "Work · Mountain View",
-        mi: 11.8,
-        kwh: 2.84,
-        min: 22,
+        hour: 19,
+        minute: 10 + Math.floor(rand() * 40),
+        from: extra.from,
+        to: extra.to,
+        mi: extra.mi,
+        kwh: extra.kwh,
+        min: extra.min,
       });
-      pushTrip({
-        day,
-        hour: 18,
-        minute: 14,
-        from: "Home",
-        to: "Whole Foods, Los Altos",
-        mi: 4.2,
-        kwh: 0.98,
-        min: 12,
-      });
-      pushCharge({
-        day,
-        hour: 2,
-        minute: 10,
-        where: "Home Wall Connector",
-        kwh: 28.4,
-        min: 154,
-        peakKw: 11.5,
-        kind: "home",
-      });
-      continue;
     }
-
-    if (wd >= 1 && wd <= 5 && !isHoliday(day)) {
-      const amJitter = Math.floor(rand() * 18);
-      const pmJitter = Math.floor(rand() * 28);
-      const miOut = 11.4 + rand() * 1.3;
-      const miIn = 11.5 + rand() * 1.4;
+  } else {
+    const n = r > 0.35 ? (rand() > 0.55 ? 2 : 1) : 0;
+    for (let i = 0; i < n; i++) {
+      const useLong = rand() > 0.8;
+      const extra = WEEKEND[useLong ? 4 + Math.floor(rand() * 6) : Math.floor(rand() * 4)];
       pushTrip({
         day,
-        hour: 8,
-        minute: 22 + amJitter,
-        from: "Home",
-        to: "Work · Mountain View",
-        mi: Math.round(miOut * 10) / 10,
-        kwh: Math.round(miOut * 0.241 * 100) / 100,
-        min: 18 + Math.floor(rand() * 10),
+        hour: 10 + i * 4 + Math.floor(rand() * 2),
+        minute: Math.floor(rand() * 50),
+        from: extra.from,
+        to: extra.to,
+        mi: extra.mi,
+        kwh: extra.kwh,
+        min: extra.min,
       });
-      pushTrip({
-        day,
-        hour: 17,
-        minute: 40 + (pmJitter % 20),
-        from: "Work · Mountain View",
-        to: "Home",
-        mi: Math.round(miIn * 10) / 10,
-        kwh: Math.round(miIn * 0.241 * 100) / 100,
-        min: 19 + Math.floor(rand() * 12),
-      });
-      if (r > 0.82) {
-        const extra = WEEKEND[Math.floor(rand() * 4)];
-        pushTrip({
+      if (extra.mi > 40) {
+        pushCharge({
           day,
-          hour: 19,
-          minute: 10 + Math.floor(rand() * 40),
-          from: extra.from,
-          to: extra.to,
-          mi: extra.mi,
-          kwh: extra.kwh,
-          min: extra.min,
+          hour: 15,
+          minute: 20 + Math.floor(rand() * 25),
+          where: extra.to.includes("Gilroy")
+            ? "Gilroy Supercharger"
+            : extra.to.includes("Cruz")
+              ? "Santa Cruz Supercharger"
+              : extra.to.includes("Napa")
+                ? "Napa Supercharger"
+                : extra.to.includes("SF")
+                  ? "San Francisco Supercharger"
+                  : "San Jose Supercharger",
+          kwh: Math.round((18 + rand() * 28) * 10) / 10,
+          min: 14 + Math.floor(rand() * 18),
+          peakKw: 188 + Math.floor(rand() * 40),
+          kind: "supercharger",
         });
       }
-    } else {
-      const n = r > 0.35 ? (rand() > 0.55 ? 2 : 1) : 0;
-      for (let i = 0; i < n; i++) {
-        longTripCounter += 1;
-        const useLong = longTripCounter % 5 === 0;
-        const extra = WEEKEND[useLong ? 4 + Math.floor(rand() * 6) : Math.floor(rand() * 4)];
-        pushTrip({
-          day,
-          hour: 10 + i * 4 + Math.floor(rand() * 2),
-          minute: Math.floor(rand() * 50),
-          from: extra.from,
-          to: extra.to,
-          mi: extra.mi,
-          kwh: extra.kwh,
-          min: extra.min,
-        });
-        if (extra.mi > 40) {
-          pushCharge({
-            day,
-            hour: 15,
-            minute: 20 + Math.floor(rand() * 25),
-            where:
-              extra.to.includes("Gilroy")
-                ? "Gilroy Supercharger"
-                : extra.to.includes("Cruz")
-                  ? "Santa Cruz Supercharger"
-                  : extra.to.includes("Napa")
-                    ? "Napa Supercharger"
-                    : extra.to.includes("SF")
-                      ? "San Francisco Supercharger"
-                      : "San Jose Supercharger",
-            kwh: Math.round((18 + rand() * 28) * 10) / 10,
-            min: 14 + Math.floor(rand() * 18),
-            peakKw: 188 + Math.floor(rand() * 40),
-            kind: "supercharger",
-          });
-        }
-      }
-    }
-
-    if (wd !== 0 && rand() > 0.48) {
-      pushCharge({
-        day,
-        hour: 1,
-        minute: Math.floor(rand() * 40),
-        where: "Home Wall Connector",
-        kwh: Math.round((8 + rand() * 10) * 10) / 10,
-        min: 70 + Math.floor(rand() * 70),
-        peakKw: 11.5,
-        kind: "home",
-      });
     }
   }
 
-  trips.sort((a, b) => (a.day === b.day ? b.hour - a.hour : a.day < b.day ? 1 : -1));
-  charges.sort((a, b) => (a.day === b.day ? b.hour - a.hour : a.day < b.day ? 1 : -1));
+  if (wd !== 0 && rand() > 0.48) {
+    pushCharge({
+      day,
+      hour: 1,
+      minute: Math.floor(rand() * 40),
+      where: "Home Wall Connector",
+      kwh: Math.round((8 + rand() * 10) * 10) / 10,
+      min: 70 + Math.floor(rand() * 70),
+      peakKw: 11.5,
+      kind: "home",
+    });
+  }
+
   return { trips, charges };
 }
 
-const HISTORY = buildHistory();
-export const TRIPS = HISTORY.trips;
-export const CHARGES = HISTORY.charges;
+const DAY_CACHE = new Map<string, { trips: Trip[]; charges: ChargeSession[] }>();
 
-export function tripsIn(period: Period, today = laDayString()) {
-  return TRIPS.filter((t) => inPeriod(t.day, period, today));
+function ensureDay(day: string, today = laDayString()) {
+  let hit = DAY_CACHE.get(day);
+  if (hit) return hit;
+  hit = buildDay(day, today);
+  DAY_CACHE.set(day, hit);
+  return hit;
 }
 
-export function tripsInRange(start: string, end: string) {
+function historyInRange(start: string, end: string, today = laDayString()) {
   const a = start <= end ? start : end;
   const b = start <= end ? end : start;
-  return TRIPS.filter((t) => t.day >= a && t.day <= b);
+  const trips: Trip[] = [];
+  const charges: ChargeSession[] = [];
+  for (let day = a; day <= b; day = addDays(day, 1)) {
+    const row = ensureDay(day, today);
+    for (const t of row.trips) trips.push(t);
+    for (const c of row.charges) charges.push(c);
+  }
+  trips.sort((x, y) => (x.day === y.day ? y.hour - x.hour : x.day < y.day ? 1 : -1));
+  charges.sort((x, y) => (x.day === y.day ? y.hour - x.hour : x.day < y.day ? 1 : -1));
+  return { trips, charges };
+}
+
+function periodBounds(period: Period, today = laDayString()) {
+  return { start: periodStart(period, today), end: today };
+}
+
+export function getTrips(today = laDayString()) {
+  return historyInRange(DELIVERED_DAY, today, today).trips;
+}
+
+export function getCharges(today = laDayString()) {
+  return historyInRange(DELIVERED_DAY, today, today).charges;
+}
+
+export function tripsIn(period: Period, today = laDayString()) {
+  const { start, end } = periodBounds(period, today);
+  return historyInRange(start, end, today).trips;
+}
+
+export function tripsInRange(start: string, end: string, today = laDayString()) {
+  return historyInRange(start, end, today).trips;
+}
+
+export function tripsByIds(ids: string[], today = laDayString()) {
+  const out: Trip[] = [];
+  const seen = new Set<string>();
+  for (const id of ids) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const day = id.split(":")[1];
+    if (!day || day.length !== 10) continue;
+    const hit = ensureDay(day, today).trips.find((t) => t.id === id);
+    if (hit) out.push(hit);
+  }
+  return out;
 }
 
 export type EnergyDay = {
@@ -491,7 +534,8 @@ export function chargesInFrom(sessions: ChargeSession[], period: Period, today =
 }
 
 export function chargesIn(period: Period, today = laDayString()) {
-  return chargesInFrom(CHARGES, period, today);
+  const { start, end } = periodBounds(period, today);
+  return historyInRange(start, end, today).charges;
 }
 
 export function emptyChargeTotals(): ChargeTotals {
@@ -530,7 +574,7 @@ export function chargeTotalsFrom(sessions: ChargeSession[], period: Period, toda
 }
 
 export function chargeTotals(period: Period, today = laDayString()): ChargeTotals {
-  return chargeTotalsFrom(CHARGES, period, today);
+  return chargeTotalsFrom(chargesIn(period, today), "total", today);
 }
 
 export function tripTotals(period: Period, today = laDayString()): TripTotals {
@@ -823,7 +867,7 @@ export function chargeRanksFrom(sessions: ChargeSession[], period: Period, today
 }
 
 export function chargeRanks(period: Period, today = laDayString()): ChargeRank[] {
-  return chargeRanksFrom(CHARGES, period, today);
+  return chargeRanksFrom(chargesIn(period, today), "total", today);
 }
 
 

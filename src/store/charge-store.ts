@@ -19,13 +19,14 @@ import {
   withRadius,
 } from "@/lib/charge-locations";
 import {
-  CHARGES,
   type ChargeSession,
   type Period,
   chargeRanksFrom,
   chargeTotalsFrom,
+  chargesIn,
   formatCents,
   formatUsd,
+  inPeriod,
   laDayString,
 } from "@/lib/history";
 import { energyKwh } from "@/lib/vehicle";
@@ -93,9 +94,16 @@ function priceSession(session: ChargeSession & { locationId?: string }, location
   };
 }
 
-export function pricedSessions(locations: ChargeLocation[], logged: LoggedSession[]): ChargeSession[] {
-  const extra = logged.map((s) => priceSession(s, locations));
-  const hist = CHARGES.map((s) => priceSession(s, locations));
+export function pricedSessions(
+  locations: ChargeLocation[],
+  logged: LoggedSession[],
+  period: Period = "month",
+  today = laDayString(),
+): ChargeSession[] {
+  const extra = logged
+    .filter((s) => inPeriod(s.day, period, today))
+    .map((s) => priceSession(s, locations));
+  const hist = chargesIn(period, today).map((s) => priceSession(s, locations));
   return [...extra, ...hist].sort((a, b) => (a.day === b.day ? b.hour - a.hour : a.day < b.day ? 1 : -1));
 }
 
@@ -271,8 +279,8 @@ export function ranksFor(
   period: Period,
   today = laDayString(),
 ) {
-  const sessions = pricedSessions(locations, logged);
-  const ranked = chargeRanksFrom(sessions, period, today);
+  const sessions = pricedSessions(locations, logged, period, today);
+  const ranked = chargeRanksFrom(sessions, "total", today);
   const byName = new Map(ranked.map((r) => [r.where, r]));
   return locations
     .map((loc) => {
@@ -303,5 +311,5 @@ export function totalsFor(
   period: Period,
   today = laDayString(),
 ) {
-  return chargeTotalsFrom(pricedSessions(locations, logged), period, today);
+  return chargeTotalsFrom(pricedSessions(locations, logged, period, today), "total", today);
 }
