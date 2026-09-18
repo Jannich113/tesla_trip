@@ -20,6 +20,7 @@ import {
   minutesBetweenDateTime,
   asDateTime,
   waitDelayMin,
+  planTripMin,
   extraMileageKr,
   CHEAP_STALL_KM,
   detourPays,
@@ -282,6 +283,44 @@ describe("leg modes", () => {
 
 
 
+
+  it("saved/total trip min is leave→arrive once (no pre-leave charge stacked on startAt)", () => {
+    const driveMin = 180;
+    const chargeMin = 240;
+    const waitMin = 0;
+    const leg = {
+      departAt: "2026-09-12T08:00",
+      arriveAt: "2026-09-12T11:00",
+      route: { seconds: driveMin * 60 },
+      chargeMin,
+      waitMin,
+    };
+    const naive = driveMin + chargeMin + waitMin;
+    assert.equal(planTripMin([leg]), driveMin);
+    assert.ok(planTripMin([leg]) < naive);
+    assert.equal(naive, 420);
+  });
+
+  it("saved/total trip min includes mid-trip charge between first leave and last arrive", () => {
+    const legs = [
+      {
+        departAt: "2026-09-12T08:00",
+        arriveAt: "2026-09-12T10:00",
+        route: { seconds: 2 * 3600 },
+        chargeMin: 0,
+        waitMin: 0,
+      },
+      {
+        departAt: "2026-09-12T10:30",
+        arriveAt: "2026-09-12T12:30",
+        route: { seconds: 2 * 3600 },
+        chargeMin: 30,
+        waitMin: 0,
+      },
+    ];
+    assert.equal(planTripMin(legs), 4.5 * 60);
+  });
+
   it("DC stalls are not timed at home AC kW", () => {
     assert.equal(stallKw("supercharger", 11), 150);
     assert.equal(stallKw("home", 11), 11);
@@ -405,7 +444,7 @@ describe("leg modes", () => {
     const fast = estimateTolls(path, 480, true, "fastest");
     const cheap = estimateTolls(path, 480, true, "cheapest");
     const eco = estimateTolls(path, 480, true, "eco");
-    assert.ok(free.roadKr < 1, "free roads must not pick up FR/IT €/km");
+    assert.ok(free.roadKr < 1, "free roads must not pick up FR/IT € /km");
     assert.ok(fast.kr > 200);
     assert.equal(cheap.kr, fast.kr);
     assert.equal(eco.kr, 0);

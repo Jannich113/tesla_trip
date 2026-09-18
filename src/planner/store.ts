@@ -428,9 +428,10 @@ export const usePlanStore = create<PlanStore>()(
           speedEff,
           savedAt: new Date().toISOString(),
           startAt: summary?.startAt || when || undefined,
-          min: summary?.min,
-          kr: summary?.kr,
-          mi: summary?.mi,
+          // Caller passes leave→arrive once (planTripMin). Keep finite non-negative.
+          min: summary?.min != null && Number.isFinite(summary.min) ? Math.max(0, summary.min) : undefined,
+          kr: summary?.kr != null && Number.isFinite(summary.kr) ? summary.kr : undefined,
+          mi: summary?.mi != null && Number.isFinite(summary.mi) ? summary.mi : undefined,
           routes: get().routeCache,
         };
         set({
