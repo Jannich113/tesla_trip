@@ -406,7 +406,7 @@ export function addDaysYmd(ymd: string, days: number) {
 export function addMinutesDateTime(value: string, add: number) {
   const { ymd, hhmm } = splitDateTime(value);
   const t = new Date(ymdToUtc(ymd, parseHhmm(hhmm)) + add * 60_000);
-  return `${t.getUTCFullYear()}-${pad2(t.getUTCMonth() + 1)}-${pad2(t.getUTCDate())}T${pad2(t.getUTCHours())}:${pad2(t.getUTCMinutes())}`;
+  return `${t.getUTCFullYear()}-${pad2(t.getUTCMonth() + 1)}T${pad2(t.getUTCHours())}:${pad2(t.getUTCMinutes())}`;
 }
 
 export function minutesBetweenDateTime(from: string, to: string) {
@@ -435,6 +435,28 @@ export function waitDelayMin(opts: {
   const driveIfCheap =
     minutesBetweenDateTime(opts.plannedStart, cheapDone) > 0 ? cheapDone : opts.plannedStart;
   return Math.max(0, minutesBetweenDateTime(driveIfNow, driveIfCheap));
+}
+
+/** Leave→arrive trip minutes for saved cards / totals.min.
+ *  Counts drive + on-route charge/wait once. Does not re-add pre-departure
+ *  charge/wait when startAt is already first departAt (that was the ~2× bug). */
+export function planTripMin(
+  legs: {
+    departAt?: string;
+    arriveAt?: string;
+    route: { seconds: number };
+    chargeMin: number;
+    waitMin: number;
+  }[],
+) {
+  if (!legs.length) return 0;
+  const first = legs[0];
+  const last = legs[legs.length - 1];
+  if (first?.departAt && last?.arriveAt) {
+    const wall = minutesBetweenDateTime(first.departAt, last.arriveAt);
+    if (Number.isFinite(wall) && wall >= 0) return wall;
+  }
+  return legs.reduce((n, leg) => n + leg.route.seconds / 60 + leg.chargeMin + leg.waitMin, 0);
 }
 
 /** Minutes to wait from clock until startHour:00. 0 if that hour is already in progress. */
