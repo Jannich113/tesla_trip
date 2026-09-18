@@ -406,7 +406,7 @@ export function addDaysYmd(ymd: string, days: number) {
 export function addMinutesDateTime(value: string, add: number) {
   const { ymd, hhmm } = splitDateTime(value);
   const t = new Date(ymdToUtc(ymd, parseHhmm(hhmm)) + add * 60_000);
-  return `${t.getUTCFullYear()}-${pad2(t.getUTCMonth() + 1)}T${pad2(t.getUTCHours())}:${pad2(t.getUTCMinutes())}`;
+  return `${t.getUTCFullYear()}-${pad2(t.getUTCMonth() + 1)}-${pad2(t.getUTCDate())}T${pad2(t.getUTCHours())}:${pad2(t.getUTCMinutes())}`;
 }
 
 export function minutesBetweenDateTime(from: string, to: string) {
