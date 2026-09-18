@@ -175,6 +175,7 @@ type PlanState = {
 type PlanStore = PlanState & {
   setName: (name: string) => void;
   addStop: (stop: Omit<PlanStop, "id"> & { id?: string }) => void;
+  replaceStop: (id: string, next: Pick<PlanStop, "name" | "lat" | "lng">) => void;
   removeStop: (id: string) => void;
   moveStop: (id: string, dir: -1 | 1) => void;
   setLegMode: (index: number, mode: LegMode) => void;
@@ -321,6 +322,13 @@ export const usePlanStore = create<PlanStore>()(
         waits.splice(at - 1, 0, DEFAULT_WAIT_MIN);
         legWhen.splice(at - 1, 0, autoWhen());
         set({ stops, modes, detours, waits, legWhen });
+      },
+
+      replaceStop: (id, next) => {
+        const stops = get().stops.map((s) =>
+          s.id === id ? { ...s, name: next.name, lat: next.lat, lng: next.lng } : s,
+        );
+        set({ stops });
       },
 
       removeStop: (id) => {
