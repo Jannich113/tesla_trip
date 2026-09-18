@@ -20,11 +20,14 @@ import {
   minutesBetweenDateTime,
   asDateTime,
   waitDelayMin,
+  planTripMin,
   extraMileageKr,
   CHEAP_STALL_KM,
   detourPays,
   detourSavings,
   pathMode,
+  avoidForMode,
+  NO_CHEAP_AVOID,
   routeAb,
   stallKw,
   timePenalized,
@@ -137,6 +140,20 @@ describe("leg modes", () => {
     assert.equal(pathMode("cheapest", true), "eco");
     assert.equal(pathMode("cheapest", { motorways: true }), "eco");
     assert.equal(pathMode("cheapest", { tolls: true, roadFees: true }), "cheapest");
+  });
+
+  it("avoidForMode isolates cheap avoid to Cheapest only", () => {
+    const allOn = { motorways: true, tolls: true, roadFees: true };
+    assert.deepEqual(avoidForMode("eco", allOn), NO_CHEAP_AVOID);
+    assert.deepEqual(avoidForMode("fastest", allOn), NO_CHEAP_AVOID);
+    assert.deepEqual(avoidForMode("cheapest", allOn), {
+      motorways: true,
+      tolls: true,
+      roadFees: true,
+    });
+    assert.equal(pathMode("eco", avoidForMode("eco", allOn)), "eco");
+    assert.equal(pathMode("fastest", avoidForMode("fastest", allOn)), "fastest");
+    assert.equal(pathMode("cheapest", avoidForMode("cheapest", { tolls: true })), "cheapest");
   });
 
   it("cheapest avoid toggles split motorways, gates and road fees", () => {
@@ -262,6 +279,44 @@ describe("leg modes", () => {
       }),
       8 * 60,
     );
+  });
+
+
+  it("saved/total trip min is leave→arrive once (no pre-leave charge stacked on startAt)", () => {
+    const driveMin = 180;
+    const chargeMin = 240;
+    const waitMin = 0;
+    const leg = {
+      departAt: "2026-09-12T08:00",
+      arriveAt: "2026-09-12T11:00",
+      route: { seconds: driveMin * 60 },
+      chargeMin,
+      waitMin,
+    };
+    const naive = driveMin + chargeMin + waitMin;
+    assert.equal(planTripMin([leg]), driveMin);
+    assert.ok(planTripMin([leg]) < naive);
+    assert.equal(naive, 420);
+  });
+
+  it("saved/total trip min includes mid-trip charge between first leave and last arrive", () => {
+    const legs = [
+      {
+        departAt: "2026-09-12T08:00",
+        arriveAt: "2026-09-12T10:00",
+        route: { seconds: 2 * 3600 },
+        chargeMin: 0,
+        waitMin: 0,
+      },
+      {
+        departAt: "2026-09-12T10:30",
+        arriveAt: "2026-09-12T12:30",
+        route: { seconds: 2 * 3600 },
+        chargeMin: 30,
+        waitMin: 0,
+      },
+    ];
+    assert.equal(planTripMin(legs), 4.5 * 60);
   });
 
   it("DC stalls are not timed at home AC kW", () => {
