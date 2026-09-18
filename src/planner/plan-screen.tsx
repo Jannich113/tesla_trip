@@ -462,6 +462,7 @@ export function PlanScreen() {
   const addStopToStore = usePlanStore((s) => s.addStop);
   const insertStopAt = usePlanStore((s) => s.insertStopAt);
   const removeStop = usePlanStore((s) => s.removeStop);
+  const replaceStop = usePlanStore((s) => s.replaceStop);
   const moveStop = usePlanStore((s) => s.moveStop);
   const setLegMode = usePlanStore((s) => s.setLegMode);
   const setLegDetour = usePlanStore((s) => s.setLegDetour);
@@ -502,6 +503,9 @@ export function PlanScreen() {
   const [addKind, setAddKind] = useState<"auto" | "depart" | "arrive">("depart");
   const [addAt, setAddAt] = useState("");
   const [editWhen, setEditWhen] = useState<string | null>(null);
+  const [editStop, setEditStop] = useState<string | null>(null);
+  const [editQuery, setEditQuery] = useState("");
+  const [editHits, setEditHits] = useState<AddressHit[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [prefer, setPrefer] = useState<Record<number, string>>({});
   const [acceptCharge, setAcceptCharge] = useState<Record<number, boolean>>({});
@@ -538,6 +542,22 @@ export function PlanScreen() {
     }, 280);
     return () => window.clearTimeout(t);
   }, [query]);
+
+  useEffect(() => {
+    if (!editStop) {
+      setEditHits([]);
+      return;
+    }
+    const q = editQuery.trim();
+    if (q.length < 3) {
+      setEditHits([]);
+      return;
+    }
+    const t = window.setTimeout(() => {
+      void searchAddress(q).then(setEditHits);
+    }, 280);
+    return () => window.clearTimeout(t);
+  }, [editQuery, editStop]);
 
   useEffect(() => {
     setAddKind(stops.length === 0 ? "depart" : "auto");
@@ -975,6 +995,25 @@ export function PlanScreen() {
     setHits([]);
     if (addKind !== "auto") setAddAt(at);
     setSelected(`leg-${Math.max(0, idx - 1)}`);
+  }
+
+  function replaceStopPlace(id: string, hit: AddressHit) {
+    replaceStop(id, {
+      name: hit.label.split(",")[0] || hit.label,
+      lat: hit.lat,
+      lng: hit.lng,
+    });
+    setEditStop(null);
+    setEditQuery("");
+    setEditHits([]);
+  }
+
+  function toggleEditStop(id: string) {
+    const open = editStop !== id;
+    setEditStop(open ? id : null);
+    setEditWhen(null);
+    setEditQuery("");
+    setEditHits([]);
   }
 
   function insertCharge(legIndex: number, spot: PricedCharge) {
@@ -1439,11 +1478,24 @@ export function PlanScreen() {
                 </span>
                 <div className="relative z-[1] min-w-0 flex-1">
                   <div className="flex h-11 items-center gap-2 rounded-full bg-surface-2 px-3">
-                    <p className="min-w-0 truncate text-sm">{stop.name}</p>
+                    <button
+                      type="button"
+                      onClick={() => toggleEditStop(stop.id)}
+                      className="min-w-0 flex-1 truncate text-left text-sm"
+                      aria-expanded={editStop === stop.id}
+                      aria-label={`Edit address for ${stop.name}`}
+                    >
+                      {stop.name}
+                    </button>
                     {w.note && w.at ? (
                       <button
                         type="button"
-                        onClick={() => setEditWhen(editWhen === stop.id ? null : stop.id)}
+                        onClick={() => {
+                          setEditWhen(editWhen === stop.id ? null : stop.id);
+                          setEditStop(null);
+                          setEditQuery("");
+                          setEditHits([]);
+                        }}
                         className="ml-auto shrink-0 text-xs tabular-nums text-muted"
                         aria-expanded={editWhen === stop.id}
                         aria-label={`Edit ${w.kind === "arrive" ? "arrive" : "leave"} time for ${stop.name}`}
@@ -1453,7 +1505,12 @@ export function PlanScreen() {
                     ) : (
                       <button
                         type="button"
-                        onClick={() => setEditWhen(editWhen === stop.id ? null : stop.id)}
+                        onClick={() => {
+                          setEditWhen(editWhen === stop.id ? null : stop.id);
+                          setEditStop(null);
+                          setEditQuery("");
+                          setEditHits([]);
+                        }}
                         className="ml-auto shrink-0 text-xs text-subtle"
                         aria-expanded={editWhen === stop.id}
                       >
@@ -1461,6 +1518,32 @@ export function PlanScreen() {
                       </button>
                     )}
                   </div>
+                  {editStop === stop.id ? (
+                    <div className="mt-1">
+                      <input
+                        autoFocus
+                        value={editQuery}
+                        onChange={(e) => setEditQuery(e.target.value)}
+                        placeholder="Search address"
+                        className="h-11 w-full rounded-xl bg-surface-2 px-3 text-sm outline-none placeholder:text-subtle"
+                      />
+                      {editHits.length ? (
+                        <ul className="mt-1 overflow-hidden rounded-xl bg-surface-2">
+                          {editHits.map((hit) => (
+                            <li key={`${hit.lat},${hit.lng}`} className="border-t border-border first:border-0">
+                              <button
+                                type="button"
+                                onClick={() => replaceStopPlace(stop.id, hit)}
+                                className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm"
+                              >
+                                <span className="truncate">{hit.label}</span>
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </div>
+                  ) : null}
                   {editWhen === stop.id ? (
                     <WhenFields
                       kind={i === 0 ? "depart" : w.kind}
