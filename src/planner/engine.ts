@@ -79,6 +79,8 @@ export {
   DEFAULT_MODE_FOCUS,
   pathMode,
   asCheapAvoid,
+  avoidForMode,
+  NO_CHEAP_AVOID,
   type CheapAvoid,
   routeAb,
   timePenalized,

@@ -90,6 +90,19 @@ export function asCheapAvoid(raw: boolean | CheapAvoid | null | undefined): Requ
   };
 }
 
+/** No cheap-avoid flags — Eco/Fastest corridors and shared planArgs baseline. */
+export const NO_CHEAP_AVOID: Required<CheapAvoid> = {
+  motorways: false,
+  tolls: false,
+  roadFees: false,
+};
+
+/** Cheap avoid toggles apply only to Cheapest; Eco/Fastest always get none. */
+export function avoidForMode(mode: LegMode, cheapAvoid: boolean | CheapAvoid = false): Required<CheapAvoid> {
+  if (mode !== "cheapest") return { ...NO_CHEAP_AVOID };
+  return asCheapAvoid(cheapAvoid);
+}
+
 /** Eco: own corridor. Cheapest: fastest unless Avoid motorways (eco) or avoid gates/fees (own no-toll try). */
 export function pathMode(mode: LegMode, avoid: boolean | CheapAvoid = false): LegMode {
   if (mode === "eco") return "eco";
