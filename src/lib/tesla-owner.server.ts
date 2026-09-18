@@ -1,7 +1,19 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { getCookie, setCookie } from "@tanstack/react-start/server";
 import { env, isWorkspacePreview } from "@/lib/env.server";
-import { OWNER_VIN, TESLA_OWNER_SCOPES, type TeslaOwnerStatus } from "@/lib/tesla-owner";
+import {
+  OWNER_VIN,
+  TESLA_OWNER_SCOPES,
+  type TeslaOwnerStatus,
+} from "@/lib/tesla-owner";
+import {
+  demoOwnerSnapshot,
+  mapFleetVehicleData,
+  pickOwnerVehicle,
+  tokenHasDeniedScopes,
+  vehicleDataEndpoints,
+  type TeslaOwnerVehicleSnapshot,
+} from "@/lib/tesla-owner-data";
 
 const SESSION_COOKIE = "juniper_owner";
 const STATE_COOKIE = "juniper_owner_state";
@@ -12,6 +24,7 @@ const DEFAULT_AUDIENCE = "https://fleet-api.prd.eu.vn.cloud.tesla.com";
 
 type OwnerSession = {
   sub: string;
+  /** Fleet VIN for the linked owner vehicle. Real VINs stay in the cookie only. */
   vin: string;
   teslaVehicleId: number;
   accessToken: string;
@@ -97,7 +110,8 @@ function baseStatus(extra: Partial<TeslaOwnerStatus> = {}): TeslaOwnerStatus {
 export function readOwnerStatus(): TeslaOwnerStatus {
   if (!isConfigured()) return baseStatus({ reason: "not_configured" });
   const session = unpack<OwnerSession>(getCookie(SESSION_COOKIE));
-  if (!session || session.vin !== OWNER_VIN || session.exp < Date.now() / 1000) {
+  if (!session?.accessToken || !session.vin) return baseStatus();
+  if (session.exp + 30 < Date.now() / 1000 && !session.refreshToken) {
     return baseStatus();
   }
   return {
@@ -110,7 +124,9 @@ export function readOwnerStatus(): TeslaOwnerStatus {
   };
 }
 
-export function startOwnerLink(): { ok: true; url: string } | { ok: false; reason: TeslaOwnerStatus["reason"] } {
+export function startOwnerLink():
+  | { ok: true; url: string }
+  | { ok: false; reason: TeslaOwnerStatus["reason"] } {
   if (!isConfigured()) return { ok: false, reason: "not_configured" };
   const redirect = redirectUri();
   if (!redirect) return { ok: false, reason: "not_configured" };
@@ -134,12 +150,10 @@ export function clearOwnerSession(): TeslaOwnerStatus {
   return readOwnerStatus();
 }
 
-function isOwnerAccess(value: unknown) {
-  if (!value || typeof value !== "string") return true;
-  return value.toUpperCase() === "OWNER";
-}
-
-export async function completeOwnerLink(code: string, state: string): Promise<TeslaOwnerStatus["reason"] | "ok"> {
+export async function completeOwnerLink(
+  code: string,
+  state: string,
+): Promise<TeslaOwnerStatus["reason"] | "ok"> {
   if (!isConfigured()) return "not_configured";
   const pending = unpack<{ state: string }>(getCookie(STATE_COOKIE));
   writeCookie(STATE_COOKIE, "", 0);
@@ -165,30 +179,28 @@ export async function completeOwnerLink(code: string, state: string): Promise<Te
     access_token?: string;
     refresh_token?: string;
     expires_in?: number;
-    id_token?: string;
+    scope?: string;
   };
   if (!token.access_token) return "error";
+  if (tokenHasDeniedScopes(token.scope)) return "denied";
 
   const listRes = await fetch(`${audience()}/api/1/vehicles`, {
     headers: { Authorization: `Bearer ${token.access_token}` },
   });
   if (!listRes.ok) return "error";
   const list = (await listRes.json()) as {
-    response?: Array<{
-      id?: number;
-      vin?: string;
-      access_type?: string;
-    }>;
+    response?: FleetVehicleListItemLike[];
   };
-  const match = list.response?.find((v) => v.vin === OWNER_VIN);
-  if (!match) return "not_owner";
-  if (!isOwnerAccess(match.access_type)) return "driver";
+  const picked = pickOwnerVehicle(list.response, OWNER_VIN);
+  if (!picked.ok) return picked.reason;
+  if (!picked.vehicle.vin) return "not_owner";
 
-  const exp = Math.floor(Date.now() / 1000) + Math.max(60, token.expires_in ?? 3600);
+  const exp =
+    Math.floor(Date.now() / 1000) + Math.max(60, token.expires_in ?? 3600);
   const session: OwnerSession = {
     sub: "tesla-owner",
-    vin: OWNER_VIN,
-    teslaVehicleId: match.id ?? 0,
+    vin: picked.vehicle.vin,
+    teslaVehicleId: picked.vehicle.id ?? 0,
     accessToken: token.access_token,
     refreshToken: token.refresh_token,
     linkedAt: Date.now(),
@@ -196,4 +208,114 @@ export async function completeOwnerLink(code: string, state: string): Promise<Te
   };
   pack(session, Math.max(60, token.expires_in ?? 3600));
   return "ok";
+}
+
+type FleetVehicleListItemLike = {
+  id?: number;
+  vin?: string;
+  access_type?: string;
+  display_name?: string;
+  state?: string;
+};
+
+function readSession(): OwnerSession | null {
+  const session = unpack<OwnerSession>(getCookie(SESSION_COOKIE));
+  if (!session?.accessToken || !session.vin) return null;
+  return session;
+}
+
+async function refreshAccessToken(
+  session: OwnerSession,
+): Promise<OwnerSession | null> {
+  if (!session.refreshToken || !isConfigured()) return null;
+  const tokenRes = await fetch(TOKEN, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      client_id: clientId()!,
+      client_secret: clientSecret()!,
+      refresh_token: session.refreshToken,
+      scope: TESLA_OWNER_SCOPES.join(" "),
+    }),
+  });
+  if (!tokenRes.ok) return null;
+  const token = (await tokenRes.json()) as {
+    access_token?: string;
+    refresh_token?: string;
+    expires_in?: number;
+    scope?: string;
+  };
+  if (!token.access_token) return null;
+  if (tokenHasDeniedScopes(token.scope)) {
+    clearOwnerSession();
+    return null;
+  }
+  const next: OwnerSession = {
+    ...session,
+    accessToken: token.access_token,
+    refreshToken: token.refresh_token ?? session.refreshToken,
+    exp: Math.floor(Date.now() / 1000) + Math.max(60, token.expires_in ?? 3600),
+  };
+  pack(next, Math.max(60, token.expires_in ?? 3600));
+  return next;
+}
+
+async function ensureFreshSession(): Promise<OwnerSession | null> {
+  const session = readSession();
+  if (!session) return null;
+  if (session.exp - 60 > Date.now() / 1000) return session;
+  return (await refreshAccessToken(session)) ?? null;
+}
+
+/**
+ * Read-only Fleet vehicle_data for the linked owner session.
+ * Never issues remote commands. Precise location only when includeLocation is true.
+ */
+export async function fetchOwnerVehicleData(opts: {
+  includeLocation: boolean;
+}): Promise<TeslaOwnerVehicleSnapshot> {
+  const includeLocation = Boolean(opts.includeLocation);
+
+  if (!isConfigured()) {
+    return demoOwnerSnapshot({ includeLocation, reason: "not_configured" });
+  }
+
+  const session = await ensureFreshSession();
+  if (!session) {
+    return demoOwnerSnapshot({ includeLocation, reason: "not_linked" });
+  }
+
+  const headers = { Authorization: `Bearer ${session.accessToken}` };
+  const id = encodeURIComponent(session.vin);
+  const endpoints = vehicleDataEndpoints(includeLocation);
+  const url = `${audience()}/api/1/vehicles/${id}/vehicle_data?endpoints=${encodeURIComponent(endpoints)}`;
+
+  let dataRes = await fetch(url, { headers });
+
+  // Soft wake is part of the read path (not vehicle_cmds). Retry once if asleep.
+  if (dataRes.status === 408 || dataRes.status === 412) {
+    await fetch(`${audience()}/api/1/vehicles/${id}/wake_up`, {
+      method: "POST",
+      headers,
+    }).catch(() => null);
+    await new Promise((r) => setTimeout(r, 1500));
+    dataRes = await fetch(url, { headers });
+  }
+
+  if (!dataRes.ok) {
+    const reason =
+      dataRes.status === 408 || dataRes.status === 412 ? "asleep" : "error";
+    return {
+      ...demoOwnerSnapshot({ includeLocation, reason }),
+      vin: session.vin,
+      source: "demo",
+    };
+  }
+
+  const body = (await dataRes.json()) as { response?: Record<string, unknown> };
+  return mapFleetVehicleData(body.response as never, {
+    includeLocation,
+    fallbackVin: session.vin,
+  });
 }

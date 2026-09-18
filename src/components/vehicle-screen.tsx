@@ -10,7 +10,9 @@ import {
   beginTeslaOwnerLink,
   disconnectTeslaOwner,
   getTeslaOwnerStatus,
+  getTeslaOwnerVehicleData,
   type TeslaOwnerStatus,
+  type TeslaOwnerVehicleSnapshot,
 } from "@/lib/tesla-owner";
 import { downloadOwnerExport } from "@/lib/owner-export";
 import { useChargeStore } from "@/store/charge-store";
@@ -24,6 +26,9 @@ export function VehicleScreen() {
   const { profile, heroes, paints } = useVehicleProfile();
   const [owner, setOwner] = useState<TeslaOwnerStatus | null>(null);
   const [busy, setBusy] = useState(false);
+  const [live, setLive] = useState<TeslaOwnerVehicleSnapshot | null>(null);
+  const [liveBusy, setLiveBusy] = useState(false);
+  const shareLocation = useVehicleStore((st) => st.shareLocation);
 
   const specs: { label: string; value: string }[] = [
     { label: "Vehicle", value: `${profile.year} ${profile.model}` },
@@ -48,6 +53,46 @@ export function VehicleScreen() {
     };
   }, []);
 
+  useEffect(() => {
+    let alive = true;
+    if (!owner?.linked) {
+      setLive(null);
+      return;
+    }
+    setLiveBusy(true);
+    void getTeslaOwnerVehicleData({ data: { includeLocation: shareLocation } })
+      .then((snap) => {
+        if (alive) setLive(snap);
+      })
+      .catch(() => {
+        if (alive) {
+          setLive(null);
+          toast("Could not load owner vehicle data");
+        }
+      })
+      .finally(() => {
+        if (alive) setLiveBusy(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [owner?.linked, shareLocation]);
+
+  async function refreshLive() {
+    if (!owner?.linked) return;
+    setLiveBusy(true);
+    try {
+      const snap = await getTeslaOwnerVehicleData({
+        data: { includeLocation: shareLocation },
+      });
+      setLive(snap);
+    } catch {
+      toast("Could not refresh owner vehicle data");
+    } finally {
+      setLiveBusy(false);
+    }
+  }
+
   async function connect() {
     setBusy(true);
     try {
@@ -71,6 +116,7 @@ export function VehicleScreen() {
     try {
       const status = await disconnectTeslaOwner();
       setOwner(status);
+      setLive(null);
       toast("Tesla owner account disconnected");
     } finally {
       setBusy(false);
@@ -167,6 +213,14 @@ export function VehicleScreen() {
 
       <OwnerAccess owner={owner} busy={busy} vin={profile.vin} onConnect={connect} onDisconnect={disconnect} />
 
+      <OwnerLiveData
+        linked={Boolean(owner?.linked)}
+        live={live}
+        busy={liveBusy}
+        shareLocation={shareLocation}
+        onRefresh={() => void refreshLive()}
+      />
+
       <PrivacyCard vehicleName={profile.name} />
 
 
@@ -230,6 +284,104 @@ export function VehicleScreen() {
     </div>
   );
 }
+
+
+function OwnerLiveData({
+  linked,
+  live,
+  busy,
+  shareLocation,
+  onRefresh,
+}: {
+  linked: boolean;
+  live: TeslaOwnerVehicleSnapshot | null;
+  busy: boolean;
+  shareLocation: boolean;
+  onRefresh: () => void;
+}) {
+  const demo = !linked || live?.source === "demo";
+  const locationLabel =
+    !shareLocation || live?.locationHidden
+      ? "Hidden"
+      : live?.location
+        ? `${live.location.lat.toFixed(4)}, ${live.location.lng.toFixed(4)}`
+        : "Unavailable";
+
+  return (
+    <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium">Live vehicle data</p>
+          <p className="mt-1 text-xs text-muted">
+            Read-only Fleet snapshot. No remote commands.
+            {demo
+              ? " Showing demo values until an owner account is linked."
+              : ""}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onRefresh}
+          disabled={!linked || busy}
+          className="h-9 shrink-0 rounded-full bg-surface-2 px-3 text-xs font-medium transition-[scale,opacity] duration-150 ease-[var(--ease-out)] active:scale-[0.96] disabled:opacity-50"
+        >
+          {busy ? "Loading…" : "Refresh"}
+        </button>
+      </div>
+      <dl className="mt-3 space-y-3">
+        <LiveRow
+          label="Source"
+          value={demo ? "Demo fallback" : "Tesla Fleet (owner)"}
+        />
+        <LiveRow
+          label="Battery"
+          value={
+            live?.batteryLevel != null
+              ? `${Math.round(live.batteryLevel)}%`
+              : "—"
+          }
+        />
+        <LiveRow
+          label="Range"
+          value={
+            live?.batteryRangeMi != null
+              ? `${Math.round(live.batteryRangeMi)} mi`
+              : "—"
+          }
+        />
+        <LiveRow label="Charge" value={live?.chargingState ?? "—"} />
+        <LiveRow label="State" value={live?.state ?? "—"} />
+        <LiveRow
+          label="Location"
+          value={locationLabel}
+          mono={Boolean(
+            live?.location && shareLocation && !live.locationHidden,
+          )}
+        />
+      </dl>
+    </section>
+  );
+}
+
+function LiveRow({
+  label,
+  value,
+  mono,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-4">
+      <dt className="text-xs text-muted">{label}</dt>
+      <dd className={cn("text-sm", mono && "tabular-nums tracking-wide")}>
+        {value}
+      </dd>
+    </div>
+  );
+}
+
 
 function OwnerAccess({
   owner,
