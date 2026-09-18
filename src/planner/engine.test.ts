@@ -25,6 +25,8 @@ import {
   detourPays,
   detourSavings,
   pathMode,
+  avoidForMode,
+  NO_CHEAP_AVOID,
   routeAb,
   stallKw,
   timePenalized,
@@ -137,6 +139,20 @@ describe("leg modes", () => {
     assert.equal(pathMode("cheapest", true), "eco");
     assert.equal(pathMode("cheapest", { motorways: true }), "eco");
     assert.equal(pathMode("cheapest", { tolls: true, roadFees: true }), "cheapest");
+  });
+
+  it("avoidForMode isolates cheap avoid to Cheapest only", () => {
+    const allOn = { motorways: true, tolls: true, roadFees: true };
+    assert.deepEqual(avoidForMode("eco", allOn), NO_CHEAP_AVOID);
+    assert.deepEqual(avoidForMode("fastest", allOn), NO_CHEAP_AVOID);
+    assert.deepEqual(avoidForMode("cheapest", allOn), {
+      motorways: true,
+      tolls: true,
+      roadFees: true,
+    });
+    assert.equal(pathMode("eco", avoidForMode("eco", allOn)), "eco");
+    assert.equal(pathMode("fastest", avoidForMode("fastest", allOn)), "fastest");
+    assert.equal(pathMode("cheapest", avoidForMode("cheapest", { tolls: true })), "cheapest");
   });
 
   it("cheapest avoid toggles split motorways, gates and road fees", () => {

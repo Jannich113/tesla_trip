@@ -38,6 +38,8 @@ import {
   modeHint,
   modeLabel,
   pathMode,
+  avoidForMode,
+  NO_CHEAP_AVOID,
   planTotals,
   pricePlan,
   remainingHours,
@@ -185,6 +187,56 @@ function locationsForRoutes(all: ChargeLocation[], routes: RoutedLeg[], maxM = 2
     if (paths.some((p) => minDistToPathM(l.lat, l.lng, p) < maxM)) near.set(l.id, l);
   }
   return [...near.values()];
+}
+
+/** Deduped corridors for charger search. Caller chooses which path modes. */
+function collectSearchRoutes(modes: LegMode[], routesFor: (mode: LegMode) => RoutedLeg[]): RoutedLeg[] {
+  const all: RoutedLeg[] = [];
+  const seen = new Set<string>();
+  for (const mode of modes) {
+    for (const r of routesFor(mode)) {
+      const a = r.path[0];
+      const b = r.path.at(-1);
+      if (!a || !b) continue;
+      const k = `${mode}-${a.join()}-${b.join()}-${r.miles.toFixed(0)}-${r.source}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      all.push(r);
+    }
+  }
+  return all;
+}
+
+/** Build the stall pool along the given corridors only (Eco/Fastest stay put when Cheapest avoid toggles). */
+function buildPlanLocations(
+  live: boolean,
+  locationsStored: ChargeLocation[],
+  routeChargers: ChargeLocation[],
+  searchRoutes: RoutedLeg[],
+): ChargeLocation[] {
+  if (!live) return locationsStored.filter((l) => l.kind === "home").slice(0, 4);
+  const paths = searchRoutes.map((r) => r.path).filter((p) => p.length >= 2);
+  const europe = paths.some((p) => p.some(([lat, lng]) => lat > 34 && lng > -12 && lng < 42));
+  const keep = locationsStored.filter((l) => {
+    if (europe && l.preset && l.lng < -20) return false;
+    if (l.kind === "home" || !l.preset) return true;
+    return paths.some((p) => minDistToPathM(l.lat, l.lng, p) < 80_000);
+  });
+  const byId = new Map(keep.map((l) => [l.id, l]));
+  for (const c of routeChargers) byId.set(c.id, c);
+  const all = [...byId.values()];
+  if (!paths.length) return all;
+  const picked = new Map<string, ChargeLocation>();
+  for (const p of paths) {
+    for (const l of spreadAlongPath(all, p, 28, 55_000)) picked.set(l.id, l);
+    const ranked = all
+      .map((l) => ({ l, d: minDistToPathM(l.lat, l.lng, p) }))
+      .filter((s) => s.d < 50_000)
+      .sort((a, b) => a.l.usdPerKwh - b.l.usdPerKwh)
+      .slice(0, 12);
+    for (const s of ranked) picked.set(s.l.id, s.l);
+  }
+  return [...picked.values()];
 }
 
 function routeKey(
@@ -586,66 +638,58 @@ export function PlanScreen() {
         .slice(0, -1)
         .map((_, i) => {
           const m = activeModes[i] ?? "fastest";
-          return routeMap[routeKey(stops[i], stops[i + 1], pathMode(m, m === "cheapest" ? cheapAvoid : false))];
+          return routeMap[routeKey(stops[i], stops[i + 1], pathMode(m, avoidForMode(m, cheapAvoid)))];
         })
         .filter((r): r is RoutedLeg => Boolean(r))
-    : routesFor(pathMode(activeModes[0] ?? "fastest", activeModes[0] === "cheapest" ? cheapAvoid : false));
+    : routesFor(pathMode(activeModes[0] ?? "fastest", avoidForMode(activeModes[0] ?? "fastest", cheapAvoid)));
 
-  const searchRoutes = useMemo(() => {
-    const all: RoutedLeg[] = [];
-    const seen = new Set<string>();
-    for (const mode of LEG_MODES) {
-      const pathM = pathMode(mode, mode === "cheapest" ? cheapAvoid : false);
-      for (const r of routesFor(pathM)) {
-        const a = r.path[0];
-        const b = r.path.at(-1);
-        if (!a || !b) continue;
-        const k = `${pathM}-${a.join()}-${b.join()}-${r.miles.toFixed(0)}-${r.source}`;
-        if (seen.has(k)) continue;
-        seen.add(k);
-        all.push(r);
-      }
-    }
-    return all;
-  }, [routeMap, stops, cheapAvoid]);
+  // Eco + Fastest corridors never depend on cheapAvoid — keeps their chargers/totals still.
+  const stableSearchRoutes = useMemo(
+    () => collectSearchRoutes(["eco", "fastest"], routesFor),
+    [routeMap, stops],
+  );
+  const cheapPathM = pathMode("cheapest", cheapAvoid);
+  const cheapSearchRoutes = useMemo(() => {
+    // Only when Cheapest has its own corridor (toll/fee avoid), not when sharing eco/fastest.
+    if (cheapPathM === "eco" || cheapPathM === "fastest") return [] as RoutedLeg[];
+    return collectSearchRoutes(["cheapest"], routesFor);
+  }, [routeMap, stops, cheapPathM]);
+  const searchRoutes = useMemo(
+    () => [...stableSearchRoutes, ...cheapSearchRoutes],
+    [stableSearchRoutes, cheapSearchRoutes],
+  );
 
-  const { chargers: routeChargers, loading: chargersLoading } = useRouteChargers(
-    live ? searchRoutes : [],
-    Math.max(
-      DEFAULT_DETOUR_KM,
-      ...stops.slice(1).flatMap((_, i) =>
-        (["eco", "fastest", "cheapest"] as LegMode[]).map((m) =>
-          chargeSearchKm(m, detours[i] ?? DEFAULT_DETOUR_KM),
-        ),
+  const chargeRadiusKm = Math.max(
+    DEFAULT_DETOUR_KM,
+    ...stops.slice(1).flatMap((_, i) =>
+      (["eco", "fastest", "cheapest"] as LegMode[]).map((m) =>
+        chargeSearchKm(m, detours[i] ?? DEFAULT_DETOUR_KM),
       ),
     ),
   );
+  const { chargers: stableChargers, loading: stableChargersLoading } = useRouteChargers(
+    live ? stableSearchRoutes : [],
+    chargeRadiusKm,
+  );
+  const { chargers: cheapChargers, loading: cheapChargersLoading } = useRouteChargers(
+    live ? cheapSearchRoutes : [],
+    chargeRadiusKm,
+  );
+  const routeChargers = useMemo(() => {
+    const byId = new Map(stableChargers.map((c) => [c.id, c]));
+    for (const c of cheapChargers) byId.set(c.id, c);
+    return [...byId.values()];
+  }, [stableChargers, cheapChargers]);
+  const chargersLoading = stableChargersLoading || cheapChargersLoading;
 
-  const locations = useMemo(() => {
-    if (!live) return locationsStored.filter((l) => l.kind === "home").slice(0, 4);
-    const paths = searchRoutes.map((r) => r.path).filter((p) => p.length >= 2);
-    const europe = paths.some((p) => p.some(([lat, lng]) => lat > 34 && lng > -12 && lng < 42));
-    const keep = locationsStored.filter((l) => {
-      if (europe && l.preset && l.lng < -20) return false;
-      if (l.kind === "home" || !l.preset) return true;
-      return paths.some((p) => minDistToPathM(l.lat, l.lng, p) < 80_000);
-    });
-    const byId = new Map(keep.map((l) => [l.id, l]));
-    for (const c of routeChargers) byId.set(c.id, c);
-    const all = [...byId.values()];
-    if (!paths.length) return all;
-    const picked = new Map<string, ChargeLocation>();
-    for (const p of paths) {
-      for (const l of spreadAlongPath(all, p, 28, 55_000)) picked.set(l.id, l);
-      const ranked = all
-        .map((l) => ({ l, d: minDistToPathM(l.lat, l.lng, p) }))
-        .filter((s) => s.d < 50_000)
-        .sort((a, b) => a.l.usdPerKwh - b.l.usdPerKwh)
-        .slice(0, 12);
-      for (const s of ranked) picked.set(s.l.id, s.l);
-    }
-    return [...picked.values()];
-  }, [live, locationsStored, routeChargers, searchRoutes]);
+  const stableLocations = useMemo(
+    () => buildPlanLocations(live, locationsStored, stableChargers, stableSearchRoutes),
+    [live, locationsStored, stableChargers, stableSearchRoutes],
+  );
+  const locations = useMemo(
+    () => buildPlanLocations(live, locationsStored, routeChargers, searchRoutes),
+    [live, locationsStored, routeChargers, searchRoutes],
+  );
 
   const driveMinGuess = selectedRoutes.reduce((n, r) => n + r.seconds / 60, 0);
   const departHhmm =
@@ -671,7 +715,8 @@ export function PlanScreen() {
     preferIds: stops.slice(1).map((_, i) => prefer[i] ?? null),
     memberships: networkAbo,
     focuses: activeModes.map((m) => (m === "cheapest" ? "pris" : m === "eco" ? "distance" : "time")),
-    avoid: cheapAvoid,
+    // Never share Cheapest avoid with Eco/Fastest via the common planArgs bag.
+    avoid: NO_CHEAP_AVOID,
   };
 
   const corridorStamp = useMemo(() => {
@@ -695,16 +740,18 @@ export function PlanScreen() {
       return LEG_MODES.map((mode) => ({
         mode,
         priced: [] as PricedLeg[],
-        avoid: mode === "cheapest" ? cheapAvoid : { motorways: false, tolls: false, roadFees: false },
+        avoid: avoidForMode(mode, cheapAvoid),
       }));
     }
     return LEG_MODES.map((mode) => {
-      const avoid = mode === "cheapest" ? cheapAvoid : { motorways: false, tolls: false, roadFees: false };
+      const avoid = avoidForMode(mode, cheapAvoid);
       const optionRoutes = routesFor(pathMode(mode, avoid));
       if (optionRoutes.length !== Math.max(0, stops.length - 1) || stops.length < 2) {
         return { mode, priced: [] as PricedLeg[], avoid };
       }
-      const cacheKey = `${mode}|${corridorStamp}|${soc}|${locations.length}|${hours.length}|${avoid.motorways}|${avoid.tolls}|${avoid.roadFees}`;
+      // Eco/Fastest price from stable corridors only — Cheapest avoid must not change their stall pool.
+      const locPool = mode === "cheapest" ? locations : stableLocations;
+      const cacheKey = `${mode}|${corridorStamp}|${soc}|${locPool.length}|${hours.length}|${avoid.motorways}|${avoid.tolls}|${avoid.roadFees}`;
       const cached = pricedMemo.current.get(cacheKey);
       if (cached) return { mode, avoid, priced: cached };
       const priced = pricePlan({
@@ -713,7 +760,7 @@ export function PlanScreen() {
         focuses: stops.slice(1).map(() => (mode === "cheapest" ? "pris" : mode === "eco" ? "distance" : "time")),
         detours: planArgs.detours.map((d) => (mode === "cheapest" ? 15 : d)),
         routes: optionRoutes,
-        locations: locationsForRoutes(locations, optionRoutes),
+        locations: locationsForRoutes(locPool, optionRoutes),
         avoid,
       });
       pricedMemo.current.set(cacheKey, priced);
@@ -723,14 +770,14 @@ export function PlanScreen() {
       }
       return { mode, avoid, priced };
     });
-  }, [live, corridorStamp, stops, detours, waits, soc, profile.usableKwh, profile.acKw, locations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc, prefer, networkAbo, cheapAvoid]);
+  }, [live, corridorStamp, stops, detours, waits, soc, profile.usableKwh, profile.acKw, locations, stableLocations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc, prefer, networkAbo, cheapAvoid]);
 
   const optionRows = useMemo(() => {
     const rows = pricedRows.map(({ mode, priced, avoid }) => {
       const legs = applyLiveRoutes(
         priced,
         (from, to, m) => {
-          const pathM = pathMode(m, m === "cheapest" ? cheapAvoid : false);
+          const pathM = pathMode(m, avoidForMode(m, cheapAvoid));
           return deferredMap[routeKey(from, to, pathM)] ?? deferredMap[routeKey(from, to, m)];
         },
         speedEff,
@@ -876,7 +923,7 @@ export function PlanScreen() {
       const jobs: { from: PlanStop; to: PlanStop; mode: LegMode; key: string }[] = [];
       const seen = new Set<string>();
       for (const row of optionRows) {
-        const m = pathMode(row.mode, row.mode === "cheapest" ? cheapAvoid : false);
+        const m = pathMode(row.mode, avoidForMode(row.mode, cheapAvoid));
         for (const leg of row.legs) {
           const key = routeKey(leg.from, leg.to, m);
           if (seen.has(key)) continue;
@@ -1133,7 +1180,7 @@ export function PlanScreen() {
       if (row?.legs.length) {
         for (const leg of row.legs) {
           const live =
-            routeMap[routeKey(leg.from, leg.to, pathMode(mode, mode === "cheapest" ? cheapAvoid : false))] ??
+            routeMap[routeKey(leg.from, leg.to, pathMode(mode, avoidForMode(mode, cheapAvoid)))] ??
             routeMap[routeKey(leg.from, leg.to, mode)];
           const path =
             live && live.source !== "air" && live.path.length >= 3 ? live.path : leg.route.path;
@@ -1142,10 +1189,10 @@ export function PlanScreen() {
       }
       if (!pieces.length) {
         const hit =
-          routeMap[routeKey(stops[0], stops[stops.length - 1], pathMode(mode, mode === "cheapest" ? cheapAvoid : false))] ??
+          routeMap[routeKey(stops[0], stops[stops.length - 1], pathMode(mode, avoidForMode(mode, cheapAvoid)))] ??
           routeMap[routeKey(stops[0], stops[stops.length - 1], mode)] ??
           (stops.length >= 2
-            ? routeMap[routeKey(stops[0], stops[1], pathMode(mode, mode === "cheapest" ? cheapAvoid : false))]
+            ? routeMap[routeKey(stops[0], stops[1], pathMode(mode, avoidForMode(mode, cheapAvoid)))]
             : undefined);
         if (hit?.path.length) pieces.push(hit.path);
         else {
