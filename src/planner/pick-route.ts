@@ -52,7 +52,10 @@ export function pickEcoRoute<T extends DriveCandidate>(fast: T | null, cands: T[
   });
 }
 
-/** Skip gates/road fees only when the extra time stays within CHEAP_AVOID_FRAC of Fastest. */
+/**
+ * Cheapest-only: skip gates/road fees when extra time stays within CHEAP_AVOID_FRAC of Fastest.
+ * Eco uses pickEcoRoute; Fastest uses pickFastestRoute — never pass cheapAvoid into those.
+ */
 export function pickCheapAvoidRoute<T extends DriveCandidate>(
   fast: T | null,
   cands: T[],
