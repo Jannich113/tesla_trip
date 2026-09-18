@@ -90,6 +90,19 @@ export function asCheapAvoid(raw: boolean | CheapAvoid | null | undefined): Requ
   };
 }
 
+/** No cheap-avoid flags — Eco/Fastest corridors and shared planArgs baseline. */
+export const NO_CHEAP_AVOID: Required<CheapAvoid> = {
+  motorways: false,
+  tolls: false,
+  roadFees: false,
+};
+
+/** Cheap avoid toggles apply only to Cheapest; Eco/Fastest always get none. */
+export function avoidForMode(mode: LegMode, cheapAvoid: boolean | CheapAvoid = false): Required<CheapAvoid> {
+  if (mode !== "cheapest") return { ...NO_CHEAP_AVOID };
+  return asCheapAvoid(cheapAvoid);
+}
+
 /** Eco: own corridor. Cheapest: fastest unless Avoid motorways (eco) or avoid gates/fees (own no-toll try). */
 export function pathMode(mode: LegMode, avoid: boolean | CheapAvoid = false): LegMode {
   if (mode === "eco") return "eco";
@@ -103,30 +116,3 @@ export function pathMode(mode: LegMode, avoid: boolean | CheapAvoid = false): Le
 
 /** Extra drive time cheapest may spend vs Fastest to skip a gate or road fee. */
 export const CHEAP_AVOID_FRAC = 0.15;
-/** Hard cap: cheapest will not add more than this many km per leg for a stall. */
-export const CHEAP_STALL_KM = 15;
-/** Extra drive time cheapest may spend vs Fastest to skip a gate or road fee (corridor). */
-export const CHEAP_TIME_FRAC = 0.15;
-/** Net save must be at least this many times the extra drive cost. */
-export const SAVE_WEIGHT = 3;
-export const MIN_SAVE_KR = 25;
-/** Cheapest takes a stall if net save (after extra miles) is at least this. */
-export const STALL_SAVE_KR = 1;
-export const STALL_SAVE_WEIGHT = 1;
-/** Wear / inconvenience of each extra km, added on top of energy. */
-export const EXTRA_KM_KR = 0.6;
-
-export function cheapDetourKm(routeSeconds: number) {
-  const km = (Math.max(0, routeSeconds) / 3600) * CHEAP_TIME_FRAC * 80;
-  return Math.min(100, Math.max(18, Math.round(km)));
-}
-
-/** Energy + km penalty for leaving the line. */
-export function extraMileageKr(distM: number, opts?: { acKr?: number; kwh?: number }) {
-  const km = Math.max(0, distM) / 1000;
-  const acKr = opts?.acKr ?? 2.5;
-  const kwh = opts?.kwh ?? km * 0.2;
-  return kwh * Math.max(acKr, 1) + km * EXTRA_KM_KR;
-}
-
-export { planTripMin } from "./plan-trip-min";
