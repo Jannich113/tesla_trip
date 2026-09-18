@@ -48,14 +48,18 @@ export function ChargeScreen({ visible = true }: { visible?: boolean }) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [mapFocus, setMapFocus] = useState<{ lat: number; lng: number; zoom?: number } | null>(null);
   const [mapOn, setMapOn] = useState(false);
+  // Keep BayMap mounted across tab hides so reopen reuses the Leaflet instance.
+  // First mount waits for idle so period pills / chrome stay tappable.
   useEffect(() => {
-    if (!visible) {
-      setMapOn(false);
-      return;
+    if (!visible || mapOn) return;
+    const kick = () => setMapOn(true);
+    if (typeof requestIdleCallback === "function") {
+      const id = requestIdleCallback(kick, { timeout: 400 });
+      return () => cancelIdleCallback(id);
     }
-    const id = window.setTimeout(() => setMapOn(true), 400);
+    const id = window.setTimeout(kick, 160);
     return () => window.clearTimeout(id);
-  }, [visible]);
+  }, [visible, mapOn]);
   const today = useMemo(() => laDayString(), []);
   const totals = useMemo(() => totalsFor(locations, logged, listPeriod, today), [locations, logged, listPeriod, today]);
   const driven = useMemo(() => tripTotals(listPeriod, today), [listPeriod, today]);
@@ -92,6 +96,18 @@ export function ChargeScreen({ visible = true }: { visible?: boolean }) {
     }
     return list;
   }, [ranks, draft]);
+
+  const [idleMarkers, setIdleMarkers] = useState<MapMarker[]>([]);
+  useEffect(() => {
+    if (!mapOn) return;
+    const apply = () => setIdleMarkers(markers);
+    if (typeof requestIdleCallback === "function") {
+      const id = requestIdleCallback(apply, { timeout: 400 });
+      return () => cancelIdleCallback(id);
+    }
+    const t = window.setTimeout(apply, 160);
+    return () => window.clearTimeout(t);
+  }, [mapOn, markers]);
 
   function saveDraft() {
     if (!draft) return;
@@ -207,10 +223,10 @@ export function ChargeScreen({ visible = true }: { visible?: boolean }) {
         </p>
       </section>
 
-      {mapOn && visible ? (
+      {mapOn ? (
         <Suspense fallback={<div className="h-52 rounded-xl bg-surface shadow-[var(--shadow-border)]" />}>
           <BayMap
-            markers={markers}
+            markers={idleMarkers}
             selectedId={draft ? "draft" : activeId}
             onSelect={(id) => {
               if (id === "draft") return;

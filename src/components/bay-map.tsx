@@ -362,6 +362,22 @@ function BayMapImpl({
     mapRef.current?.setView([focus.lat, focus.lng], focus.zoom ?? 15, { animate: false });
   }, [ready, focus]);
 
+  // When a parent tab unhides via CSS (display:none → visible), Leaflet needs a
+  // size refresh so tiles/pins paint on the reused map instance.
+  useEffect(() => {
+    if (!ready) return;
+    const el = hostRef.current;
+    const map = mapRef.current;
+    if (!el || !map) return;
+    const ro = new ResizeObserver(() => {
+      if (el.clientWidth > 0 && el.clientHeight > 0) {
+        map.invalidateSize({ animate: false });
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ready]);
+
   if (hidden) {
     return (
       <div className="rounded-xl bg-surface px-5 py-8 shadow-[var(--shadow-border)]">
