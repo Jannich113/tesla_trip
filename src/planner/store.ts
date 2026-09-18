@@ -166,6 +166,8 @@ type PlanState = {
   whPerMi: number | null;
   speedEff: SpeedEff | null;
   networkAbo: Record<string, boolean>;
+  /** Catalog network id to bias Eco/Fastest/Cheapest toward when close enough. */
+  preferredNetwork: string | null;
   routeCache: Record<string, RoutedLeg>;
   lastOptions: LastOptions | null;
   saved: SavedPlan[];
@@ -188,6 +190,7 @@ type PlanStore = PlanState & {
   setWhPerMi: (n: number | null) => void;
   setSpeedEff: (next: SpeedEff | null) => void;
   setNetworkAbo: (id: string, on: boolean) => void;
+  setPreferredNetwork: (id: string | null) => void;
   insertStopAt: (index: number, stop: Omit<PlanStop, "id"> & { id?: string }) => void;
   setRouteCache: (patch: Record<string, RoutedLeg>) => void;
   setLastOptions: (next: LastOptions | null) => void;
@@ -222,6 +225,7 @@ function readDraft(): Partial<PlanState> {
       whPerMi: s.whPerMi,
       speedEff: s.speedEff,
       networkAbo: s.networkAbo,
+      preferredNetwork: typeof s.preferredNetwork === "string" || s.preferredNetwork === null ? s.preferredNetwork : undefined,
       routeCache,
       lastOptions: s.lastOptions ?? null,
       saved: s.saved,
@@ -247,6 +251,7 @@ const empty = (): PlanState => ({
   whPerMi: null,
   speedEff: null,
   networkAbo: { tesla: true },
+  preferredNetwork: null,
   routeCache: {},
   lastOptions: null,
   saved: [],
@@ -270,6 +275,7 @@ export const usePlanStore = create<PlanStore>()(
       setSpeedEff: (speedEff) => set({ speedEff, whPerMi: speedEff ? kwhPerMiFrom100km(speedEff[80]) * 1000 : null }),
       setNetworkAbo: (id, on) =>
         set({ networkAbo: { ...get().networkAbo, [id]: on } }),
+      setPreferredNetwork: (preferredNetwork) => set({ preferredNetwork }),
 
       setLastOptions: (lastOptions) => set({ lastOptions }),
 
@@ -513,6 +519,7 @@ export const usePlanStore = create<PlanStore>()(
         whPerMi: s.whPerMi,
         speedEff: s.speedEff,
         networkAbo: s.networkAbo,
+        preferredNetwork: s.preferredNetwork,
         routeCache: slimRoutes(s.routeCache) ?? {},
         lastOptions: s.lastOptions,
         saved: s.saved.slice(-8).map((plan) => ({
