@@ -27,6 +27,7 @@ import {
   splitDateTime,
   stallKw,
   waitDelayMin,
+  planTripMin,
   waitMinUntil,
   waitMinUntilDated,
 } from "./modes";
@@ -43,6 +44,7 @@ import {
 import { estimateTolls } from "./tolls";
 import { withRetry, fetchWithTimeout } from "./retry";
 
+export { planTripMin } from "./modes";
 export { alongFraction, haversineM, minDistToPathM, pathMeters, pickViaAtRange, pickViaOnPath, pointAlongPath, splitRoutedLeg, spreadAlongPath } from "./insert";
 
 export {
@@ -966,7 +968,7 @@ export function pricePlan(opts: {
 }
 
 export function planTotals(legs: PricedLeg[]) {
-  return legs.reduce(
+  const acc = legs.reduce(
     (acc, leg) => {
       acc.mi += leg.route.miles;
       acc.kwh += leg.kwh;
@@ -975,7 +977,6 @@ export function planTotals(legs: PricedLeg[]) {
       acc.driveMin += leg.route.seconds / 60;
       acc.chargeMin += leg.chargeMin;
       acc.waitMin += leg.waitMin;
-      acc.min += leg.route.seconds / 60 + leg.chargeMin + leg.waitMin;
       acc.chargeKwh += leg.accepted && leg.charge ? (leg.charge.kwh ?? 0) : 0;
       acc.requiredKwh += leg.needed ? (leg.charge?.kwh ?? 0) : 0;
       acc.charges += leg.accepted && leg.charge ? 1 : 0;
@@ -995,6 +996,8 @@ export function planTotals(legs: PricedLeg[]) {
       charges: 0,
     },
   );
+  acc.min = planTripMin(legs);
+  return acc;
 }
 
 export function minutesToHm(min: number) {
