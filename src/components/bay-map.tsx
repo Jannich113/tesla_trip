@@ -99,6 +99,15 @@ function prune<T extends { remove: () => void }>(store: Map<string, T>, keep: Se
   }
 }
 
+function scheduleIdle(cb: () => void, timeout = 500): () => void {
+  if (typeof requestIdleCallback === "function") {
+    const id = requestIdleCallback(() => cb(), { timeout });
+    return () => cancelIdleCallback(id);
+  }
+  const t = window.setTimeout(cb, Math.min(48, timeout));
+  return () => window.clearTimeout(t);
+}
+
 function BayMapImpl({
   markers,
   routes = [],
@@ -142,51 +151,59 @@ function BayMapImpl({
     const el = hostRef.current;
     if (!el) return;
     let cancelled = false;
+    let cancelMount: (() => void) | undefined;
 
-    const start = window.setTimeout(() => {
+    // Defer Leaflet import + map construction until the main thread is idle so
+    // shell / stop taps stay responsive on first paint.
+    const cancelLoad = scheduleIdle(() => {
       void (async () => {
         const leaflet = await import("leaflet");
         if (cancelled || !hostRef.current) return;
         const mod = leaflet as unknown as { default?: Leaflet } & Leaflet;
         const L = (mod.default ?? mod) as Leaflet;
-        LRef.current = L;
-        const canvas = L.canvas({ padding: 0.12, tolerance: 12 });
-        canvasRef.current = canvas;
-        const map = L.map(hostRef.current, {
-          zoomControl: false,
-          attributionControl: true,
-          scrollWheelZoom: false,
-          dragging: false,
-          doubleClickZoom: false,
-          boxZoom: false,
-          keyboard: false,
-          touchZoom: false,
-          fadeAnimation: false,
-          zoomAnimation: false,
-          markerZoomAnimation: false,
-          inertia: false,
-          preferCanvas: true,
-          renderer: canvas,
-        });
-        L.control.zoom({ position: "bottomright" }).addTo(map);
-        L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-          maxZoom: 18,
-          updateWhenIdle: true,
-          updateWhenZooming: false,
-          keepBuffer: 0,
-          attribution:
-            '&copy; <a href="https://www.openstreetmap.org/copyright" rel="noreferrer" target="_blank">OpenStreetMap</a>',
-        }).addTo(map);
-        map.attributionControl?.setPosition("bottomleft");
-        map.setView([37.45, -122.15], 10);
-        mapRef.current = map;
-        if (!cancelled) setReady(true);
+        // Yield again before L.map() — import eval and map ctor are both heavy.
+        cancelMount = scheduleIdle(() => {
+          if (cancelled || !hostRef.current) return;
+          LRef.current = L;
+          const canvas = L.canvas({ padding: 0.12, tolerance: 12 });
+          canvasRef.current = canvas;
+          const map = L.map(hostRef.current, {
+            zoomControl: false,
+            attributionControl: true,
+            scrollWheelZoom: false,
+            dragging: false,
+            doubleClickZoom: false,
+            boxZoom: false,
+            keyboard: false,
+            touchZoom: false,
+            fadeAnimation: false,
+            zoomAnimation: false,
+            markerZoomAnimation: false,
+            inertia: false,
+            preferCanvas: true,
+            renderer: canvas,
+          });
+          L.control.zoom({ position: "bottomright" }).addTo(map);
+          L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+            maxZoom: 18,
+            updateWhenIdle: true,
+            updateWhenZooming: false,
+            keepBuffer: 0,
+            attribution:
+              '&copy; <a href="https://www.openstreetmap.org/copyright" rel="noreferrer" target="_blank">OpenStreetMap</a>',
+          }).addTo(map);
+          map.attributionControl?.setPosition("bottomleft");
+          map.setView([37.45, -122.15], 10);
+          mapRef.current = map;
+          if (!cancelled) setReady(true);
+        }, 600);
       })();
-    }, 48);
+    }, 600);
 
     return () => {
       cancelled = true;
-      window.clearTimeout(start);
+      cancelLoad();
+      cancelMount?.();
       setReady(false);
       routesRef.current.forEach((l) => l.remove());
       dotsRef.current.forEach((l) => l.remove());
@@ -212,7 +229,7 @@ function BayMapImpl({
     const key = overlayKey(markers, routes, selectedId, selectedIds, dropping);
     if (key === drawKeyRef.current) return;
 
-    const timer = window.setTimeout(() => {
+    const cancelDraw = scheduleIdle(() => {
       if (mapRef.current !== map) return;
       drawKeyRef.current = key;
       const selectedSet = new Set(
@@ -335,9 +352,9 @@ function BayMapImpl({
         fitKeyRef.current = focusKey;
         map.setView(fitPts[0], 12, { animate: false });
       }
-    });
+    }, 400);
 
-    return () => window.clearTimeout(timer);
+    return () => cancelDraw();
   }, [ready, hidden, markers, routes, selectedId, selectedIds, dropping]);
 
   useEffect(() => {
