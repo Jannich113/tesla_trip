@@ -1233,7 +1233,14 @@ export function PlanScreen() {
   const [idleMap, setIdleMap] = useState({ routes: [] as MapRoute[], markers: [] as MapMarker[] });
   useEffect(() => {
     if (routing) return;
-    const t = window.setTimeout(() => setIdleMap({ routes: mapRoutes, markers: mapMarkers }), 160);
+    // Defer corridor props until idle so BayMap does not paint heavy polylines
+    // during the same turn as shell / stop taps.
+    const apply = () => setIdleMap({ routes: mapRoutes, markers: mapMarkers });
+    if (typeof requestIdleCallback === "function") {
+      const id = requestIdleCallback(apply, { timeout: 400 });
+      return () => cancelIdleCallback(id);
+    }
+    const t = window.setTimeout(apply, 160);
     return () => window.clearTimeout(t);
   }, [routing, mapRoutes, mapMarkers]);
 
@@ -1697,8 +1704,8 @@ export function PlanScreen() {
         <Suspense fallback={<div className="h-52 rounded-xl bg-surface shadow-[var(--shadow-border)]" />}>
           {live ? (
             <BayMap
-              markers={idleMap.markers.length ? idleMap.markers : mapMarkers}
-              routes={idleMap.routes.length ? idleMap.routes : mapRoutes}
+              markers={idleMap.markers}
+              routes={idleMap.routes}
               selectedId={selected}
               selectedIds={selectedIds}
               onSelect={onMapSelect}
