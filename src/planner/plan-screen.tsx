@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, useDeferredValue, useRef, lazy, Suspense,
 import { ChevronDown, ChevronUp, Navigation, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import type { MapMarker, MapRoute } from "@/components/bay-map";
+import { ConfirmStrip } from "@/components/confirm-strip";
 import { searchAddress, type AddressHit } from "./search";
 import {
   DETOUR_KM,
@@ -459,6 +460,7 @@ export function PlanScreen() {
   const [abA, setAbA] = useState<LegMode>("fastest");
   const [abB, setAbB] = useState<LegMode>("cheapest");
   const [naming, setNaming] = useState(false);
+  const [clearConfirm, setClearConfirm] = useState(false);
   const [saveLabel, setSaveLabel] = useState("");
   const [pane, setPane] = useState<"plan" | "advanced" | "members">("plan");
   const { data: elpris } = useLiveElpris(area);
@@ -1532,7 +1534,20 @@ export function PlanScreen() {
           {totals.requiredKwh > 0 ? ` · ${formatNumber(totals.requiredKwh, 1)} kWh required` : ""}
         </p>
         <div className="mt-4 flex gap-2">
-          {naming ? (
+          {clearConfirm ? (
+            <ConfirmStrip
+              className="min-w-0 flex-1"
+              title="Clear this plan?"
+              body="Stops, modes, and draft reset. Saved plans stay."
+              confirmLabel="Clear"
+              cancelLabel="Keep"
+              onConfirm={() => {
+                setClearConfirm(false);
+                reset();
+              }}
+              onCancel={() => setClearConfirm(false)}
+            />
+          ) : naming ? (
             <div className="flex min-w-0 flex-1 flex-col gap-2">
               <input
                 autoFocus
@@ -1581,7 +1596,10 @@ export function PlanScreen() {
               </button>
               <button
                 type="button"
-                onClick={() => reset()}
+                onClick={() => {
+                  setNaming(false);
+                  setClearConfirm(true);
+                }}
                 className="h-11 rounded-full bg-surface-2 px-4 text-sm font-medium text-muted"
               >
                 Clear
