@@ -243,10 +243,14 @@ export function pickViaOnPath(opts: {
     });
     const along = energyTo * 24;
     const unused = (budgetKwh - energyTo) * 10;
+    // Fastest/time: nearest on the motorway corridor wins inside the SOC window.
+    // along/unused must not outweigh corridor proximity (legacy score preferred late-far).
     const score =
       focus === "pris"
         ? -(rate * 50 + extraKr) + energyTo * 0.05
-        : along - unused - fit;
+        : focus === "time" || mode === "fastest"
+          ? -distM + energyTo * 5 + (loc.kind === "supercharger" ? 800 : 0)
+          : along - unused - fit;
     if (score > bestScore) {
       bestScore = score;
       best = loc;

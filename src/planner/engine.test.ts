@@ -33,7 +33,7 @@ import {
 } from "./modes.ts";
 import { rateForNetwork, networkIdFor, roamExtra, EU_NETWORKS, EU_REGIONS, regionalOwn, regionalRoam } from "./networks.ts";
 import { pickCheapAvoidRoute, pickEcoRoute, pickFastestRoute, pickRouted } from "./pick-route.ts";
-import { alongFraction, haversineM, locationsNearPath, pickViaAtRange, pickViaOnPath, splitRoutedLeg } from "./insert.ts";
+import { alongFraction, haversineM, locationsNearPath, minDistToPathM, pickViaAtRange, pickViaOnPath, splitRoutedLeg } from "./insert.ts";
 import { encodeGeohash, geohashNeighborhood, geohashesAlongPath } from "./geohash.ts";
 import { networkFromOsmTags, isDcStation, networkFromOperator } from "./osm-operator.ts";
 import { estimateTolls, gatesOnPath } from "./tolls.ts";
@@ -279,6 +279,8 @@ describe("leg modes", () => {
       8 * 60,
     );
   });
+
+
 
   it("DC stalls are not timed at home AC kW", () => {
     assert.equal(stallKw("supercharger", 11), 150);
@@ -722,6 +724,43 @@ describe("leg modes", () => {
       detourKm: 15,
     });
     assert.equal(fast?.id, "tesla-line");
+  });
+
+  it("fastest picks the nearest on-corridor stall in the SOC window, not a later off-route one", () => {
+    const path: [number, number][] = [];
+    for (let i = 0; i <= 20; i++) {
+      path.push([55.4 - i * 0.2, 10.4 - i * 0.05]);
+    }
+    const earlyNear = {
+      id: "early-near",
+      lat: path[7][0],
+      lng: path[7][1],
+      kind: "supercharger" as const,
+      usdPerKwh: 0.45,
+      name: "Early Near",
+      short: "EN",
+    };
+    const lateFar = {
+      id: "late-far",
+      lat: path[10][0] + 0.12,
+      lng: path[10][1] - 0.15,
+      kind: "custom" as const,
+      usdPerKwh: 0.4,
+      name: "Late Far",
+      short: "LF",
+    };
+    const via = pickViaOnPath({
+      path,
+      locations: [earlyNear, lateFar],
+      budgetKwh: 55,
+      minKwh: 30,
+      totalKwh: 100,
+      mode: "fastest",
+      focus: "time",
+      detourKm: 18,
+    });
+    assert.equal(via?.id, "early-near", "nearest motorway stall must beat a later off-corridor one");
+    assert.ok(minDistToPathM(earlyNear.lat, earlyNear.lng, path) < minDistToPathM(lateFar.lat, lateFar.lng, path));
   });
 
   it("1200 mile trip inserts several charge vias", () => {
