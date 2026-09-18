@@ -20,6 +20,7 @@ import {
   minutesBetweenDateTime,
   asDateTime,
   waitDelayMin,
+  planTripMin,
   extraMileageKr,
   CHEAP_STALL_KM,
   detourPays,
@@ -33,7 +34,7 @@ import {
 } from "./modes.ts";
 import { rateForNetwork, networkIdFor, roamExtra, EU_NETWORKS, EU_REGIONS, regionalOwn, regionalRoam } from "./networks.ts";
 import { pickCheapAvoidRoute, pickEcoRoute, pickFastestRoute, pickRouted } from "./pick-route.ts";
-import { alongFraction, haversineM, locationsNearPath, pickViaAtRange, pickViaOnPath, splitRoutedLeg } from "./insert.ts";
+import { alongFraction, haversineM, locationsNearPath, minDistToPathM, pickViaAtRange, pickViaOnPath, splitRoutedLeg } from "./insert.ts";
 import { encodeGeohash, geohashNeighborhood, geohashesAlongPath } from "./geohash.ts";
 import { networkFromOsmTags, isDcStation, networkFromOperator } from "./osm-operator.ts";
 import { estimateTolls, gatesOnPath } from "./tolls.ts";
@@ -278,6 +279,44 @@ describe("leg modes", () => {
       }),
       8 * 60,
     );
+  });
+
+
+  it("saved/total trip min is leave→arrive once (no pre-leave charge stacked on startAt)", () => {
+    const driveMin = 180;
+    const chargeMin = 240;
+    const waitMin = 0;
+    const leg = {
+      departAt: "2026-09-12T08:00",
+      arriveAt: "2026-09-12T11:00",
+      route: { seconds: driveMin * 60 },
+      chargeMin,
+      waitMin,
+    };
+    const naive = driveMin + chargeMin + waitMin;
+    assert.equal(planTripMin([leg]), driveMin);
+    assert.ok(planTripMin([leg]) < naive);
+    assert.equal(naive, 420);
+  });
+
+  it("saved/total trip min includes mid-trip charge between first leave and last arrive", () => {
+    const legs = [
+      {
+        departAt: "2026-09-12T08:00",
+        arriveAt: "2026-09-12T10:00",
+        route: { seconds: 2 * 3600 },
+        chargeMin: 0,
+        waitMin: 0,
+      },
+      {
+        departAt: "2026-09-12T10:30",
+        arriveAt: "2026-09-12T12:30",
+        route: { seconds: 2 * 3600 },
+        chargeMin: 30,
+        waitMin: 0,
+      },
+    ];
+    assert.equal(planTripMin(legs), 4.5 * 60);
   });
 
   it("DC stalls are not timed at home AC kW", () => {
@@ -722,6 +761,43 @@ describe("leg modes", () => {
       detourKm: 15,
     });
     assert.equal(fast?.id, "tesla-line");
+  });
+
+  it("fastest picks the nearest on-corridor stall in the SOC window, not a later off-route one", () => {
+    const path: [number, number][] = [];
+    for (let i = 0; i <= 20; i++) {
+      path.push([55.4 - i * 0.2, 10.4 - i * 0.05]);
+    }
+    const earlyNear = {
+      id: "early-near",
+      lat: path[7][0],
+      lng: path[7][1],
+      kind: "supercharger" as const,
+      usdPerKwh: 0.45,
+      name: "Early Near",
+      short: "EN",
+    };
+    const lateFar = {
+      id: "late-far",
+      lat: path[10][0] + 0.12,
+      lng: path[10][1] - 0.15,
+      kind: "custom" as const,
+      usdPerKwh: 0.4,
+      name: "Late Far",
+      short: "LF",
+    };
+    const via = pickViaOnPath({
+      path,
+      locations: [earlyNear, lateFar],
+      budgetKwh: 55,
+      minKwh: 30,
+      totalKwh: 100,
+      mode: "fastest",
+      focus: "time",
+      detourKm: 18,
+    });
+    assert.equal(via?.id, "early-near", "nearest motorway stall must beat a later off-corridor one");
+    assert.ok(minDistToPathM(earlyNear.lat, earlyNear.lng, path) < minDistToPathM(lateFar.lat, lateFar.lng, path));
   });
 
   it("1200 mile trip inserts several charge vias", () => {
