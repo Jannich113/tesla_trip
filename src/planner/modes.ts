@@ -1,1 +1,1 @@
-export const LEG_MODES = ["eco", "fastest", "cheapest"] as const;
+@/tmp/tesla_trip_21/src/planner/modes.ts
