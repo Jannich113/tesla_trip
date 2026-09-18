@@ -94,14 +94,18 @@ export function TripsScreen({ visible = true }: { visible?: boolean }) {
   const [rangeEnd, setRangeEnd] = useState("");
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const [mapOn, setMapOn] = useState(false);
+  // Keep BayMap mounted across tab hides so reopen reuses the Leaflet instance.
+  // First mount waits for idle so period pills / chrome stay tappable.
   useEffect(() => {
-    if (!visible) {
-      setMapOn(false);
-      return;
+    if (!visible || mapOn) return;
+    const kick = () => setMapOn(true);
+    if (typeof requestIdleCallback === "function") {
+      const id = requestIdleCallback(kick, { timeout: 400 });
+      return () => cancelIdleCallback(id);
     }
-    const id = window.setTimeout(() => setMapOn(true), 400);
+    const id = window.setTimeout(kick, 160);
     return () => window.clearTimeout(id);
-  }, [visible]);
+  }, [visible, mapOn]);
 
   const today = useMemo(() => laDayString(), []);
   const periodTotals = useMemo(() => tripTotals(listPeriod, today), [listPeriod, today]);
@@ -189,6 +193,20 @@ export function TripsScreen({ visible = true }: { visible?: boolean }) {
     }
     return extra.length ? [...base, ...extra] : base;
   }, [focusView, corridorView, insight]);
+
+  const [idleMap, setIdleMap] = useState({ routes: [] as MapRoute[], markers: [] as MapMarker[] });
+  useEffect(() => {
+    if (!mapOn) return;
+    // Defer corridor props until idle so first paint does not contend with pills.
+    const apply = () => setIdleMap({ routes: mapRoutes, markers: mapMarkers });
+    if (typeof requestIdleCallback === "function") {
+      const id = requestIdleCallback(apply, { timeout: 400 });
+      return () => cancelIdleCallback(id);
+    }
+    const t = window.setTimeout(apply, 160);
+    return () => window.clearTimeout(t);
+  }, [mapOn, mapRoutes, mapMarkers]);
+
   const active = selected && mapRoutes.some((r) => r.id === selected) ? selected : mapRoutes[0]?.id;
   const selectedIds = useMemo(
     () => (focusView ? focusView.keys : active ? [active] : []),
@@ -477,11 +495,11 @@ export function TripsScreen({ visible = true }: { visible?: boolean }) {
         ) : null}
       </section>
 
-      {mapOn && visible ? (
+      {mapOn ? (
         <Suspense fallback={<div className="h-52 rounded-xl bg-surface shadow-[var(--shadow-border)]" />}>
           <BayMap
-            markers={mapMarkers}
-            routes={mapRoutes}
+            markers={idleMap.markers}
+            routes={idleMap.routes}
             selectedId={active}
             selectedIds={selectedIds}
             onSelect={selectOnMap}
