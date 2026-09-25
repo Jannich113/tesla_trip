@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { VEHICLE } from "@/lib/vehicle";
+import type { TeslaOwnerVehicleSnapshot } from "@/lib/tesla-owner-data";
 
 export const OWNER_VIN = VEHICLE.vin;
 
@@ -25,6 +26,8 @@ export type TeslaOwnerStatus = {
   reason?: "not_configured" | "not_owner" | "driver" | "denied" | "error";
 };
 
+export type { TeslaOwnerVehicleSnapshot };
+
 export const getTeslaOwnerStatus = createServerFn({ method: "POST" }).handler(
   async (): Promise<TeslaOwnerStatus> => {
     const { readOwnerStatus } = await import("./tesla-owner.server.ts");
@@ -33,7 +36,9 @@ export const getTeslaOwnerStatus = createServerFn({ method: "POST" }).handler(
 );
 
 export const beginTeslaOwnerLink = createServerFn({ method: "POST" }).handler(
-  async (): Promise<{ ok: true; url: string } | { ok: false; reason: TeslaOwnerStatus["reason"] }> => {
+  async (): Promise<
+    { ok: true; url: string } | { ok: false; reason: TeslaOwnerStatus["reason"] }
+  > => {
     const { startOwnerLink } = await import("./tesla-owner.server.ts");
     return startOwnerLink();
   },
@@ -45,3 +50,12 @@ export const disconnectTeslaOwner = createServerFn({ method: "POST" }).handler(
     return clearOwnerSession();
   },
 );
+
+export const getTeslaOwnerVehicleData = createServerFn({ method: "POST" })
+  .inputValidator((data: { includeLocation?: boolean }) => ({
+    includeLocation: Boolean(data?.includeLocation),
+  }))
+  .handler(async ({ data }): Promise<TeslaOwnerVehicleSnapshot> => {
+    const { fetchOwnerVehicleData } = await import("./tesla-owner.server.ts");
+    return fetchOwnerVehicleData({ includeLocation: data.includeLocation });
+  });
