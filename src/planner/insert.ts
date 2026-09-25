@@ -1,4 +1,4 @@
-import { chargeFitScore, chargeSearchKm, CHEAP_STALL_KM, defaultFocus, extraMileageKr, type LegMode, type ModeFocus } from "./modes.ts";
+import { chargeFitScore, chargeSearchKm, CHEAP_STALL_KM, defaultFocus, extraMileageKr, PREFERRED_CLOSE_M, PREFERRED_RATE_PREMIUM_KR, type LegMode, type ModeFocus } from "./modes.ts";
 import { geohashesAlongPath, inGeohashSet } from "./geohash.ts";
 import { networkIdFor, rateForNetwork } from "./networks.ts";
 
@@ -201,12 +201,15 @@ export function pickViaOnPath(opts: {
   detourKm: number;
   excludeIds?: Iterable<string>;
   memberships?: Record<string, boolean>;
+  /** Bias Eco/Fastest/Cheapest toward this network when close enough. */
+  preferredNetwork?: string | null;
   /** Energy that drops SOC to 25%. Prefer a stall after this (lower = faster DC). */
   minKwh?: number;
 }): ViaLoc | null {
   const { path, locations, budgetKwh, totalKwh, mode, detourKm } = opts;
   const focus = opts.focus ?? defaultFocus(mode);
   const memberships = opts.memberships ?? {};
+  const preferredNetwork = opts.preferredNetwork ?? null;
   if (totalKwh <= 0 || budgetKwh <= 0 || path.length < 2) return null;
   const exclude = new Set(opts.excludeIds ?? []);
   const searchBand =
@@ -245,12 +248,21 @@ export function pickViaOnPath(opts: {
     const unused = (budgetKwh - energyTo) * 10;
     // Fastest/time: nearest on the motorway corridor wins inside the SOC window.
     // along/unused must not outweigh corridor proximity (legacy score preferred late-far).
+    const netId = networkIdFor(loc.kind, loc.networkId);
+    const preferBonus =
+      preferredNetwork && netId === preferredNetwork
+        ? focus === "pris"
+          ? PREFERRED_RATE_PREMIUM_KR * 50
+          : focus === "time" || mode === "fastest"
+            ? PREFERRED_CLOSE_M
+            : (PREFERRED_CLOSE_M / 1000) * 14
+        : 0;
     const score =
-      focus === "pris"
+      (focus === "pris"
         ? -(rate * 50 + extraKr) + energyTo * 0.05
         : focus === "time" || mode === "fastest"
           ? -distM + energyTo * 5 + (loc.kind === "supercharger" ? 800 : 0)
-          : along - unused - fit;
+          : along - unused - fit) + preferBonus;
     if (score > bestScore) {
       bestScore = score;
       best = loc;
@@ -271,6 +283,7 @@ export function pickViaAtRange(opts: Parameters<typeof pickViaOnPath>[0]): ViaLo
   const focus = opts.focus ?? defaultFocus(opts.mode);
   const pris = opts.mode === "cheapest" || focus === "pris";
   const memberships = opts.memberships ?? {};
+  const preferredNetwork = opts.preferredNetwork ?? null;
   const locRate = (loc: ViaLoc) => {
     const netId = networkIdFor(loc.kind, loc.networkId);
     return (netId ? rateForNetwork(netId, Boolean(memberships[netId])) : null) ?? loc.usdPerKwh * 6.85;
@@ -281,6 +294,7 @@ export function pickViaAtRange(opts: Parameters<typeof pickViaOnPath>[0]): ViaLo
   const pool = locationsNearPath(opts.locations, opts.path, band);
   let best: ViaLoc | null = null;
   let bestScore = Infinity;
+  let bestAdj = band;
   let bestD = band;
   for (const loc of pool) {
     if (exclude.has(loc.id) || loc.kind === "home") continue;
@@ -288,16 +302,22 @@ export function pickViaAtRange(opts: Parameters<typeof pickViaOnPath>[0]): ViaLo
     if (energyTo < minEnergy * 0.9 || energyTo > opts.budgetKwh * 1.02) continue;
     const d = approxM(lat, lng, loc.lat, loc.lng);
     if (d > band) continue;
+    const netId = networkIdFor(loc.kind, loc.networkId);
+    const isPref = Boolean(preferredNetwork && netId === preferredNetwork);
     if (pris) {
-      const cost = locRate(loc) * 50 + extraMileageKr(d);
+      const cost = locRate(loc) * 50 + extraMileageKr(d) - (isPref ? PREFERRED_RATE_PREMIUM_KR * 50 : 0);
       if (cost < bestScore - 0.5 || (Math.abs(cost - bestScore) <= 0.5 && d < bestD)) {
         bestScore = cost;
         bestD = d;
         best = loc;
       }
-    } else if (d < bestD) {
-      bestD = d;
-      best = loc;
+    } else {
+      const adj = d - (isPref ? PREFERRED_CLOSE_M : 0);
+      if (adj < bestAdj || (Math.abs(adj - bestAdj) < 1 && d < bestD)) {
+        bestAdj = adj;
+        bestD = d;
+        best = loc;
+      }
     }
   }
   if (best) return best;
