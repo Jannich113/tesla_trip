@@ -1,4 +1,4 @@
-import { VEHICLE } from "@/lib/vehicle";
+import { VEHICLE } from "./vehicle.ts";
 
 export type FleetVehicleListItem = {
   id?: number;
