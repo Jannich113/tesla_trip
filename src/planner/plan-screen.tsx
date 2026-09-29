@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useDeferredValue, useRef, lazy, Suspense, memo, startTransition } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState, useDeferredValue, useRef, lazy, Suspense, memo, startTransition } from "react";
 import { ChevronDown, ChevronUp, Navigation, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import type { MapMarker, MapRoute } from "@/components/bay-map";
@@ -49,9 +49,9 @@ import {
   SPEED_KMH,
   splitDateTime,
 } from "./engine";
-import { usePlanStore, type OptionSnap } from "./store";
+import { applyDraftShell, paintDraftRoutes, usePlanStore, type OptionSnap } from "./store";
 import { withRetry } from "./retry";
-import { formatKrPerKwh, formatKrValue, type HourPrice } from "@/lib/elpris";
+import { formatKrPerKwh, formatKrValue, type ElprisData, type HourPrice } from "@/lib/elpris";
 import { applyTillægToHours, providerById } from "@/lib/el-providers";
 import { PLACES } from "@/lib/places";
 import { cn } from "@/lib/utils";
@@ -68,6 +68,7 @@ import { minDistToPathM, spreadAlongPath } from "./insert";
 import { simplifyPath } from "./polyline";
 import { useRouteChargers } from "./use-route-chargers";
 import { useChargePrices } from "./use-charge-prices";
+import { cacheGet, cacheOpenDisk } from "./cache";
 import { useLiveElpris } from "./use-live-elpris";
 import { EU_BLOCS, EU_NETWORKS, EU_REGIONS, type EuRegion, regionalExtra, regionalOwn, regionalRoam, roamExtra, roamRate } from "./networks";
 import { useVehicleProfile } from "@/hooks/use-vehicle-profile";
@@ -442,6 +443,20 @@ const OptionList = memo(function OptionList({
 
 const BayMap = lazy(() => import("@/components/bay-map").then((m) => ({ default: m.BayMap })));
 
+function ElprisAfterPaint({
+  area,
+  onData,
+}: {
+  area: Parameters<typeof useLiveElpris>[0];
+  onData: (data: ElprisData | null) => void;
+}) {
+  const { data } = useLiveElpris(area);
+  useEffect(() => {
+    onData(data);
+  }, [data, onData]);
+  return null;
+}
+
 export function PlanScreen() {
   const units = useVehicleStore((s) => s.units);
   const vehicleSoc = useVehicleStore((s) => Math.round(s.soc));
@@ -522,10 +537,23 @@ export function PlanScreen() {
   const [saveLabel, setSaveLabel] = useState("");
   const [pane, setPane] = useState<"plan" | "advanced" | "members">("plan");
   const [pickerStop, setPickerStop] = useState<string | null>(null);
-  const { data: elpris } = useLiveElpris(area);
+  const [elpris, setElpris] = useState<ElprisData | null>(null);
+
+  useLayoutEffect(() => {
+    applyDraftShell();
+  }, []);
 
   useEffect(() => {
-    const kick = () => setLive(true);
+    const kick = () => {
+      try {
+        cacheOpenDisk();
+        paintDraftRoutes();
+        const hit = cacheGet<ElprisData>("elpris", useElprisStore.getState().area, { stale: true });
+        if (hit) setElpris(hit);
+      } finally {
+        setLive(true);
+      }
+    };
     if (typeof requestIdleCallback === "function") {
       const id = requestIdleCallback(kick, { timeout: 250 });
       return () => cancelIdleCallback(id);
@@ -841,7 +869,7 @@ export function PlanScreen() {
         kmh: avgSpeedKmh(row.totals.mi, seconds),
       };
     });
-  }, [pricedRows, deferredMap, speedEff, cheapAvoid, stops]);
+  }, [pricedRows, deferredMap, speedEff, cheapAvoid, stops, lastOptions]);
 
   useEffect(() => {
     if (!live) return;
@@ -865,6 +893,7 @@ export function PlanScreen() {
   }, [live, optionRows, stops, lastOptions, setLastOptions]);
 
   const legs: PricedLeg[] = useMemo(() => {
+    if (!live) return [];
     if (!mixed) {
       const row = optionRows.find((r) => r.mode === (activeModes[0] ?? "fastest"));
       return row?.legs ?? [];
@@ -875,7 +904,7 @@ export function PlanScreen() {
       modes: activeModes,
       routes: selectedRoutes,
     });
-  }, [mixed, optionRows, activeModes, stops, selectedRoutes]);
+  }, [live, mixed, optionRows, activeModes, stops, selectedRoutes]);
 
   const viewLegs = useMemo(() => {
     return legs.map((leg, i) => {
@@ -918,6 +947,9 @@ export function PlanScreen() {
   }, [viewLegs, stops]);
 
   const totals = useMemo(() => planTotals(viewLegs), [viewLegs]);
+  const snapRow = optionRows.find((r) => r.mode === (activeModes[0] ?? "fastest"));
+  const headline = viewLegs.length ? totals : (snapRow?.totals ?? totals);
+  const headlineLive = viewLegs.length > 0;
 
   useEffect(() => {
     if (stops.length < 2) return;
@@ -1341,6 +1373,7 @@ export function PlanScreen() {
 
   return (
     <div className="space-y-5 px-4 pb-6 [touch-action:manipulation]">
+      {live ? <ElprisAfterPaint area={area} onData={setElpris} /> : null}
       <div className="flex rounded-full bg-surface-2 p-1">
         {(["plan", "advanced", "members"] as const).map((id) => (
           <button
@@ -1652,27 +1685,40 @@ export function PlanScreen() {
                 : `${modeLabel(activeModes[0] ?? "fastest")} · ${viewLegs.length} ${viewLegs.length === 1 ? "leg" : "legs"}`}
         </p>
         <p className="mt-2 text-4xl font-medium tracking-tight tabular-nums">
-          {formatDistance(totals.mi, units, totals.mi >= 100 ? 0 : 1)}
+          {formatDistance(headline.mi, units, headline.mi >= 100 ? 0 : 1)}
         </p>
         <p className="mt-2 text-sm text-muted">
-          {formatNumber(totals.kwh, 1)} kWh drive
-          <span className="text-subtle"> · </span>
-          {totals.chargeKwh > 0 ? `${formatNumber(totals.chargeKwh, 1)} kWh charge` : `${formatNumber(soc, 0)}% start`}
-          <span className="text-subtle"> · </span>
-          {minutesToHm(totals.driveMin)} drive
-          {totals.min - totals.driveMin >= 5 ? (
+          {headlineLive ? (
             <>
+              {formatNumber(totals.kwh, 1)} kWh drive
               <span className="text-subtle"> · </span>
-              {minutesToHm(totals.min)} total
+              {totals.chargeKwh > 0 ? `${formatNumber(totals.chargeKwh, 1)} kWh charge` : `${formatNumber(soc, 0)}% start`}
+              <span className="text-subtle"> · </span>
+              {minutesToHm(totals.driveMin)} drive
+              {totals.min - totals.driveMin >= 5 ? (
+                <>
+                  <span className="text-subtle"> · </span>
+                  {minutesToHm(totals.min)} total
+                </>
+              ) : null}
             </>
-          ) : null}
+          ) : headline.driveMin > 0 || headline.kr > 0 ? (
+            <>
+              {minutesToHm(headline.driveMin)} drive
+              {headline.charges > 0 ? ` · ${headline.charges} ${headline.charges === 1 ? "charge" : "charges"}` : ""}
+            </>
+          ) : stops.length >= 2 ? (
+            "—"
+          ) : (
+            "Add a destination"
+          )}
         </p>
         <p className="mt-3 text-2xl font-medium tabular-nums">
-          {formatKrValue(totals.kr, 2)} <span className="text-base text-muted">kr</span>
+          {formatKrValue(headline.kr, 2)} <span className="text-base text-muted">kr</span>
         </p>
         <p className="mt-1 text-xs text-subtle">
-          {totals.tollKr > 0
-            ? `Toll ${formatKrValue(totals.tollKr, 0)} kr${viewLegs.find((l) => l.tollLabel)?.tollLabel ? ` · ${[...new Set(viewLegs.map((l) => l.tollLabel).filter(Boolean))].join(" · ")}` : ""} · `
+          {headline.tollKr > 0
+            ? `Toll ${formatKrValue(headline.tollKr, 0)} kr${viewLegs.find((l) => l.tollLabel)?.tollLabel ? ` · ${[...new Set(viewLegs.map((l) => l.tollLabel).filter(Boolean))].join(" · ")}` : ""} · `
             : ""}
           {chargersLoading ? "Finding chargers along route · " : routeChargers.length ? `${routeChargers.length} chargers on corridor · ` : ""}
           {whenKind === "arrive" ? `Arrive ${formatDateTime(clock)}` : `Leave ${formatDateTime(departHhmm)}`}

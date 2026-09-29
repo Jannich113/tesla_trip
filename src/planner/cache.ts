@@ -9,6 +9,8 @@ const MAX_BYTES = 350_000;
 const namespaces = new Map<string, Map<string, Entry<unknown>>>();
 const loaded = new Set<string>();
 const writeTimers = new Map<string, ReturnType<typeof setTimeout>>();
+/** Disk stays closed until the plan shell has painted. */
+let diskOpen = false;
 
 function storeKey(ns: string) {
   return `juniper-cache:v${CACHE_VERSION}:${ns}`;
@@ -42,6 +44,25 @@ function trim(entries: Map<string, Entry<unknown>>, max: number) {
   }
 }
 
+function readDisk(ns: string, map: Map<string, Entry<unknown>>) {
+  if (loaded.has(ns)) return;
+  loaded.add(ns);
+  if (typeof localStorage === "undefined") return;
+  try {
+    const raw = localStorage.getItem(storeKey(ns));
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as Record<string, Entry<unknown>>;
+    const now = Date.now();
+    for (const [key, entry] of Object.entries(parsed)) {
+      if (map.has(key)) continue;
+      if (!entry || expired(entry, now)) continue;
+      map.set(key, entry);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 function loadNs(ns: string): Map<string, Entry<unknown>> {
   let map = namespaces.get(ns);
   if (!map) {
@@ -49,21 +70,16 @@ function loadNs(ns: string): Map<string, Entry<unknown>> {
     namespaces.set(ns, map);
   }
   if (loaded.has(ns)) return map;
-  loaded.add(ns);
-  if (typeof localStorage === "undefined") return map;
-  try {
-    const raw = localStorage.getItem(storeKey(ns));
-    if (!raw) return map;
-    const parsed = JSON.parse(raw) as Record<string, Entry<unknown>>;
-    const now = Date.now();
-    for (const [key, entry] of Object.entries(parsed)) {
-      if (!entry || expired(entry, now)) continue;
-      map.set(key, entry);
-    }
-  } catch {
-    /* ignore */
-  }
+  if (!diskOpen) return map;
+  readDisk(ns, map);
   return map;
+}
+
+/** Parse elpris / charger snapshots after the first paint, not during it. */
+export function cacheOpenDisk() {
+  if (diskOpen) return;
+  diskOpen = true;
+  for (const ns of ["elpris", "chargers"]) loadNs(ns);
 }
 
 function flushNs(ns: string) {
@@ -122,6 +138,7 @@ export function cacheInvalidate(ns: string, key?: string) {
     return;
   }
   map.clear();
+  loaded.add(ns);
   const t = writeTimers.get(ns);
   if (t) clearTimeout(t);
   writeTimers.delete(ns);
