@@ -1,142 +1,68 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { noStore, publicCache } from "@/lib/http-cache";
+import {
+  buildSpotDay,
+  copenhagenDate,
+  dkkPerEurFromNordPool,
+  nordPoolCurrency,
+  nordPoolDayUrl,
+  quartersFromDay,
+  type NordPoolDay,
+  type QuarterPrice,
+} from "@/lib/nordpool";
+import { isPriceArea, type PriceArea } from "@/lib/price-areas";
 
-type EdsRecord = {
-  TimeDK: string;
-  DayAheadPriceDKK: number | null;
-  PriceArea?: string;
+const NORDPOOL_HEADERS = {
+  Accept: "application/json",
+  "User-Agent": "tesla_trip",
 };
-
-export type HourPrice = {
-  hour: string;
-  timeDk: string;
-  krPerKwh: number;
-  orePerKwh: number;
-};
-
-export type PriceArea = "DK1" | "DK2";
-
-export type ElprisResponse = {
-  area: PriceArea;
-  source: "Energi Data Service";
-  updatedAt: string;
-  current: HourPrice | null;
-  today: HourPrice[];
-  tomorrow: HourPrice[];
-};
-
-function edsUrl(area: PriceArea) {
-  return (
-    "https://api.energidataservice.dk/dataset/DayAheadPrices" +
-    "?start=StartOfDay&end=StartOfDay%2BP2D" +
-    `&filter={"PriceArea":["${area}"]}&sort=TimeDK&limit=200`
-  );
-}
 
 function parseArea(raw: string | null): PriceArea {
-  return raw === "DK2" ? "DK2" : "DK1";
+  return isPriceArea(raw) ? raw : "DK1";
 }
 
-function pad2(n: number) {
-  return n.toString().padStart(2, "0");
+async function fetchDay(
+  area: PriceArea,
+  date: string,
+  currency: "DKK" | "EUR",
+): Promise<NordPoolDay> {
+  const res = await fetch(nordPoolDayUrl(area, date, currency), { headers: NORDPOOL_HEADERS });
+  if (res.status === 204) return { currency, multiAreaEntries: [] };
+  if (!res.ok) throw new Error(`Nord Pool returned ${res.status}`);
+  return (await res.json()) as NordPoolDay;
 }
 
-/** Calendar date + hour in Europe/Copenhagen from a TimeDK string like 2026-09-11T14:15:00 */
-function parseTimeDk(timeDk: string) {
-  const m = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})/.exec(timeDk);
-  if (!m) return null;
-  return { date: m[1], hour: m[2], minute: Number(m[3]) };
-}
-
-function dkNowParts(now = new Date()) {
-  const fmt = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Europe/Copenhagen",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-  const parts = Object.fromEntries(fmt.formatToParts(now).map((p) => [p.type, p.value]));
-  const hourRaw = parts.hour === "24" ? "00" : parts.hour;
-  return {
-    date: `${parts.year}-${parts.month}-${parts.day}`,
-    hour: pad2(Number(hourRaw)),
-  };
-}
-
-function nextDkDate(date: string) {
-  const [y, m, d] = date.split("-").map(Number);
-  // Noon UTC avoids DST edge cases when stepping calendar days in DK
-  const dt = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
-  dt.setUTCDate(dt.getUTCDate() + 1);
-  const fmt = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Europe/Copenhagen",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-  const parts = Object.fromEntries(fmt.formatToParts(dt).map((p) => [p.type, p.value]));
-  return `${parts.year}-${parts.month}-${parts.day}`;
-}
-
-function toHourPrices(records: EdsRecord[]): HourPrice[] {
-  type Bucket = { timeDk: string; hour: string; sum: number; count: number };
-  const buckets = new Map<string, Bucket>();
-
-  for (const rec of records) {
-    if (rec.DayAheadPriceDKK == null || !Number.isFinite(rec.DayAheadPriceDKK)) continue;
-    const parsed = parseTimeDk(rec.TimeDK);
-    if (!parsed) continue;
-    const key = `${parsed.date}T${parsed.hour}`;
-    const existing = buckets.get(key);
-    if (existing) {
-      existing.sum += rec.DayAheadPriceDKK;
-      existing.count += 1;
-    } else {
-      buckets.set(key, {
-        timeDk: `${parsed.date}T${parsed.hour}:00:00`,
-        hour: parsed.hour,
-        sum: rec.DayAheadPriceDKK,
-        count: 1,
-      });
-    }
+async function eurToDkk(today: string): Promise<number | null> {
+  try {
+    const fx = dkkPerEurFromNordPool(await fetchDay("DK1", today, "DKK"));
+    if (fx) return fx;
+  } catch {
+    /* Frankfurter below */
   }
-
-  return [...buckets.values()]
-    .sort((a, b) => a.timeDk.localeCompare(b.timeDk))
-    .map((b) => {
-      const krPerKwh = b.sum / b.count / 1000;
-      return {
-        hour: b.hour,
-        timeDk: b.timeDk,
-        krPerKwh,
-        orePerKwh: krPerKwh * 100,
-      };
+  try {
+    const res = await fetch("https://api.frankfurter.app/latest?from=EUR&to=DKK", {
+      headers: { Accept: "application/json" },
     });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { rates?: { DKK?: number } };
+    const rate = body.rates?.DKK;
+    return typeof rate === "number" && rate > 6 && rate < 9 ? rate : null;
+  } catch {
+    return null;
+  }
 }
 
-function buildPayload(records: EdsRecord[], area: PriceArea): ElprisResponse {
-  const hours = toHourPrices(records);
-  const { date: todayDate, hour: currentHour } = dkNowParts();
-  const tomorrowDate = nextDkDate(todayDate);
-
-  const today = hours.filter((h) => h.timeDk.startsWith(todayDate));
-  const tomorrow = hours.filter((h) => h.timeDk.startsWith(tomorrowDate));
-  const current =
-    today.find((h) => h.hour === currentHour) ??
-    hours.find((h) => h.timeDk.startsWith(`${todayDate}T${currentHour}`)) ??
-    null;
-
-  return {
-    area,
-    source: "Energi Data Service",
-    updatedAt: new Date().toISOString(),
-    current,
-    today,
-    tomorrow,
-  };
+async function dayQuarters(
+  area: PriceArea,
+  date: string,
+  dkkPerEur: number,
+): Promise<QuarterPrice[]> {
+  const currency = nordPoolCurrency(area);
+  const body = await fetchDay(area, date, currency);
+  if (currency === "EUR" && !(dkkPerEur > 1)) {
+    throw new Error("Missing EUR to DKK rate");
+  }
+  return quartersFromDay(body, area, dkkPerEur);
 }
 
 export const Route = createFileRoute("/api/elpris")({
@@ -146,20 +72,27 @@ export const Route = createFileRoute("/api/elpris")({
         try {
           const url = new URL(request.url);
           const area = parseArea(url.searchParams.get("area"));
-          const res = await fetch(edsUrl(area), {
-            headers: { Accept: "application/json" },
-          });
-          if (!res.ok) {
+          const today = copenhagenDate(0);
+          const tomorrow = copenhagenDate(1);
+          const dkkPerEur = nordPoolCurrency(area) === "EUR" ? await eurToDkk(today) : 1;
+          if (dkkPerEur == null) {
             return Response.json(
-              { error: `Energi Data Service returned ${res.status}` },
+              { error: "Nord Pool EUR prices need a DKK exchange rate" },
               { status: 502, headers: noStore },
             );
           }
-          const body = (await res.json()) as { records?: EdsRecord[] };
-          const records = Array.isArray(body.records) ? body.records : [];
-          return Response.json(buildPayload(records, area), {
-            headers: publicCache(120, 600),
-          });
+          const [todayQ, tomorrowQ] = await Promise.all([
+            dayQuarters(area, today, dkkPerEur),
+            dayQuarters(area, tomorrow, dkkPerEur).catch(() => [] as QuarterPrice[]),
+          ]);
+          const payload = buildSpotDay(area, todayQ, tomorrowQ);
+          if (payload.today.length === 0 && payload.tomorrow.length === 0) {
+            return Response.json(
+              { error: `Nord Pool returned no day-ahead prices for ${area}` },
+              { status: 502, headers: noStore },
+            );
+          }
+          return Response.json(payload, { headers: publicCache(120, 600) });
         } catch (err) {
           const message = err instanceof Error ? err.message : "Failed to fetch prices";
           return Response.json({ error: message }, { status: 502, headers: noStore });

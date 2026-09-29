@@ -1,11 +1,13 @@
 /**
  * Danish electricity retailers for Elpris.
  * Tillæg figures are approximate consumer quotes (~Sep 2026), often inkl. moms
- * on retailer sites. Nord Pool spot from EDS is ekskl. moms — we add tillæg as-is
+ * on retailer sites. Nord Pool spot is ekskl. moms — we add tillæg as-is
  * for relative comparison and label that this is not full forbrugerpris.
+ * Retailer tillæg only apply in DK1/DK2. Other zones use the spot row.
  */
+import { PRICE_AREA_IDS, type PriceArea } from "@/lib/price-areas";
 
-export type PriceArea = "DK1" | "DK2";
+export type { PriceArea };
 
 export type ElProvider = {
   id: string;
@@ -19,11 +21,6 @@ export type ElProvider = {
   note?: string;
 };
 
-export const PRICE_AREAS: { id: PriceArea; label: string; hint: string }[] = [
-  { id: "DK1", label: "DK1", hint: "Vest · Jylland & Fyn" },
-  { id: "DK2", label: "DK2", hint: "Øst · Sjælland & Bornholm" },
-];
-
 export const SPOT_ONLY_ID = "spot";
 
 export const EL_PROVIDERS: ElProvider[] = [
@@ -33,7 +30,7 @@ export const EL_PROVIDERS: ElProvider[] = [
     product: "Uden tillæg",
     tillægOre: 0,
     aboKr: 0,
-    areas: ["DK1", "DK2"],
+    areas: PRICE_AREA_IDS,
     note: "Ren day-ahead spot (ekskl. moms)",
   },
   {
@@ -159,7 +156,9 @@ export function providerById(id: string): ElProvider {
 }
 
 export function providersForArea(area: PriceArea): ElProvider[] {
-  return EL_PROVIDERS.filter((p) => p.areas.includes(area));
+  const list = EL_PROVIDERS.filter((p) => p.areas.includes(area));
+  if (list.length > 0) return list;
+  return EL_PROVIDERS.filter((p) => p.id === SPOT_ONLY_ID);
 }
 
 /** Apply retailer tillæg (øre → kr) onto spot kr/kWh. */
