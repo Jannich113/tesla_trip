@@ -164,7 +164,7 @@ function ocmToCharger(poi: OcmPoi): RouteCharger | null {
   return {
     id: `ocm-${poi.ID ?? poi.UUID ?? `${lat},${lng}`}`,
     name,
-    short: (poi.OperatorInfo?.Title || name).split(/[,(/]/)[0].trim().slice(0, 22),
+    short: (addr.Title || name).split(/[,(/]/)[0].trim().slice(0, 28),
     lat: lat as number,
     lng: lng as number,
     kind: networkId === "tesla" ? "supercharger" : "custom",

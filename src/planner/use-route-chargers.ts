@@ -52,7 +52,7 @@ export function useRouteChargers(routes: RoutedLeg[], radiusKm?: number) {
   }, [paths, radiusKm]);
 
   const local = useMemo(() => {
-    const km = Math.max(12, radiusKm ?? 0);
+    const km = Math.max(28, radiusKm ?? 0);
     const byId = new Map<string, ChargeLocation>();
     for (const path of paths) {
       for (const c of seedsAlongPath(path, km * 1000)) byId.set(c.id, asLocation(c));

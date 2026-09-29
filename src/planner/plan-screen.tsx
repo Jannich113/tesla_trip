@@ -863,7 +863,7 @@ export function PlanScreen() {
       }
       // Eco/Fastest price from stable corridors only — Cheapest avoid must not change their stall pool.
       const locPool = mode === "cheapest" ? locations : stableLocations;
-      const cacheKey = `${mode}|${corridorStamp}|${soc}|${locPool.length}|${hours.length}|${avoid.motorways}|${avoid.tolls}|${avoid.roadFees}|${planArgs.detours.join(",")}|${planArgs.preferredNetwork ?? ""}|stalls2`;
+      const cacheKey = `${mode}|${corridorStamp}|${soc}|${locPool.length}|${hours.length}|${avoid.motorways}|${avoid.tolls}|${avoid.roadFees}|${planArgs.detours.join(",")}|${planArgs.preferredNetwork ?? ""}|stalls3`;
       const cached = pricedMemo.current.get(cacheKey);
       if (cached) return { mode, avoid, priced: cached };
       const priced = pricePlan({
@@ -875,7 +875,7 @@ export function PlanScreen() {
         locations: locationsForRoutes(
           locPool,
           optionRoutes,
-          mode === "fastest" && planArgs.preferredNetwork ? 45_000 : 22_000,
+          mode === "fastest" ? 40_000 : 22_000,
           mode === "cheapest" ? planArgs.preferredNetwork : null,
         ),
         avoid,

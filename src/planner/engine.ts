@@ -935,7 +935,7 @@ export function pricePlan(opts: {
         usedVias.add(viaLoc.id);
         const viaStop: PlanStop = {
           id: `via-${viaLoc.id}`,
-          name: viaLoc.short || viaLoc.name || viaLoc.id,
+          name: viaLoc.name && viaLoc.name.length > (viaLoc.short?.length ?? 0) ? viaLoc.name : viaLoc.short || viaLoc.name || viaLoc.id,
           lat: viaLoc.lat,
           lng: viaLoc.lng,
         };
@@ -1053,6 +1053,56 @@ export function pricePlan(opts: {
       Boolean(userTarget != null) ||
       (suggested && Boolean(opts.acceptCharge?.[userIndex]));
     const billed = accepted && charge !== null;
+    // A stall that isn't this stop has to be a via. Otherwise the price sits on the city and the route never visits a charger.
+    if (billed && charge && !atViaFrom && job.depth < 8) {
+      const stall = locations.find((l) => l.id === charge.locationId);
+      if (stall && stall.kind !== "home" && !usedVias.has(stall.id)) {
+        const fromM = haversineM(job.from, stall);
+        const toM = haversineM(job.to, stall);
+        if (fromM > 2_500 && toM > 2_500) {
+          const split = splitRoutedLeg(route, stall.lat, stall.lng);
+          if (
+            split &&
+            split.before.miles > 0.4 &&
+            split.after.miles > 0.4 &&
+            split.before.path.length >= 2 &&
+            split.after.path.length >= 2
+          ) {
+            usedVias.add(stall.id);
+            const viaStop: PlanStop = {
+              id: `via-${stall.id}`,
+              name:
+                stall.name && stall.name.length > stall.short.length ? stall.name : stall.short || stall.name,
+              lat: stall.lat,
+              lng: stall.lng,
+            };
+            jobs.unshift({
+              from: viaStop,
+              to: job.to,
+              mode,
+              focus,
+              detourKm: job.detourKm,
+              route: split.after,
+              userIndex,
+              via: job.via,
+              depth: job.depth + 1,
+            });
+            jobs.unshift({
+              from: job.from,
+              to: viaStop,
+              mode,
+              focus,
+              detourKm: job.detourKm,
+              route: split.before,
+              userIndex,
+              via: true,
+              depth: job.depth + 1,
+            });
+            continue;
+          }
+        }
+      }
+    }
     const chargeMin = billed && charge ? (charge.kwh / stallKw(charge.kind, acKw)) * 60 : 0;
     const rawWait = billed && charge && charge.cheapWindow ? charge.waitMin : 0;
     const windowStart = addMinutesDateTime(readyAt, rawWait);
