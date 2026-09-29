@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ChevronDown, RotateCw } from "lucide-react";
 import {
-  PRICE_AREAS,
   applyTillægToHours,
   providerById,
   providersForArea,
@@ -9,6 +8,7 @@ import {
   type ElProvider,
   type PriceArea,
 } from "@/lib/el-providers";
+import { isPriceArea, isPriceCountry, PRICE_COUNTRIES } from "@/lib/price-areas";
 import {
   type ElprisData,
   type HourPrice,
@@ -68,15 +68,11 @@ function HourList({
     return { min: lo, max: hi };
   }, [hours]);
 
-  const pastHours =
-    dimPast && currentHour != null ? hours.filter((h) => h.hour < currentHour) : [];
-  const rest =
-    dimPast && currentHour != null ? hours.filter((h) => h.hour >= currentHour) : hours;
+  const pastHours = dimPast && currentHour != null ? hours.filter((h) => h.hour < currentHour) : [];
+  const rest = dimPast && currentHour != null ? hours.filter((h) => h.hour >= currentHour) : hours;
 
   if (hours.length === 0) {
-    return (
-      <p className="px-1 py-3 text-sm text-muted">{emptyNote ?? "Ingen priser endnu"}</p>
-    );
+    return <p className="px-1 py-3 text-sm text-muted">{emptyNote ?? "Ingen priser endnu"}</p>;
   }
 
   function rows(list: HourPrice[], past: boolean) {
@@ -150,7 +146,6 @@ function HourList({
   );
 }
 
-
 function SelectField({
   label,
   value,
@@ -183,8 +178,10 @@ function SelectField({
 }
 
 export function ElprisScreen() {
+  const country = useElprisStore((s) => s.country);
   const area = useElprisStore((s) => s.area);
   const providerId = useElprisStore((s) => s.providerId);
+  const setCountry = useElprisStore((s) => s.setCountry);
   const setArea = useElprisStore((s) => s.setArea);
   const setProviderId = useElprisStore((s) => s.setProviderId);
 
@@ -246,11 +243,16 @@ export function ElprisScreen() {
   }, [raw, provider.tillægOre]);
 
   const current = data?.current ?? null;
-  const areaMeta = PRICE_AREAS.find((a) => a.id === area);
+  const countryMeta = PRICE_COUNTRIES.find((c) => c.id === country);
+  const regionOptions = countryMeta?.areas ?? PRICE_COUNTRIES[0].areas;
+  const areaMeta = regionOptions.find((a) => a.id === area);
+
+  function onCountryChange(next: string) {
+    if (isPriceCountry(next)) setCountry(next);
+  }
 
   function onAreaChange(next: string) {
-    const a = next === "DK2" ? "DK2" : "DK1";
-    setArea(a);
+    if (isPriceArea(next)) setArea(next);
   }
 
   function onProviderChange(id: string) {
@@ -263,7 +265,7 @@ export function ElprisScreen() {
         <div>
           <p className="text-xs font-medium uppercase tracking-wide text-muted">Elpris</p>
           <p className="mt-1 text-xs text-subtle">
-            {areaMeta?.hint ?? area} · Energi Data Service
+            {countryMeta?.name ?? country} · {areaMeta?.hint ?? area} · Nord Pool
           </p>
         </div>
         <button
@@ -279,13 +281,22 @@ export function ElprisScreen() {
 
       <section className="mb-4 rounded-xl bg-surface p-3 shadow-[var(--shadow-border)]">
         <div className="flex gap-2">
+          <SelectField label="Land" value={country} onChange={onCountryChange}>
+            {PRICE_COUNTRIES.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </SelectField>
           <SelectField label="Område" value={area} onChange={onAreaChange}>
-            {PRICE_AREAS.map((a) => (
+            {regionOptions.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.id} — {a.hint}
               </option>
             ))}
           </SelectField>
+        </div>
+        <div className="mt-2">
           <SelectField label="Elselskab" value={provider.id} onChange={onProviderChange}>
             {providerOptions.map((p: ElProvider) => (
               <option key={p.id} value={p.id}>
@@ -306,11 +317,8 @@ export function ElprisScreen() {
           {provider.tillægOre > 0
             ? ` · ca. ${provider.tillægOre.toLocaleString("da-DK")} øre/kWh tillæg`
             : " · uden spottillæg"}
-          {provider.aboKr > 0
-            ? ` · abo. ca. ${provider.aboKr.toLocaleString("da-DK")} kr/md`
-            : ""}
-          {provider.note ? ` · ${provider.note}` : ""}
-          . Tillæg er vejledende.
+          {provider.aboKr > 0 ? ` · abo. ca. ${provider.aboKr.toLocaleString("da-DK")} kr/md` : ""}
+          {provider.note ? ` · ${provider.note}` : ""}. Tillæg er vejledende.
         </p>
       </section>
 
@@ -386,8 +394,7 @@ export function ElprisScreen() {
 
           <p className="mt-4 px-1 text-[11px] leading-relaxed text-subtle">
             Spot (ekskl. moms) for {data?.area ?? area} + vejledende spottillæg. Ikke fuld
-            forbrugerpris — mangler moms, nettarif, Energinet og elafgift. Spot via Energi Data
-            Service. Opdateret{" "}
+            forbrugerpris. Spot via Nord Pool day-ahead. Opdateret{" "}
             {data?.updatedAt
               ? new Date(data.updatedAt).toLocaleTimeString("da-DK", {
                   hour: "2-digit",

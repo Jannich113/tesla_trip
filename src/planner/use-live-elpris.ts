@@ -2,11 +2,16 @@ import { useCallback, useEffect, useState } from "react";
 import { cacheGet, cacheSet, elprisTtlMs } from "./cache";
 import { type PriceArea } from "@/lib/el-providers";
 import { type ElprisData, fetchElpris } from "@/lib/elpris";
+import { areaForPlanner } from "@/lib/price-areas";
+import { usePlanStore } from "./store";
 
 const POLL_MS = 60_000;
 
 export function useLiveElpris(area: PriceArea) {
-  const cached = cacheGet<ElprisData>("elpris", area, { stale: true });
+  const stops = usePlanStore((s) => s.stops);
+  // Selected zone only when the route is in that country. See areaForPlanner.
+  const resolved = areaForPlanner(area, stops);
+  const cached = cacheGet<ElprisData>("elpris", resolved, { stale: true });
   const [data, setData] = useState<ElprisData | null>(cached ?? null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(!cached);
@@ -14,7 +19,7 @@ export function useLiveElpris(area: PriceArea) {
 
   const load = useCallback(
     async (isRefresh = false) => {
-      const hit = cacheGet<ElprisData>("elpris", area, { stale: true });
+      const hit = cacheGet<ElprisData>("elpris", resolved, { stale: true });
       if (hit && !isRefresh) {
         setData(hit);
         setLoading(false);
@@ -24,10 +29,10 @@ export function useLiveElpris(area: PriceArea) {
         else if (!hit) setLoading(true);
       }
       try {
-        const next = await fetchElpris(area);
+        const next = await fetchElpris(resolved);
         setData(next);
         setError(null);
-        cacheSet("elpris", area, next, elprisTtlMs(), 6);
+        cacheSet("elpris", resolved, next, elprisTtlMs(), 6);
       } catch (err) {
         if (!hit) setError(err instanceof Error ? err.message : "Kunne ikke hente elpris");
       } finally {
@@ -35,7 +40,7 @@ export function useLiveElpris(area: PriceArea) {
         setRefreshing(false);
       }
     },
-    [area],
+    [resolved],
   );
 
   useEffect(() => {
