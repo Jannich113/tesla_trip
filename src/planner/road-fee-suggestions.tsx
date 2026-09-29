@@ -7,8 +7,8 @@ type RoadFeeSuggestionsProps = {
 };
 
 /**
- * Suggestion list for the trip overview. Plan screen can render this later.
- * Links leave the app. Nothing here pays a toll or starts parking.
+ * Suggestion list on the trip overview. Links leave the app.
+ * Nothing here pays a toll or starts parking.
  */
 export function RoadFeeSuggestions({ path, className }: RoadFeeSuggestionsProps) {
   const apps = suggestRoadFeeApps(path);
