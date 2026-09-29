@@ -80,3 +80,42 @@ export function avoidableFeeKr(
   if (a.roadFees) return t.roadKr;
   return 0;
 }
+
+function distToSegmentM(lat: number, lng: number, a: [number, number], b: [number, number]) {
+  const lat0 = ((a[0] + b[0]) * 0.5 * Math.PI) / 180;
+  const mLat = 111_320;
+  const mLng = Math.cos(lat0) * mLat;
+  const px = lng * mLng;
+  const py = lat * mLat;
+  const ax = a[1] * mLng;
+  const ay = a[0] * mLat;
+  const bx = b[1] * mLng;
+  const by = b[0] * mLat;
+  const dx = bx - ax;
+  const dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2));
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+
+/** Meters from a point to the closest vertex or segment of the path. */
+export function distToPathM(lat: number, lng: number, path: [number, number][]) {
+  if (path.length === 0) return Infinity;
+  let best = Infinity;
+  for (let i = 0; i < path.length; i++) {
+    const dLat = path[i][0] - lat;
+    const dLng = (path[i][1] - lng) * Math.cos(((path[i][0] + lat) * 0.5 * Math.PI) / 180);
+    best = Math.min(best, Math.hypot(dLat, dLng) * 111_320);
+    if (i < path.length - 1) best = Math.min(best, distToSegmentM(lat, lng, path[i], path[i + 1]));
+  }
+  return best;
+}
+
+/**
+ * Toll corridors the geometry actually enters. Country and city apps use
+ * their own triggers; this is only the bridge/tunnel gates.
+ */
+export function tollRegionIdsOnPath(path: [number, number][], maxM = 4000) {
+  if (path.length === 0) return [];
+  return TOLL_GATES.filter((g) => distToPathM(g.lat, g.lng, path) <= maxM).map((g) => g.id);
+}
