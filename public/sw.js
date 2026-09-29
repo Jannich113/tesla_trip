@@ -70,7 +70,7 @@ function isStatic(url) {
 }
 
 function isTile(url) {
-  return url.hostname === "tile.openstreetmap.org";
+  return url.hostname === "tile.openstreetmap.org" || url.hostname.endsWith("basemaps.cartocdn.com");
 }
 
 async function trim(cache, max) {

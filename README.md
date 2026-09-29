@@ -160,6 +160,7 @@ npm run build
 | Edge cases | Zero length, the date line, a route too short to split, 25% battery, and empty number fields |
 | Keeps a Tesla on the whole route | Same check for Svendborg–Barcelona, Oslo–Rome, Amsterdam–Madrid, Hamburg–Budapest, and Copenhagen–Milan |
 | Service worker cache is versioned | A page load that waits forever on the network |
+| Leaflet map loads without an idle wait | The map chunk, CARTO tiles, and preconnect start immediately instead of after two 600 ms idle delays |
 
 ---
 

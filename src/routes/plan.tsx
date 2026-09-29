@@ -3,9 +3,10 @@ import { Link, createFileRoute } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
 import { Toaster } from "sonner";
 
-const PlanScreen = lazy(() =>
-  import("@/planner/plan-screen").then((m) => ({ default: m.PlanScreen })),
-);
+const planReady = import("@/planner/plan-screen").then((m) => ({ default: m.PlanScreen }));
+void import("@/components/bay-map");
+
+const PlanScreen = lazy(() => planReady);
 
 export const Route = createFileRoute("/plan")({ component: PlanPage });
 

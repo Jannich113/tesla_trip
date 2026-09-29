@@ -132,6 +132,17 @@ function scheduleIdle(cb: () => void, timeout = 500): () => void {
   return () => window.clearTimeout(t);
 }
 
+let leafletPromise: Promise<Leaflet> | null = null;
+
+/** Start the Leaflet download as soon as this module is imported. */
+export function loadLeaflet(): Promise<Leaflet> {
+  leafletPromise ??= import("leaflet").then((mod) => {
+    const wrapped = mod as unknown as { default?: Leaflet } & Leaflet;
+    return (wrapped.default ?? wrapped) as Leaflet;
+  });
+  return leafletPromise;
+}
+
 function BayMapImpl({
   markers,
   routes = [],
@@ -183,59 +194,53 @@ function BayMapImpl({
     const el = hostRef.current;
     if (!el) return;
     let cancelled = false;
-    let cancelMount: (() => void) | undefined;
+    let raf = 0;
 
-    // Defer Leaflet import + map construction until the main thread is idle so
-    // shell / stop taps stay responsive on first paint.
-    const cancelLoad = scheduleIdle(() => {
-      void (async () => {
-        const leaflet = await import("leaflet");
+    // Download starts with the module. Build the map on the next frame so the
+    // shell can paint, without the old idle gap of more than a second.
+    void loadLeaflet().then((L) => {
+      if (cancelled || !hostRef.current) return;
+      raf = requestAnimationFrame(() => {
         if (cancelled || !hostRef.current) return;
-        const mod = leaflet as unknown as { default?: Leaflet } & Leaflet;
-        const L = (mod.default ?? mod) as Leaflet;
-        // Yield again before L.map() — import eval and map ctor are both heavy.
-        cancelMount = scheduleIdle(() => {
-          if (cancelled || !hostRef.current) return;
-          LRef.current = L;
-          const canvas = L.canvas({ padding: 0.12, tolerance: 12 });
-          canvasRef.current = canvas;
-          const map = L.map(hostRef.current, {
-            zoomControl: false,
-            attributionControl: true,
-            scrollWheelZoom: interactive,
-            dragging: interactive,
-            doubleClickZoom: interactive,
-            boxZoom: false,
-            keyboard: false,
-            touchZoom: interactive,
-            fadeAnimation: false,
-            zoomAnimation: false,
-            markerZoomAnimation: false,
-            inertia: false,
-            preferCanvas: true,
-            renderer: canvas,
-          });
-          L.control.zoom({ position: "bottomright" }).addTo(map);
-          L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-            maxZoom: 18,
-            updateWhenIdle: true,
-            updateWhenZooming: false,
-            keepBuffer: 0,
-            attribution:
-              '&copy; <a href="https://www.openstreetmap.org/copyright" rel="noreferrer" target="_blank">OpenStreetMap</a>',
-          }).addTo(map);
-          map.attributionControl?.setPosition("bottomleft");
-          map.setView([37.45, -122.15], 10);
-          mapRef.current = map;
-          if (!cancelled) setReady(true);
-        }, 600);
-      })();
-    }, 600);
+        LRef.current = L;
+        const canvas = L.canvas({ padding: 0.12, tolerance: 12 });
+        canvasRef.current = canvas;
+        const map = L.map(hostRef.current, {
+          zoomControl: false,
+          attributionControl: true,
+          scrollWheelZoom: interactive,
+          dragging: interactive,
+          doubleClickZoom: interactive,
+          boxZoom: false,
+          keyboard: false,
+          touchZoom: interactive,
+          fadeAnimation: false,
+          zoomAnimation: false,
+          markerZoomAnimation: false,
+          inertia: false,
+          preferCanvas: true,
+          renderer: canvas,
+        });
+        L.control.zoom({ position: "bottomright" }).addTo(map);
+        L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
+          subdomains: "abcd",
+          maxZoom: 19,
+          updateWhenIdle: true,
+          updateWhenZooming: false,
+          keepBuffer: 0,
+          attribution:
+            '&copy; <a href="https://www.openstreetmap.org/copyright" rel="noreferrer" target="_blank">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions" rel="noreferrer" target="_blank">CARTO</a>',
+        }).addTo(map);
+        map.attributionControl?.setPosition("bottomleft");
+        map.setView([37.45, -122.15], 10);
+        mapRef.current = map;
+        if (!cancelled) setReady(true);
+      });
+    });
 
     return () => {
       cancelled = true;
-      cancelLoad();
-      cancelMount?.();
+      if (raf) cancelAnimationFrame(raf);
       setReady(false);
       routes.forEach((l) => l.remove());
       dots.forEach((l) => l.remove());
@@ -419,7 +424,7 @@ function BayMapImpl({
         fitKeyRef.current = focusKey;
         map.setView(fitPts[0], 12, { animate: false });
       }
-    }, 400);
+    }, 80);
 
     return () => cancelDraw();
   }, [ready, hidden, interactive, markers, routes, selectedId, selectedIds, dropping]);

@@ -1515,7 +1515,7 @@ export function PlanScreen() {
     // during the same turn as shell / stop taps.
     const apply = () => setIdleMap({ routes: mapRoutes, markers: mapMarkers });
     if (typeof requestIdleCallback === "function") {
-      const id = requestIdleCallback(apply, { timeout: 400 });
+      const id = requestIdleCallback(apply, { timeout: 80 });
       return () => cancelIdleCallback(id);
     }
     const t = window.setTimeout(apply, 160);

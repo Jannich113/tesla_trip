@@ -30,6 +30,8 @@ export const Route = createRootRoute({
         href: "https://fonts.googleapis.com/css2?family=Outfit:wght@400;600&display=optional",
       },
       { rel: "stylesheet", href: appCss },
+      { rel: "preconnect", href: "https://a.basemaps.cartocdn.com", crossOrigin: "anonymous" },
+      { rel: "preconnect", href: "https://b.basemaps.cartocdn.com", crossOrigin: "anonymous" },
       { rel: "manifest", href: "/__grok/manifest.webmanifest" },
       { rel: "apple-touch-icon", href: "/__grok/icon-180.png" },
     ],

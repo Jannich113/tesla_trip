@@ -83,6 +83,18 @@ export function Dashboard({ startTab = "home" }: { startTab?: Tab }) {
   }, []);
 
   useEffect(() => {
+    const warm = () => {
+      void import("@/components/bay-map");
+    };
+    if (typeof requestIdleCallback === "function") {
+      const id = requestIdleCallback(warm, { timeout: 800 });
+      return () => cancelIdleCallback(id);
+    }
+    const t = window.setTimeout(warm, 200);
+    return () => window.clearTimeout(t);
+  }, []);
+
+  useEffect(() => {
     void Promise.resolve(useVehicleStore.persist.rehydrate()).catch(() => {});
     void Promise.resolve(useChargeStore.persist.rehydrate()).catch(() => {});
     void Promise.resolve(useTripStore.persist.rehydrate()).catch(() => {});
