@@ -83,17 +83,43 @@ function safeStorage(): {
   let pending: { name: string; value: string } | null = null;
   const write = (name: string, value: string) => {
     if (typeof localStorage === "undefined") return;
+    let payload = value;
     try {
-      localStorage.setItem(name, value);
+      const parsed = JSON.parse(value) as { state?: PlanState; version?: number };
+      if (parsed.state && deferRoutes && emptyRoutes(parsed.state.routeCache)) {
+        const prev = localStorage.getItem(name);
+        if (prev) {
+          const old = JSON.parse(prev) as { state?: PlanState };
+          const kept = old.state?.routeCache;
+          if (kept && Object.keys(kept).length) {
+            parsed.state.routeCache = kept;
+            if (Array.isArray(parsed.state.saved) && Array.isArray(old.state?.saved)) {
+              const byId = new Map(old.state.saved.map((plan) => [plan.id, plan.routes]));
+              parsed.state.saved = parsed.state.saved.map((plan) =>
+                plan.routes ? plan : { ...plan, routes: byId.get(plan.id) },
+              );
+            }
+            payload = JSON.stringify(parsed);
+          }
+        }
+      }
+      if (parsed.state) {
+        localStorage.setItem(SHELL_KEY, JSON.stringify({ v: 3, state: toShell(parsed.state) }));
+      }
+    } catch {
+      /* shell is best-effort; the draft write below still runs */
+    }
+    try {
+      localStorage.setItem(name, payload);
     } catch {
       try {
         for (const k of Object.keys(localStorage)) {
           if (k.startsWith("juniper-cache:")) localStorage.removeItem(k);
         }
-        localStorage.setItem(name, value);
+        localStorage.setItem(name, payload);
       } catch {
         try {
-          const parsed = JSON.parse(value) as { state?: { saved?: unknown[]; routeCache?: unknown } };
+          const parsed = JSON.parse(payload) as { state?: { saved?: unknown[]; routeCache?: unknown } };
           if (parsed.state) {
             parsed.state.saved = [];
             parsed.state.routeCache = {};
@@ -142,6 +168,181 @@ function safeStorage(): {
 function lonelyHome(stops?: PlanStop[] | null) {
   return !!stops && stops.length === 1 && (stops[0].id === "home" || stops[0].name === "Home");
 }
+
+const SHELL_KEY = "juniper-planner-shell";
+const DRAFT_KEY = "juniper-planner-draft";
+
+/** Route geometry stays off the first paint. Preserves corridors if a shell write lands first. */
+let deferRoutes = true;
+let shellApplied = false;
+let appliedStopIds = "";
+let routeStash: Record<string, RoutedLeg> | undefined;
+let savedRouteStash: Map<string, Record<string, RoutedLeg> | undefined> | undefined;
+
+function emptyRoutes(routes?: Record<string, RoutedLeg> | null) {
+  return !routes || !Object.keys(routes).length;
+}
+
+function withoutLonelyHome<T extends Partial<PlanState>>(s: T): T {
+  if (!lonelyHome(s.stops)) return s;
+  return {
+    ...s,
+    stops: [] as PlanStop[],
+    modes: [] as LegMode[],
+    detours: [] as number[],
+    waits: [] as number[],
+    legWhen: [] as LegWhen[],
+    lastOptions: null,
+    routeCache: {},
+    name: !s.name || s.name === "Home" ? "" : s.name,
+  };
+}
+
+function migrateDraft(persisted: Partial<PlanState> & { cheapAvoidFees?: boolean }, version: number) {
+  const p = persisted;
+  if (version < 2) {
+    const old = Boolean(p.cheapAvoidFees);
+    p.cheapAvoidMotorways = p.cheapAvoidMotorways ?? old;
+    p.cheapAvoidTolls = p.cheapAvoidTolls ?? old;
+    p.cheapAvoidRoadFees = p.cheapAvoidRoadFees ?? old;
+  }
+  if (version < 3 && lonelyHome(p.stops)) {
+    p.stops = [];
+    p.modes = [];
+    p.detours = [];
+    p.waits = [];
+    p.legWhen = [];
+    p.lastOptions = null;
+    p.routeCache = {};
+    if (!p.name || p.name === "Home") p.name = "";
+  }
+  return withoutLonelyHome(p);
+}
+
+function toShell(s: Partial<PlanState>): Partial<PlanState> {
+  const cleaned = withoutLonelyHome(s);
+  const saved = Array.isArray(cleaned.saved)
+    ? cleaned.saved.slice(-8).map((plan) => {
+        const { routes: _routes, ...rest } = plan;
+        return rest;
+      })
+    : [];
+  return {
+    name: cleaned.name ?? "",
+    stops: Array.isArray(cleaned.stops) ? cleaned.stops : [],
+    modes: cleaned.modes ?? [],
+    cheapAvoidMotorways: Boolean(cleaned.cheapAvoidMotorways),
+    cheapAvoidTolls: Boolean(cleaned.cheapAvoidTolls),
+    cheapAvoidRoadFees: Boolean(cleaned.cheapAvoidRoadFees),
+    detours: cleaned.detours ?? [],
+    waits: cleaned.waits ?? [],
+    whenKind: cleaned.whenKind ?? "depart",
+    when: cleaned.when ?? "",
+    legWhen: cleaned.legWhen ?? [],
+    whPerMi: cleaned.whPerMi ?? null,
+    speedEff: cleaned.speedEff ?? null,
+    networkAbo: cleaned.networkAbo ?? { tesla: true },
+    preferredNetwork:
+      typeof cleaned.preferredNetwork === "string" || cleaned.preferredNetwork === null
+        ? cleaned.preferredNetwork
+        : null,
+    lastOptions: cleaned.lastOptions ?? null,
+    saved,
+    seq: cleaned.seq ?? 0,
+  };
+}
+
+function rememberRoutes(s: Partial<PlanState> | undefined) {
+  if (!s) return;
+  if (!routeStash && s.routeCache && Object.keys(s.routeCache).length) routeStash = s.routeCache;
+  if (!savedRouteStash && Array.isArray(s.saved)) {
+    savedRouteStash = new Map(s.saved.map((plan) => [plan.id, plan.routes]));
+  }
+}
+
+function readFullDraft(): Partial<PlanState> | null {
+  if (typeof localStorage === "undefined") return null;
+  const raw = localStorage.getItem(DRAFT_KEY);
+  if (!raw) return null;
+  const parsed = JSON.parse(raw) as { state?: Partial<PlanState> & { cheapAvoidFees?: boolean }; version?: number };
+  const version = typeof parsed.version === "number" ? parsed.version : 0;
+  const state = parsed.state ?? (parsed as Partial<PlanState> & { cheapAvoidFees?: boolean });
+  if (!state || typeof state !== "object" || Array.isArray(state)) return null;
+  return migrateDraft(state, version);
+}
+
+function loadShell(): Partial<PlanState> | null {
+  if (typeof localStorage === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(SHELL_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as { v?: number; state?: Partial<PlanState> };
+      if (parsed?.v === 3 && parsed.state && typeof parsed.state === "object") {
+        return toShell(parsed.state);
+      }
+    }
+  } catch {
+    /* fall through to the full draft */
+  }
+  try {
+    const full = readFullDraft();
+    if (!full) return null;
+    rememberRoutes(full);
+    const shell = toShell(full);
+    try {
+      localStorage.setItem(SHELL_KEY, JSON.stringify({ v: 3, state: shell }));
+    } catch {
+      /* ignore */
+    }
+    return shell;
+  } catch {
+    return null;
+  }
+}
+
+/** Stops, modes, avoid toggles, and last option snapshots. No route geometry. */
+export function applyDraftShell() {
+  if (shellApplied || typeof window === "undefined") return;
+  shellApplied = true;
+  const shell = loadShell();
+  if (!shell) return;
+  appliedStopIds = (shell.stops ?? []).map((s) => s.id).join("|");
+  const cur = usePlanStore.getState();
+  usePlanStore.setState({ ...shell, routeCache: cur.routeCache });
+}
+
+/** Slim and prime stored corridors after the shell has painted. */
+export function paintDraftRoutes() {
+  if (!deferRoutes || typeof window === "undefined") return;
+  deferRoutes = false;
+  if (!routeStash && !savedRouteStash) {
+    try {
+      rememberRoutes(readFullDraft() ?? undefined);
+    } catch {
+      /* ignore */
+    }
+  }
+  const slim = slimRoutes(routeStash) ?? {};
+  routeStash = undefined;
+  primeRouteCache(slim);
+  const cur = usePlanStore.getState();
+  const saved = cur.saved.map((plan) => {
+    const raw = savedRouteStash?.get(plan.id);
+    if (!raw) return plan;
+    const routes = slimRoutes(raw);
+    if (routes) primeRouteCache(routes);
+    return { ...plan, routes };
+  });
+  savedRouteStash = undefined;
+  const curIds = cur.stops.map((s) => s.id).join("|");
+  const fromSaved = saved.find((plan) => plan.stops.map((s) => s.id).join("|") === curIds)?.routes;
+  const routeCache =
+    curIds === appliedStopIds
+      ? { ...slim, ...(fromSaved ?? {}), ...cur.routeCache }
+      : { ...(fromSaved ?? {}), ...cur.routeCache };
+  usePlanStore.setState({ routeCache, saved });
+}
+
 
 function uid(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
@@ -201,42 +402,6 @@ type PlanStore = PlanState & {
   reset: () => void;
 };
 
-function readDraft(): Partial<PlanState> {
-  if (typeof window === "undefined") return {};
-  try {
-    const raw = localStorage.getItem("juniper-planner-draft");
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as { state?: PlanState };
-    const s = parsed.state ?? (parsed as PlanState);
-    if (!s || typeof s !== "object") return {};
-    const routeCache = slimRoutes(s.routeCache) ?? {};
-    primeRouteCache(routeCache);
-    return {
-      name: s.name,
-      stops: Array.isArray(s.stops) && s.stops.length && !lonelyHome(s.stops) ? s.stops : undefined,
-      modes: s.modes,
-      cheapAvoidMotorways: s.cheapAvoidMotorways,
-      cheapAvoidTolls: s.cheapAvoidTolls,
-      cheapAvoidRoadFees: s.cheapAvoidRoadFees,
-      detours: s.detours,
-      waits: s.waits,
-      whenKind: s.whenKind,
-      when: s.when,
-      legWhen: s.legWhen,
-      whPerMi: s.whPerMi,
-      speedEff: s.speedEff,
-      networkAbo: s.networkAbo,
-      preferredNetwork: typeof s.preferredNetwork === "string" || s.preferredNetwork === null ? s.preferredNetwork : undefined,
-      routeCache,
-      lastOptions: s.lastOptions ?? null,
-      saved: s.saved,
-      seq: s.seq,
-    };
-  } catch {
-    return {};
-  }
-}
-
 const empty = (): PlanState => ({
   name: "",
   stops: [],
@@ -259,10 +424,7 @@ const empty = (): PlanState => ({
   seq: 0,
 });
 
-const boot = (): PlanState => {
-  const seed = readDraft();
-  return { ...empty(), ...seed, stops: seed.stops?.length ? seed.stops : empty().stops };
-};
+const boot = (): PlanState => empty();
 
 export const usePlanStore = create<PlanStore>()(
   persist(
@@ -483,6 +645,9 @@ export const usePlanStore = create<PlanStore>()(
       reset: () => {
         const saved = get().saved;
         const seq = get().seq;
+        deferRoutes = false;
+        routeStash = undefined;
+        savedRouteStash = undefined;
         cacheInvalidate("chargers");
         set({ ...empty(), saved, seq });
       },
@@ -492,26 +657,7 @@ export const usePlanStore = create<PlanStore>()(
       version: 3,
       storage: createJSONStorage(() => safeStorage()),
       skipHydration: true,
-      migrate: (persisted, version) => {
-        const p = persisted as SavedPlan & PlanState & { cheapAvoidFees?: boolean };
-        if (version < 2) {
-          const old = Boolean(p.cheapAvoidFees);
-          p.cheapAvoidMotorways = p.cheapAvoidMotorways ?? old;
-          p.cheapAvoidTolls = p.cheapAvoidTolls ?? old;
-          p.cheapAvoidRoadFees = p.cheapAvoidRoadFees ?? old;
-        }
-        if (version < 3 && lonelyHome(p.stops)) {
-          p.stops = [];
-          p.modes = [];
-          p.detours = [];
-          p.waits = [];
-          p.legWhen = [];
-          p.lastOptions = null;
-          p.routeCache = {};
-          if (!p.name || p.name === "Home") p.name = "";
-        }
-        return p;
-      },
+      migrate: (persisted, version) => migrateDraft(persisted as PlanState & { cheapAvoidFees?: boolean }, version),
       partialize: (s) => ({
         name: s.name,
         stops: s.stops,
@@ -561,6 +707,3 @@ export const usePlanStore = create<PlanStore>()(
   ),
 );
 
-if (typeof window !== "undefined") {
-  void usePlanStore.persist.rehydrate();
-}
