@@ -26,6 +26,7 @@ type Leaflet = typeof import("leaflet");
 type Polyline = import("leaflet").Polyline;
 type CircleMarker = import("leaflet").CircleMarker;
 type Circle = import("leaflet").Circle;
+type Marker = import("leaflet").Marker;
 
 function arc(a: [number, number], b: [number, number], steps = 10): [number, number][] {
   const mx = (a[0] + b[0]) / 2;
@@ -70,7 +71,10 @@ function overlayKey(
 ) {
   const sel = `${selectedId ?? ""}:${(selectedIds ?? []).join(",")}`;
   const m = markers
-    .map((x) => `${x.id}:${x.lat.toFixed(3)},${x.lng.toFixed(3)}:${x.badge ?? ""}:${x.kind}:${x.color ?? ""}`)
+    .map(
+      (x) =>
+        `${x.id}:${x.lat.toFixed(3)},${x.lng.toFixed(3)}:${x.badge ?? ""}:${x.label}:${x.kind}:${x.color ?? ""}:${x.radiusM ?? 0}`,
+    )
     .join("|");
   const r = routes
     .map((x) => {
@@ -89,6 +93,26 @@ function pinColor(kind: MapMarker["kind"], badge?: string, color?: string) {
   if (kind === "home") return "#c8cdd4";
   if (kind === "charger") return "#e6b84d";
   return "#6ea8ff";
+}
+
+function esc(s: string) {
+  return s.replace(/[&<>"']/g, (c) => {
+    if (c === "&") return "&amp;";
+    if (c === "<") return "&lt;";
+    if (c === ">") return "&gt;";
+    if (c === '"') return "&quot;";
+    return "&#39;";
+  });
+}
+
+function pinHtml(marker: MapMarker, selected: boolean) {
+  const kindClass =
+    marker.kind === "charger" ? "map-pin-charger" : marker.kind === "home" ? "map-pin-home" : "";
+  const badge =
+    marker.badge && marker.badge !== "!" && marker.badge !== "+"
+      ? `<span class="map-pin-badge">${esc(marker.badge)}</span>`
+      : `<span class="map-pin-dot"></span>`;
+  return `<div class="map-pin map-pin-live ${kindClass}${selected ? " is-selected" : ""}"><span class="map-pin-label">${esc(marker.label)}</span>${badge}</div>`;
 }
 
 function prune<T extends { remove: () => void }>(store: Map<string, T>, keep: Set<string>) {
@@ -119,6 +143,7 @@ function BayMapImpl({
   dropping = false,
   hidden = false,
   focus,
+  interactive = false,
 }: {
   markers: MapMarker[];
   routes?: MapRoute[];
@@ -130,6 +155,8 @@ function BayMapImpl({
   dropping?: boolean;
   hidden?: boolean;
   focus?: { lat: number; lng: number; zoom?: number } | null;
+  /** Pan, zoom, and tap pins. Overview maps stay static. */
+  interactive?: boolean;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<import("leaflet").Map | null>(null);
@@ -137,6 +164,7 @@ function BayMapImpl({
   const canvasRef = useRef<import("leaflet").Renderer | null>(null);
   const routesRef = useRef(new Map<string, Polyline>());
   const dotsRef = useRef(new Map<string, CircleMarker>());
+  const pinsRef = useRef(new Map<string, Marker>());
   const ringsRef = useRef(new Map<string, Circle>());
   const onSelectRef = useRef(onSelect);
   const onDropRef = useRef(onDrop);
@@ -148,6 +176,10 @@ function BayMapImpl({
 
   useEffect(() => {
     if (hidden) return;
+    const routes = routesRef.current;
+    const dots = dotsRef.current;
+    const pins = pinsRef.current;
+    const rings = ringsRef.current;
     const el = hostRef.current;
     if (!el) return;
     let cancelled = false;
@@ -170,12 +202,12 @@ function BayMapImpl({
           const map = L.map(hostRef.current, {
             zoomControl: false,
             attributionControl: true,
-            scrollWheelZoom: false,
-            dragging: false,
-            doubleClickZoom: false,
+            scrollWheelZoom: interactive,
+            dragging: interactive,
+            doubleClickZoom: interactive,
             boxZoom: false,
             keyboard: false,
-            touchZoom: false,
+            touchZoom: interactive,
             fadeAnimation: false,
             zoomAnimation: false,
             markerZoomAnimation: false,
@@ -205,12 +237,14 @@ function BayMapImpl({
       cancelLoad();
       cancelMount?.();
       setReady(false);
-      routesRef.current.forEach((l) => l.remove());
-      dotsRef.current.forEach((l) => l.remove());
-      ringsRef.current.forEach((l) => l.remove());
-      routesRef.current.clear();
-      dotsRef.current.clear();
-      ringsRef.current.clear();
+      routes.forEach((l) => l.remove());
+      dots.forEach((l) => l.remove());
+      pins.forEach((l) => l.remove());
+      rings.forEach((l) => l.remove());
+      routes.clear();
+      dots.clear();
+      pins.clear();
+      rings.clear();
       mapRef.current?.remove();
       mapRef.current = null;
       LRef.current = null;
@@ -218,7 +252,7 @@ function BayMapImpl({
       drawKeyRef.current = "";
       fitKeyRef.current = "";
     };
-  }, [hidden]);
+  }, [hidden, interactive]);
 
   useEffect(() => {
     if (!ready || hidden) return;
@@ -235,10 +269,14 @@ function BayMapImpl({
       const selectedSet = new Set(
         [selectedId, ...(selectedIds ?? [])].filter((id): id is string => !!id),
       );
-      const selectedRoutes = routes.filter((r) => selectedSet.has(r.id));
-      const pins = markers.length > 40
-        ? markers.filter((m) => m.kind !== "charger").concat(markers.filter((m) => m.kind === "charger").slice(0, 24))
-        : markers;
+      const chargerCap = interactive ? 80 : 24;
+      const pinLimit = interactive ? 90 : 40;
+      const pins =
+        markers.length > pinLimit
+          ? markers
+              .filter((m) => m.kind !== "charger")
+              .concat(markers.filter((m) => m.kind === "charger").slice(0, chargerCap))
+          : markers;
 
       const keepRoutes = new Set<string>();
       for (const route of routes) {
@@ -271,49 +309,76 @@ function BayMapImpl({
       prune(routesRef.current, keepRoutes);
 
       const keepDots = new Set<string>();
+      const keepPins = new Set<string>();
       const keepRings = new Set<string>();
       for (const marker of pins) {
-        keepDots.add(marker.id);
         const selected = selectedSet.has(marker.id);
-        const color = pinColor(marker.kind, marker.badge, marker.color);
-        let dot = dotsRef.current.get(marker.id);
-        if (!dot) {
-          dot = L.circleMarker([marker.lat, marker.lng], {
-            radius: selected ? 8 : 6,
-            color,
-            weight: selected ? 2 : 1,
-            opacity: 1,
-            fillColor: color,
-            fillOpacity: selected ? 1 : 0.88,
-            renderer: canvas,
-            interactive: false,
-            bubblingMouseEvents: true,
+        if (interactive) {
+          keepPins.add(marker.id);
+          const icon = L.divIcon({
+            className: "map-pin-wrap",
+            html: pinHtml(marker, selected),
+            iconSize: [120, 46],
+            iconAnchor: [60, 44],
           });
-          dot.addTo(map);
-          dotsRef.current.set(marker.id, dot);
+          let pin = pinsRef.current.get(marker.id);
+          if (!pin) {
+            pin = L.marker([marker.lat, marker.lng], {
+              icon,
+              keyboard: false,
+              zIndexOffset: selected ? 400 : 0,
+            });
+            pin.on("click", () => onSelectRef.current?.(marker.id));
+            pin.addTo(map);
+            pinsRef.current.set(marker.id, pin);
+          } else {
+            pin.setLatLng([marker.lat, marker.lng]);
+            pin.setIcon(icon);
+            pin.setZIndexOffset(selected ? 400 : 0);
+          }
         } else {
-          dot.setLatLng([marker.lat, marker.lng]);
-          dot.setStyle({
-            radius: selected ? 8 : 6,
-            color,
-            weight: selected ? 2 : 1,
-            fillColor: color,
-            fillOpacity: selected ? 1 : 0.88,
-          });
+          keepDots.add(marker.id);
+          const color = pinColor(marker.kind, marker.badge, marker.color);
+          let dot = dotsRef.current.get(marker.id);
+          if (!dot) {
+            dot = L.circleMarker([marker.lat, marker.lng], {
+              radius: selected ? 8 : 6,
+              color,
+              weight: selected ? 2 : 1,
+              opacity: 1,
+              fillColor: color,
+              fillOpacity: selected ? 1 : 0.88,
+              renderer: canvas,
+              interactive: false,
+              bubblingMouseEvents: true,
+            });
+            dot.addTo(map);
+            dotsRef.current.set(marker.id, dot);
+          } else {
+            dot.setLatLng([marker.lat, marker.lng]);
+            dot.setStyle({
+              radius: selected ? 8 : 6,
+              color,
+              weight: selected ? 2 : 1,
+              fillColor: color,
+              fillOpacity: selected ? 1 : 0.88,
+            });
+          }
         }
 
-        const showRing = Boolean(marker.radiusM && marker.radiusM > 0 && (selected || dropping));
+        const showRing = Boolean(marker.radiusM && marker.radiusM > 0 && (interactive || selected || dropping));
         if (showRing && marker.radiusM) {
           keepRings.add(marker.id);
           let ring = ringsRef.current.get(marker.id);
           if (!ring) {
+            const emphasized = interactive || selected;
             ring = L.circle([marker.lat, marker.lng], {
               radius: marker.radiusM,
               color: "#1ecf8a",
-              weight: selected ? 1.4 : 1,
-              opacity: selected ? 0.8 : 0.25,
+              weight: emphasized ? 1.4 : 1,
+              opacity: emphasized ? 0.8 : 0.25,
               fillColor: "#1ecf8a",
-              fillOpacity: selected ? 0.14 : 0.04,
+              fillOpacity: emphasized ? 0.12 : 0.04,
               interactive: false,
               renderer: canvas,
             });
@@ -322,15 +387,17 @@ function BayMapImpl({
           } else {
             ring.setLatLng([marker.lat, marker.lng]);
             ring.setRadius(marker.radiusM);
+            const emphasized = interactive || selected;
             ring.setStyle({
-              weight: selected ? 1.4 : 1,
-              opacity: selected ? 0.8 : 0.25,
-              fillOpacity: selected ? 0.14 : 0.04,
+              weight: emphasized ? 1.4 : 1,
+              opacity: emphasized ? 0.8 : 0.25,
+              fillOpacity: emphasized ? 0.12 : 0.04,
             });
           }
         }
       }
       prune(dotsRef.current, keepDots);
+      prune(pinsRef.current, keepPins);
       prune(ringsRef.current, keepRings);
 
       const focusKey = `${routes.map((r) => `${r.id}:${r.path?.length ?? 0}`).join(",")}:${pins.map((m) => m.id).join(",")}`;
@@ -341,21 +408,21 @@ function BayMapImpl({
         }),
         ...pins.map((m) => [m.lat, m.lng] as [number, number]),
       ];
-      if (fitPts.length >= 2 && fitKeyRef.current !== focusKey) {
+      if (!interactive && fitPts.length >= 2 && fitKeyRef.current !== focusKey) {
         fitKeyRef.current = focusKey;
         map.fitBounds(L.latLngBounds(fitPts), {
           padding: [28, 28],
           maxZoom: 7,
           animate: false,
         });
-      } else if (fitPts.length === 1 && fitKeyRef.current !== focusKey) {
+      } else if (!interactive && fitPts.length === 1 && fitKeyRef.current !== focusKey) {
         fitKeyRef.current = focusKey;
         map.setView(fitPts[0], 12, { animate: false });
       }
     }, 400);
 
     return () => cancelDraw();
-  }, [ready, hidden, markers, routes, selectedId, selectedIds, dropping]);
+  }, [ready, hidden, interactive, markers, routes, selectedId, selectedIds, dropping]);
 
   useEffect(() => {
     if (!ready || !focus) return;
@@ -391,7 +458,10 @@ function BayMapImpl({
 
   return (
     <div className="relative isolate overflow-hidden rounded-xl bg-surface shadow-[var(--shadow-border)]">
-      <div ref={hostRef} className={cn("bay-map h-80 w-full", dropping && "cursor-crosshair")} />
+      <div
+        ref={hostRef}
+        className={cn("bay-map h-80 w-full", interactive && "bay-map-live", dropping && "cursor-crosshair")}
+      />
       {!ready ? (
         <p className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-muted">
           Map
