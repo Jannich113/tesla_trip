@@ -11,7 +11,6 @@ import {
   DEFAULT_WAIT_MIN,
   LEG_MODES,
   type LegMode,
-  type LegWhen,
   type PlanStop,
   type PricedCharge,
   type PricedLeg,
@@ -51,7 +50,7 @@ import {
 } from "./engine";
 import { applyDraftShell, paintDraftRoutes, usePlanStore, type OptionSnap } from "./store";
 import { withRetry } from "./retry";
-import { formatKrPerKwh, formatKrValue, type ElprisData, type HourPrice } from "@/lib/elpris";
+import { formatKrPerKwh, formatKrValue, type ElprisData } from "@/lib/elpris";
 import { applyTillægToHours, providerById } from "@/lib/el-providers";
 import { PLACES } from "@/lib/places";
 import { cn } from "@/lib/utils";
@@ -646,6 +645,8 @@ export function PlanScreen() {
     return () => {
       cancelled = true;
     };
+    // routeMap is read only to skip cached hops; adding it retriggers this effect on every cache write.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [live, stops, setRouteCache]);
 
   useEffect(() => {
@@ -703,6 +704,8 @@ export function PlanScreen() {
   // Eco + Fastest corridors never depend on cheapAvoid — keeps their chargers/totals still.
   const stableSearchRoutes = useMemo(
     () => collectSearchRoutes(["eco", "fastest"], routesFor),
+    // routesFor closes over routeMap and stops; its identity changes every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [routeMap, stops],
   );
   const cheapPathM = pathMode("cheapest", cheapAvoid);
@@ -710,6 +713,8 @@ export function PlanScreen() {
     // Only when Cheapest has its own corridor (toll/fee avoid), not when sharing eco/fastest.
     if (cheapPathM === "eco" || cheapPathM === "fastest") return [] as RoutedLeg[];
     return collectSearchRoutes(["cheapest"], routesFor);
+    // routesFor closes over routeMap and stops; its identity changes every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routeMap, stops, cheapPathM]);
   const searchRoutes = useMemo(
     () => [...stableSearchRoutes, ...cheapSearchRoutes],
@@ -833,6 +838,8 @@ export function PlanScreen() {
       }
       return { mode, avoid, priced };
     });
+    // planArgs and routesFor are new every render; their inputs are already listed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [live, corridorStamp, stops, detours, waits, soc, profile.usableKwh, profile.acKw, locations, stableLocations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc, prefer, networkAbo, cheapAvoid]);
 
   const optionRows = useMemo(() => {
@@ -908,6 +915,8 @@ export function PlanScreen() {
       modes: activeModes,
       routes: selectedRoutes,
     });
+    // planArgs is a fresh object every render; adding it would reprice mixed legs every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [live, mixed, optionRows, activeModes, stops, selectedRoutes]);
 
   const viewLegs = useMemo(() => {
@@ -1023,6 +1032,8 @@ export function PlanScreen() {
       cancelled = true;
       window.clearTimeout(timer);
     };
+    // hopKey already tracks geometry; optionRows/routeMap would refetch and can loop via setRouteCache.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hopKey, cheapAvoid]);
 
   function addStop(hit: AddressHit) {
@@ -1340,7 +1351,7 @@ export function PlanScreen() {
     if (row?.legs.length) {
       const first = row.legs[0].from;
       seq.push({ id: first.id, lat: first.lat, lng: first.lng, label: first.name, via: false });
-      for (const [i, leg] of row.legs.entries()) {
+      for (const leg of row.legs) {
         const spot = leg.charge;
         const loc = spot ? locations.find((x) => x.id === spot.locationId) : undefined;
         seq.push({

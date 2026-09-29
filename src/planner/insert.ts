@@ -169,7 +169,6 @@ export function splitRoutedLeg(route: SplitRoute, lat: number, lng: number): { b
   if (route.path.length < 2) return null;
   let idx = closestPathIndex(route.path, lat, lng);
   idx = Math.max(1, Math.min(route.path.length - 2, idx));
-  const via = route.path[idx];
   const beforePath = route.path.slice(0, idx + 1);
   const afterPath = route.path.slice(idx);
   if (beforePath.length < 2 || afterPath.length < 2) return null;

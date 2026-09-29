@@ -65,16 +65,15 @@ export function ChargeScreen({ visible = true }: { visible?: boolean }) {
   }, [visible, mapOn]);
   const livePrices = useChargePrices();
   const variableSites = livePrices.data?.variable?.sites.length ?? 0;
-  const variableAt = livePrices.data?.variable?.updatedAt ?? "";
   const today = useMemo(() => laDayString(), []);
   const totals = useMemo(
     () => totalsFor(locations, logged, listPeriod, today),
-    [locations, logged, listPeriod, today, variableSites, variableAt],
+    [locations, logged, listPeriod, today],
   );
   const driven = useMemo(() => tripTotals(listPeriod, today), [listPeriod, today]);
   const ranks = useMemo(
     () => ranksFor(locations, logged, listPeriod, today),
-    [locations, logged, listPeriod, today, variableSites, variableAt],
+    [locations, logged, listPeriod, today],
   );
   const blended = totals.kwh > 0 ? totals.usd / totals.kwh : 0;
   const remaining = Math.max(0, s.chargeLimit - s.soc);
