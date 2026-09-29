@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { type ChargePricesResponse } from "./charge-prices";
+import { setActiveVariableFeed } from "./variable-rates";
 
 const POLL_MS = 30 * 60 * 1000;
 
@@ -20,6 +21,7 @@ export function useChargePrices() {
     else setLoading(true);
     try {
       const next = await fetchChargePrices(isRefresh);
+      setActiveVariableFeed(next.variable ?? null);
       setData(next);
       setError(null);
     } catch (err) {

@@ -18,6 +18,7 @@ import { VEHICLE, energyKwh, formatNumber, minutesToHm, timeToLimitMin } from "@
 import { cn } from "@/lib/utils";
 import { ranksFor, totalsFor, useChargeStore } from "@/store/charge-store";
 import { useVehicleStore } from "@/store/vehicle-store";
+import { useChargePrices } from "@/planner/use-charge-prices";
 
 const BayMap = lazy(() => import("@/components/bay-map").then((m) => ({ default: m.BayMap })));
 
@@ -46,7 +47,9 @@ export function ChargeScreen({ visible = true }: { visible?: boolean }) {
   const listPeriod = useDeferredValue(period);
   const [selected, setSelected] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
-  const [mapFocus, setMapFocus] = useState<{ lat: number; lng: number; zoom?: number } | null>(null);
+  const [mapFocus, setMapFocus] = useState<{ lat: number; lng: number; zoom?: number } | null>(
+    null,
+  );
   const [mapOn, setMapOn] = useState(false);
   // Keep BayMap mounted across tab hides so reopen reuses the Leaflet instance.
   // First mount waits for idle so period pills / chrome stay tappable.
@@ -60,17 +63,27 @@ export function ChargeScreen({ visible = true }: { visible?: boolean }) {
     const id = window.setTimeout(kick, 160);
     return () => window.clearTimeout(id);
   }, [visible, mapOn]);
+  const livePrices = useChargePrices();
+  const variableSites = livePrices.data?.variable?.sites.length ?? 0;
+  const variableAt = livePrices.data?.variable?.updatedAt ?? "";
   const today = useMemo(() => laDayString(), []);
-  const totals = useMemo(() => totalsFor(locations, logged, listPeriod, today), [locations, logged, listPeriod, today]);
+  const totals = useMemo(
+    () => totalsFor(locations, logged, listPeriod, today),
+    [locations, logged, listPeriod, today, variableSites, variableAt],
+  );
   const driven = useMemo(() => tripTotals(listPeriod, today), [listPeriod, today]);
-  const ranks = useMemo(() => ranksFor(locations, logged, listPeriod, today), [locations, logged, listPeriod, today]);
+  const ranks = useMemo(
+    () => ranksFor(locations, logged, listPeriod, today),
+    [locations, logged, listPeriod, today, variableSites, variableAt],
+  );
   const blended = totals.kwh > 0 ? totals.usd / totals.kwh : 0;
   const remaining = Math.max(0, s.chargeLimit - s.soc);
   const minutes =
     s.mode === "charging"
       ? timeToLimitMin(s.soc, s.chargeLimit, Math.max(s.chargeKw, 0.1))
       : timeToLimitMin(s.soc, s.chargeLimit, VEHICLE.acKw);
-  const activeId = selected && ranks.some((r) => r.id === selected) ? selected : (ranks[0]?.id ?? chargeAtId);
+  const activeId =
+    selected && ranks.some((r) => r.id === selected) ? selected : (ranks[0]?.id ?? chargeAtId);
   const activeRank = ranks.find((r) => r.id === activeId);
   const chargeAt = locations.find((l) => l.id === chargeAtId) ?? locations[0];
 
@@ -189,8 +202,7 @@ export function ChargeScreen({ visible = true }: { visible?: boolean }) {
               : `${formatNumber(Math.max(0, energyKwh(s.chargeLimit) - energyKwh(s.soc)), 1)} kWh to ${s.chargeLimit}%`}
         </p>
         <p className="mt-3 text-xs text-muted">
-          Limit {s.chargeLimit}%
-          <span className="text-subtle"> · </span>
+          Limit {s.chargeLimit}%<span className="text-subtle"> · </span>
           Sessions log to {chargeAt?.name ?? "Home"}
           {chargeAt ? (
             <span className="text-subtle">
@@ -221,10 +233,18 @@ export function ChargeScreen({ visible = true }: { visible?: boolean }) {
           <span className="text-subtle"> · </span>
           {formatCents(blended)} blended
         </p>
+        {variableSites > 0 ? (
+          <p className="mt-2 text-xs text-subtle">
+            Supercharger visits that match a published time-of-use site use that site&apos;s rate at
+            plug-in time. Other sessions stay on the saved ¢/kWh.
+          </p>
+        ) : null}
       </section>
 
       {mapOn ? (
-        <Suspense fallback={<div className="h-52 rounded-xl bg-surface shadow-[var(--shadow-border)]" />}>
+        <Suspense
+          fallback={<div className="h-52 rounded-xl bg-surface shadow-[var(--shadow-border)]" />}
+        >
           <BayMap
             markers={idleMarkers}
             selectedId={draft ? "draft" : activeId}
@@ -360,8 +380,8 @@ export function ChargeScreen({ visible = true }: { visible?: boolean }) {
               </label>
             </div>
             <p className="text-xs text-subtle">
-              Sessions inside this circle attach automatically. Find sends the address to OpenStreetMap
-              Nominatim only when you tap it.
+              Sessions inside this circle attach automatically. Find sends the address to
+              OpenStreetMap Nominatim only when you tap it.
             </p>
             <div className="flex gap-2">
               <button
@@ -478,10 +498,26 @@ export function ChargeScreen({ visible = true }: { visible?: boolean }) {
       </section>
 
       <div className="grid grid-cols-2 gap-3">
-        <Tile label="Home" value={formatUsd(totals.homeUsd)} hint={`${formatNumber(totals.homeKwh, 0)} kWh`} />
-        <Tile label="Supercharger" value={formatUsd(totals.scUsd)} hint={`${formatNumber(totals.scKwh, 0)} kWh`} />
-        <Tile label="Custom" value={formatUsd(totals.otherUsd)} hint={`${formatNumber(totals.otherKwh, 0)} kWh`} />
-        <Tile label="Per mile" value={driven.mi > 0 ? formatUsd(totals.usd / driven.mi, 3) : "—"} hint="cost to drive" />
+        <Tile
+          label="Home"
+          value={formatUsd(totals.homeUsd)}
+          hint={`${formatNumber(totals.homeKwh, 0)} kWh`}
+        />
+        <Tile
+          label="Supercharger"
+          value={formatUsd(totals.scUsd)}
+          hint={`${formatNumber(totals.scKwh, 0)} kWh`}
+        />
+        <Tile
+          label="Custom"
+          value={formatUsd(totals.otherUsd)}
+          hint={`${formatNumber(totals.otherKwh, 0)} kWh`}
+        />
+        <Tile
+          label="Per mile"
+          value={driven.mi > 0 ? formatUsd(totals.usd / driven.mi, 3) : "—"}
+          hint="cost to drive"
+        />
       </div>
     </div>
   );

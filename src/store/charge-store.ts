@@ -30,6 +30,11 @@ import {
 } from "@/lib/history";
 import { VEHICLE, energyKwh } from "@/lib/vehicle";
 import { bindChargeBridge } from "@/store/vehicle-store";
+import {
+  activeVariableFeed,
+  superchargerUsdPerKwh,
+  variableFeedRevision,
+} from "@/planner/variable-rates";
 
 export type LoggedSession = ChargeSession & { locationId: string };
 
@@ -53,7 +58,9 @@ type ChargeStore = ChargeState & {
   }) => ChargeLocation;
   updateLocation: (
     id: string,
-    patch: Partial<Pick<ChargeLocation, "name" | "short" | "usdPerKwh" | "lat" | "lng" | "radiusM">>,
+    patch: Partial<
+      Pick<ChargeLocation, "name" | "short" | "usdPerKwh" | "lat" | "lng" | "radiusM">
+    >,
   ) => void;
   removeLocation: (id: string) => void;
   beginCharge: (soc: number) => void;
@@ -82,28 +89,57 @@ function mergePresets(saved: ChargeLocation[] | undefined): ChargeLocation[] {
   });
 }
 
-function priceSession(session: ChargeSession & { locationId?: string }, locations: ChargeLocation[]): ChargeSession {
+function priceSession(
+  session: ChargeSession & { locationId?: string },
+  locations: ChargeLocation[],
+): ChargeSession {
   const byId = session.locationId ? locations.find((l) => l.id === session.locationId) : undefined;
   const loc = byId ?? resolveChargeLocation(locations, { where: session.where });
   if (!loc) return session;
+  const live = superchargerUsdPerKwh({
+    kind: loc.kind,
+    networkId: loc.networkId,
+    lat: loc.lat,
+    lng: loc.lng,
+    day: session.day,
+    hour: session.hour,
+    minute: session.minute,
+    feed: activeVariableFeed(),
+  });
   return {
     ...session,
     where: loc.name,
-    usd: round2(session.kwh * loc.usdPerKwh),
+    usd: round2(session.kwh * (live ?? loc.usdPerKwh)),
     kind: loc.kind,
   };
 }
 
-let pricedCache: { locations: ChargeLocation[]; logged: LoggedSession[]; rows: ChargeSession[] } | null = null;
+let pricedCache: {
+  locations: ChargeLocation[];
+  logged: LoggedSession[];
+  rev: number;
+  rows: ChargeSession[];
+} | null = null;
 
-export function pricedSessions(locations: ChargeLocation[], logged: LoggedSession[]): ChargeSession[] {
-  if (pricedCache && pricedCache.locations === locations && pricedCache.logged === logged) {
+export function pricedSessions(
+  locations: ChargeLocation[],
+  logged: LoggedSession[],
+): ChargeSession[] {
+  const rev = variableFeedRevision();
+  if (
+    pricedCache &&
+    pricedCache.locations === locations &&
+    pricedCache.logged === logged &&
+    pricedCache.rev === rev
+  ) {
     return pricedCache.rows;
   }
   const extra = logged.map((s) => priceSession(s, locations));
   const hist = getCharges().map((s) => priceSession(s, locations));
-  const rows = [...extra, ...hist].sort((a, b) => (a.day === b.day ? b.hour - a.hour : a.day < b.day ? 1 : -1));
-  pricedCache = { locations, logged, rows };
+  const rows = [...extra, ...hist].sort((a, b) =>
+    a.day === b.day ? b.hour - a.hour : a.day < b.day ? 1 : -1,
+  );
+  pricedCache = { locations, logged, rev, rows };
   return rows;
 }
 
@@ -213,7 +249,8 @@ export const useChargeStore = create<ChargeStore>()(
           });
         }
 
-        if (!loc) loc = get().locations.find((l) => l.id === get().chargeAtId) ?? get().locations[0];
+        if (!loc)
+          loc = get().locations.find((l) => l.id === get().chargeAtId) ?? get().locations[0];
         if (!loc) return null;
 
         const seq = get().sessionSeq + 1;
@@ -232,9 +269,12 @@ export const useChargeStore = create<ChargeStore>()(
           usd: round2(energy * loc.usdPerKwh),
         };
         set({ logged: [session, ...get().logged], sessionSeq: seq, chargeAtId: loc.id });
-        toast.success(`Logged ${energy >= 0.1 ? energy.toFixed(1) : energy.toFixed(2)} kWh at ${loc.short}`, {
-          description: `${formatUsd(session.usd)} · ${formatCents(loc.usdPerKwh)}`,
-        });
+        toast.success(
+          `Logged ${energy >= 0.1 ? energy.toFixed(1) : energy.toFixed(2)} kWh at ${loc.short}`,
+          {
+            description: `${formatUsd(session.usd)} · ${formatCents(loc.usdPerKwh)}`,
+          },
+        );
         return session;
       },
 

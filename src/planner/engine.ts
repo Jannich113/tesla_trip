@@ -35,6 +35,13 @@ import {
 } from "./modes";
 import { networkIdFor, networkLabel, rateForNetwork } from "./networks";
 import {
+  PLANNER_ZONE,
+  activeVariableFeed,
+  matchVariableSite,
+  quoteEnergy,
+  type VariableFeed,
+} from "./variable-rates";
+import {
   alongFraction,
   haversineM,
   minDistToPathM,
@@ -47,7 +54,17 @@ import { estimateTolls } from "./tolls";
 import { withRetry, fetchWithTimeout } from "./retry";
 
 export { planTripMin } from "./modes";
-export { alongFraction, haversineM, minDistToPathM, pathMeters, pickViaAtRange, pickViaOnPath, pointAlongPath, splitRoutedLeg, spreadAlongPath } from "./insert";
+export {
+  alongFraction,
+  haversineM,
+  minDistToPathM,
+  pathMeters,
+  pickViaAtRange,
+  pickViaOnPath,
+  pointAlongPath,
+  splitRoutedLeg,
+  spreadAlongPath,
+} from "./insert";
 
 export {
   DEFAULT_DETOUR_KM,
@@ -255,34 +272,45 @@ export async function fetchRoute(from: PlanStop, to: PlanStop, mode: LegMode): P
   const hit = lookupCachedRoute(from, to, mode);
   if (hit) return hit;
   try {
-    const body = await withRetry(async () => {
-      const qs = new URLSearchParams({
-        from: `${from.lat.toFixed(4)},${from.lng.toFixed(4)}`,
-        to: `${to.lat.toFixed(4)},${to.lng.toFixed(4)}`,
-        mode,
-        v: "1",
-      });
-      let res = await fetchWithTimeout(`/api/drive?${qs}`, {
-        headers: { Accept: "application/json" },
-      }, 20_000);
-      if (!res.ok) {
-        res = await fetchWithTimeout("/api/drive", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "application/json" },
-          body: JSON.stringify({
-            from: { lat: from.lat, lng: from.lng },
-            to: { lat: to.lat, lng: to.lng },
-            mode,
-          }),
-        }, 20_000);
-      }
-      if (!res.ok) throw new Error(`Route ${res.status}`);
-      const json = (await res.json()) as RoutedLeg;
-      if (json.source === "air" || (json.path?.length ?? 0) < 3 || !Number.isFinite(json.miles)) {
-        throw new Error("Empty route");
-      }
-      return json;
-    }, { delaysMs: [400, 1200] });
+    const body = await withRetry(
+      async () => {
+        const qs = new URLSearchParams({
+          from: `${from.lat.toFixed(4)},${from.lng.toFixed(4)}`,
+          to: `${to.lat.toFixed(4)},${to.lng.toFixed(4)}`,
+          mode,
+          v: "1",
+        });
+        let res = await fetchWithTimeout(
+          `/api/drive?${qs}`,
+          {
+            headers: { Accept: "application/json" },
+          },
+          20_000,
+        );
+        if (!res.ok) {
+          res = await fetchWithTimeout(
+            "/api/drive",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Accept: "application/json" },
+              body: JSON.stringify({
+                from: { lat: from.lat, lng: from.lng },
+                to: { lat: to.lat, lng: to.lng },
+                mode,
+              }),
+            },
+            20_000,
+          );
+        }
+        if (!res.ok) throw new Error(`Route ${res.status}`);
+        const json = (await res.json()) as RoutedLeg;
+        if (json.source === "air" || (json.path?.length ?? 0) < 3 || !Number.isFinite(json.miles)) {
+          throw new Error("Empty route");
+        }
+        return json;
+      },
+      { delaysMs: [400, 1200] },
+    );
     routeCache.set(key, body);
     return body;
   } catch {
@@ -305,14 +333,16 @@ export function applyLiveRoutes(
     const live = lookup(leg.from, leg.to, leg.mode);
     if (!live || live.source === "air" || live.path.length < 3) return leg;
     const kwh = driveKwh(live.miles, live.seconds, speedEff);
-    const toll = estimateTolls(
-      live.path,
-      live.miles,
-      Boolean(live.hasToll),
-      leg.mode,
-    );
+    const toll = estimateTolls(live.path, live.miles, Boolean(live.hasToll), leg.mode);
     const chargeKr = Math.max(0, leg.kr - (leg.tollKr ?? 0));
-    return { ...leg, route: live, kwh, tollKr: toll.kr, tollLabel: toll.label, kr: chargeKr + toll.kr };
+    return {
+      ...leg,
+      route: live,
+      kwh,
+      tollKr: toll.kr,
+      tollLabel: toll.label,
+      kr: chargeKr + toll.kr,
+    };
   });
 }
 
@@ -343,7 +373,8 @@ function hourSpan(h: string, add: number) {
 export function formatChargeWindow(hours: HourPrice[]) {
   if (!hours.length) return "live";
   const start = hours[0].hour;
-  const time = hours.length === 1 ? `${start}:00` : `${start}–${hourSpan(hours[hours.length - 1].hour, 1)}`;
+  const time =
+    hours.length === 1 ? `${start}:00` : `${start}–${hourSpan(hours[hours.length - 1].hour, 1)}`;
   const ymd = (hours[0] as DatedHour).ymd;
   if (!ymd) return time;
   const [, m, d] = ymd.split("-");
@@ -482,10 +513,41 @@ function toPriced(
   clockHhmm: string,
   maxWaitMin: number,
   memberships: Record<string, boolean> = {},
+  variable: VariableFeed | null = null,
 ): PricedCharge {
   const loss = loc.kind === "home" ? 1.1 : 1.08;
   const billedKwh = kwhNeed * loss;
   const netId = networkIdFor(loc.kind, (loc as { networkId?: string }).networkId);
+  const site =
+    variable && netId ? matchVariableSite(variable.sites, loc.lat, loc.lng, netId) : null;
+  if (site && variable) {
+    const when = splitDateTime(clockHhmm);
+    const quoted = quoteEnergy({
+      site,
+      ymd: when.ymd,
+      hhmm: when.hhmm,
+      zone: PLANNER_ZONE,
+      preferCheap,
+      maxWaitMin,
+      fxEur: variable.fx.EUR,
+    });
+    if (quoted) {
+      return {
+        locationId: loc.id,
+        name: loc.short || loc.name,
+        kind: loc.kind,
+        kwh: billedKwh,
+        kr: billedKwh * quoted.rateKr,
+        rateKr: quoted.rateKr,
+        label: chargerLabel(loc, Boolean(memberships[netId!])),
+        inBand,
+        distM,
+        windowLabel: quoted.label,
+        cheapWindow: quoted.cheapWindow,
+        waitMin: quoted.waitMin,
+      };
+    }
+  }
   if (netId) {
     const hasAbo = Boolean(memberships[netId]);
     const rate = rateForNetwork(netId, hasAbo) ?? usdToKr(loc.usdPerKwh);
@@ -562,8 +624,26 @@ export function pickCharges(opts: {
   memberships?: Record<string, boolean>;
   preferredNetwork?: string | null;
   routeSeconds?: number;
+  /** undefined = the feed last loaded by /api/charge-prices. null = catalog only. */
+  variable?: VariableFeed | null;
 }): { primary: PricedCharge; backup: PricedCharge | null; options: PricedCharge[] } | null {
-  const { kwhNeed, path, detourKm, mode, locations, acKr, hours, acKw, speedEff, clockHhmm, maxWaitMin, backupId, preferId, memberships = {} } = opts;
+  const {
+    kwhNeed,
+    path,
+    detourKm,
+    mode,
+    locations,
+    acKr,
+    hours,
+    acKw,
+    speedEff,
+    clockHhmm,
+    maxWaitMin,
+    backupId,
+    preferId,
+    memberships = {},
+  } = opts;
+  const variable = opts.variable === undefined ? activeVariableFeed() : opts.variable;
   const focus = opts.focus ?? defaultFocus(mode);
   const preferredNetwork = opts.preferredNetwork ?? null;
   if (kwhNeed <= 0.05 || !locations.length) return null;
@@ -575,6 +655,20 @@ export function pickCharges(opts: {
   const maxExtraMin = preferCheap ? (CHEAP_STALL_KM / 80) * 60 : Infinity;
   const locRate = (loc: ChargeLocation) => {
     const id = networkIdFor(loc.kind, loc.networkId);
+    const site = variable && id ? matchVariableSite(variable.sites, loc.lat, loc.lng, id) : null;
+    if (site && variable) {
+      const when = splitDateTime(clockHhmm);
+      const quoted = quoteEnergy({
+        site,
+        ymd: when.ymd,
+        hhmm: when.hhmm,
+        zone: PLANNER_ZONE,
+        preferCheap: false,
+        maxWaitMin: 0,
+        fxEur: variable.fx.EUR,
+      });
+      if (quoted) return quoted.rateKr;
+    }
     return (id ? rateForNetwork(id, Boolean(memberships[id])) : null) ?? usdToKr(loc.usdPerKwh);
   };
 
@@ -619,6 +713,7 @@ export function pickCharges(opts: {
       clockHhmm,
       maxWaitMin,
       memberships,
+      variable,
     ),
   }));
 
@@ -630,8 +725,11 @@ export function pickCharges(opts: {
       kwh: driveKwh(miles, seconds, speedEff),
     });
   };
-  const onPath = [...scored].filter((s) => s.distM <= 5000).sort((a, b) => a.priced.kr - b.priced.kr || a.distM - b.distM);
-  const baselineKr = onPath[0]?.priced.kr ?? [...scored].sort((a, b) => a.distM - b.distM)[0]?.priced.kr ?? 0;
+  const onPath = [...scored]
+    .filter((s) => s.distM <= 5000)
+    .sort((a, b) => a.priced.kr - b.priced.kr || a.distM - b.distM);
+  const baselineKr =
+    onPath[0]?.priced.kr ?? [...scored].sort((a, b) => a.distM - b.distM)[0]?.priced.kr ?? 0;
   const netSave = (s: (typeof scored)[0]) => baselineKr - s.priced.kr - extraDriveKr(s.distM);
 
   const isPreferred = (loc: ChargeLocation) => {
@@ -640,9 +738,7 @@ export function pickCharges(opts: {
   };
   const preferSave = PREFERRED_RATE_PREMIUM_KR * Math.max(kwhNeed, 5);
   const preferFit =
-    focus === "time"
-      ? ((PREFERRED_CLOSE_M / 1000) / 130) * 60
-      : (PREFERRED_CLOSE_M / 1000) * 14;
+    focus === "time" ? (PREFERRED_CLOSE_M / 1000 / 130) * 60 : (PREFERRED_CLOSE_M / 1000) * 14;
   const byRank = (a: (typeof scored)[0], b: (typeof scored)[0]) => {
     if (preferCheap) {
       const aSave = netSave(a) + (isPreferred(a.loc) ? preferSave : 0);
@@ -683,10 +779,9 @@ export function pickCharges(opts: {
 
   const inSearch = rankedPool.filter((s) => s.distM <= searchBand).sort(byRank);
   const outside = rankedPool.filter((s) => s.distM > searchBand).sort(byRank);
-  const forced =
-    preferId
-      ? scored.find((s) => s.loc.id === preferId && s.distM <= Math.max(searchBand, 40_000))
-      : null;
+  const forced = preferId
+    ? scored.find((s) => s.loc.id === preferId && s.distM <= Math.max(searchBand, 40_000))
+    : null;
   const primarySrc = preferCheap
     ? (inSearch[0] ?? forced ?? outside[0])
     : (forced ?? inSearch[0] ?? outside[0]);
@@ -743,9 +838,9 @@ export function pricePlan(opts: {
   focuses?: ModeFocus[];
   preferIds?: Array<string | null | undefined>;
   avoid?: CheapAvoid;
+  variable?: VariableFeed | null;
 }): PricedLeg[] {
-  const { stops, modes, detours, routes, usableKwh, locations, hours, acKw, acKr, speedEff } =
-    opts;
+  const { stops, modes, detours, routes, usableKwh, locations, hours, acKw, acKr, speedEff } = opts;
   const live = hours[0]?.krPerKwh ?? acKr;
   const now = dkNowDateTime();
   let soc = opts.soc;
@@ -846,8 +941,7 @@ export function pricePlan(opts: {
     const socAfter = soc - (kwh / usableKwh) * 100;
     const minArrive = FLOOR_SOC;
     const required =
-      socAfter < FLOOR_SOC ||
-      (soc < REQUIRE_SOC && (jobs.length > 0 || kwh > floorKwh * 0.5));
+      socAfter < FLOOR_SOC || (soc < REQUIRE_SOC && (jobs.length > 0 || kwh > floorKwh * 0.5));
     const searchHours = hoursFrom(hours, readyAt);
     const cheap = cheapestHour(searchHours);
     const goodPrice = Boolean(cheap && cheap.krPerKwh <= live * CHEAP_VS_LIVE);
@@ -873,15 +967,16 @@ export function pricePlan(opts: {
     const kwhNeed = Math.max((target - soc) / 100, 0) * usableKwh;
     const autoKwh = Math.max((autoTarget - soc) / 100, 0) * usableKwh;
     const chargeMinEst = (Math.max(kwhNeed, 5) / 150) * 60;
-    const restDriveMin =
-      route.seconds / 60 + jobs.reduce((n, j) => n + j.route.seconds / 60, 0);
+    const restDriveMin = route.seconds / 60 + jobs.reduce((n, j) => n + j.route.seconds / 60, 0);
     const slack = minutesBetweenDateTime(readyAt, plannedStart);
     const maxNoDelay = Math.max(0, slack - chargeMinEst);
     const cheapestCap = Math.max(0, opts.waitCapMin?.[userIndex] ?? 120);
     const arriveCap = opts.arriveHhmm
       ? Math.max(
           0,
-          minutesBetweenDateTime(readyAt, asDateTime(opts.arriveHhmm)) - chargeMinEst - restDriveMin,
+          minutesBetweenDateTime(readyAt, asDateTime(opts.arriveHhmm)) -
+            chargeMinEst -
+            restDriveMin,
         )
       : null;
     const maxWaitMin =
@@ -908,13 +1003,15 @@ export function pricePlan(opts: {
           maxWaitMin,
           backupId: job.to.id.startsWith("via-")
             ? job.to.id.replace(/^via-/, "")
-            : opts.backupIds?.[userIndex] ?? null,
-          preferId: atViaFrom && mode !== "cheapest"
-            ? job.from.id.replace(/^via-/, "")
-            : opts.preferIds?.[userIndex] ?? null,
+            : (opts.backupIds?.[userIndex] ?? null),
+          preferId:
+            atViaFrom && mode !== "cheapest"
+              ? job.from.id.replace(/^via-/, "")
+              : (opts.preferIds?.[userIndex] ?? null),
           memberships: opts.memberships,
           preferredNetwork: opts.preferredNetwork,
           routeSeconds: route.seconds,
+          variable: opts.variable,
         })
       : null;
     const charge = pick?.primary ?? null;
@@ -936,7 +1033,8 @@ export function pricePlan(opts: {
     const departAt = maxDateTime(plannedStart, billed ? chargeDone : readyAt);
     const arriveAt = addMinutesDateTime(departAt, route.seconds / 60);
     const packKwh = billed ? kwhNeed : 0;
-    const startSoc = billed && charge ? Math.min(TARGET_SOC, soc + (packKwh / usableKwh) * 100) : soc;
+    const startSoc =
+      billed && charge ? Math.min(TARGET_SOC, soc + (packKwh / usableKwh) * 100) : soc;
     const arriveSoc = Math.max(minArrive, startSoc - (kwh / usableKwh) * 100);
     const extraKr =
       billed && charge && userTarget != null
@@ -948,12 +1046,7 @@ export function pricePlan(opts: {
         : charge
           ? { ...charge, waitMin }
           : null;
-    const toll = estimateTolls(
-      route.path,
-      route.miles,
-      Boolean(route.hasToll),
-      mode,
-    );
+    const toll = estimateTolls(route.path, route.miles, Boolean(route.hasToll), mode);
     out.push({
       from: job.from,
       to: job.to,
