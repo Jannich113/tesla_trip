@@ -243,6 +243,7 @@ function toShell(s: Partial<PlanState>): Partial<PlanState> {
     when: cleaned.when ?? "",
     legWhen: cleaned.legWhen ?? [],
     whPerMi: cleaned.whPerMi ?? null,
+    usableKwh: typeof cleaned.usableKwh === "number" && cleaned.usableKwh > 0 ? cleaned.usableKwh : null,
     speedEff: cleaned.speedEff ?? null,
     networkAbo: cleaned.networkAbo ?? { tesla: true },
     preferredNetwork:
@@ -374,6 +375,8 @@ type PlanState = {
   when: string;
   legWhen: LegWhen[];
   whPerMi: number | null;
+  /** Plan override. Null uses the selected model's pack. */
+  usableKwh: number | null;
   speedEff: SpeedEff | null;
   networkAbo: Record<string, boolean>;
   /** Bias Eco/Fastest/Cheapest toward this network when close enough. */
@@ -394,11 +397,13 @@ type PlanStore = PlanState & {
   setAllModes: (mode: LegMode) => void;
   setCheapAvoid: (patch: { motorways?: boolean; tolls?: boolean; roadFees?: boolean }) => void;
   setLegDetour: (index: number, km: number) => void;
+  setAllDetours: (km: number) => void;
   setLegWait: (index: number, min: number) => void;
   setWhenKind: (kind: WhenKind) => void;
   setWhen: (hhmm: string) => void;
   setLegWhen: (index: number, next: LegWhen) => void;
   setWhPerMi: (n: number | null) => void;
+  setUsableKwh: (n: number | null) => void;
   setSpeedEff: (next: SpeedEff | null) => void;
   setNetworkAbo: (id: string, on: boolean) => void;
   setPreferredNetwork: (id: string | null) => void;
@@ -424,6 +429,7 @@ const empty = (): PlanState => ({
   when: "",
   legWhen: [],
   whPerMi: null,
+  usableKwh: null,
   speedEff: null,
   networkAbo: { tesla: true },
   preferredNetwork: null,
@@ -444,6 +450,7 @@ export const usePlanStore = create<PlanStore>()(
       setWhenKind: (whenKind) => set({ whenKind }),
       setWhen: (when) => set({ when }),
       setWhPerMi: (whPerMi) => set({ whPerMi }),
+      setUsableKwh: (usableKwh) => set({ usableKwh }),
       setSpeedEff: (speedEff) => set({ speedEff, whPerMi: speedEff ? kwhPerMiFrom100km(speedEff[80]) * 1000 : null }),
       setNetworkAbo: (id, on) =>
         set({ networkAbo: { ...get().networkAbo, [id]: on } }),
@@ -575,6 +582,11 @@ export const usePlanStore = create<PlanStore>()(
         set({ detours });
       },
 
+      setAllDetours: (km) => {
+        const n = Math.max(1, get().stops.length - 1, get().detours.length);
+        set({ detours: Array.from({ length: n }, () => km) });
+      },
+
       setLegWait: (index, min) => {
         const waits = get().waits.length
           ? [...get().waits]
@@ -697,6 +709,7 @@ export const usePlanStore = create<PlanStore>()(
         when: s.when,
         legWhen: s.legWhen,
         whPerMi: s.whPerMi,
+        usableKwh: s.usableKwh,
         speedEff: s.speedEff,
         networkAbo: s.networkAbo,
         preferredNetwork: s.preferredNetwork,

@@ -47,7 +47,7 @@ describe("leg modes", () => {
   it("eco avoids highways and tolls", () => {
     const c = costingFor("eco");
     assert.equal(c.shortest, false);
-    assert.equal(c.use_highways, 0.65);
+    assert.equal(c.use_highways, 0.35);
     assert.equal(c.top_speed, 100);
     assert.equal(c.use_tolls, 0);
   });
@@ -76,7 +76,7 @@ describe("leg modes", () => {
 
   it("cheapest may detour up to 15 km extra per leg", () => {
     assert.equal(chargeSearchKm("cheapest", 12, "pris", 2 * 3600), CHEAP_STALL_KM);
-    assert.equal(chargeSearchKm("cheapest", 40, "pris", 15 * 3600), CHEAP_STALL_KM);
+    assert.equal(chargeSearchKm("cheapest", 40, "pris", 15 * 3600), 40);
     const near = extraMileageKr(2_000, { acKr: 2.5 });
     const far = extraMileageKr(14_000, { acKr: 2.5 });
     assert.ok(far > near);
@@ -136,7 +136,7 @@ describe("leg modes", () => {
   it("default focus matches the mode", () => {
     assert.equal(pathMode("eco"), "eco");
     assert.equal(pathMode("fastest"), "fastest");
-    assert.equal(pathMode("cheapest"), "fastest");
+    assert.equal(pathMode("cheapest"), "cheapest");
     assert.equal(pathMode("cheapest", true), "eco");
     assert.equal(pathMode("cheapest", { motorways: true }), "eco");
     assert.equal(pathMode("cheapest", { tolls: true, roadFees: true }), "cheapest");
@@ -161,7 +161,7 @@ describe("leg modes", () => {
     assert.equal(noTolls.use_highways, 1);
     assert.equal(noTolls.use_tolls, 0);
     const noMoto = costingFor("cheapest", { motorways: true });
-    assert.equal(noMoto.use_highways, 0.65);
+    assert.equal(noMoto.use_highways, 0.35);
   });
 
   it("cheapest skips a gate only if the detour stays under 15%", () => {
@@ -904,10 +904,10 @@ describe("leg modes", () => {
       detourKm: 18,
       preferredNetwork: "tesla",
     });
-    assert.equal(biased?.id, "pref-tesla", "preferred Tesla wins when close enough");
+    assert.equal(biased?.id, "pref-tesla", "fastest uses only the selected network");
   });
 
-  it("preferred network does not skip a required in-window charge", () => {
+  it("fastest does not fall back to another network when one is selected", () => {
     const path: [number, number][] = [];
     for (let i = 0; i <= 20; i++) {
       path.push([55.4 - i * 0.2, 10.4 - i * 0.05]);
@@ -933,7 +933,7 @@ describe("leg modes", () => {
       detourKm: 18,
       preferredNetwork: "tesla",
     });
-    assert.equal(via?.id, "only-ionity", "fall back when preferred is out of pool");
+    assert.equal(via, null, "no other network when a preferred one is selected");
   });
 
   it("cheapest still price-hunts; small preferred premium OK", () => {
@@ -986,7 +986,22 @@ describe("leg modes", () => {
       detourKm: 15,
       preferredNetwork: "brand-pref",
     });
-    assert.equal(smallPremium?.id, "pref-slight", "preferred wins with small premium");
+    assert.equal(smallPremium?.id, "cheap-stall", "a lower price beats the preferred network");
+    const samePrice = pickViaOnPath({
+      path,
+      locations: [
+        cheap,
+        { ...preferredSlight, id: "pref-same", usdPerKwh: 0.4, networkId: "brand-pref" },
+      ],
+      budgetKwh: 50,
+      minKwh: 28,
+      totalKwh: 90,
+      mode: "cheapest",
+      focus: "pris",
+      detourKm: 15,
+      preferredNetwork: "brand-pref",
+    });
+    assert.equal(samePrice?.id, "pref-same", "same price keeps the selected network");
     const stillHunts = pickViaOnPath({
       path,
       locations: [cheap, preferredDear],

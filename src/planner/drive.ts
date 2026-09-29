@@ -230,12 +230,14 @@ async function fastestPool(from: Stop, to: Stop): Promise<DriveRouteJson[]> {
 
 async function hop(from: Stop, to: Stop, mode: LegMode): Promise<DriveRouteJson | null> {
   if (mode === "eco") {
-    const [v, o] = await Promise.all([
+    const [v, o, alts] = await Promise.all([
       valhalla(from, to, "eco").catch(() => null),
       osrm(from, to).catch(() => null),
+      osrmRoutes(from, to, "&alternatives=true").catch(() => []),
     ]);
-    const quiet = [v, o].filter((r): r is DriveRouteJson => Boolean(r && okRoute(r, from, to)));
-    return pickEcoRoute(o && okRoute(o, from, to) ? o : null, quiet.filter((r) => r.source === "valhalla")) ?? (o && okRoute(o, from, to) ? o : v);
+    const fast = o && okRoute(o, from, to) ? o : null;
+    const cands = [v, ...alts].filter((r): r is DriveRouteJson => Boolean(r && okRoute(r, from, to)));
+    return pickEcoRoute(fast, cands) ?? fast ?? v;
   }
   if (mode === "cheapest") {
     const [v, skip, fastPool] = await Promise.all([
@@ -275,10 +277,6 @@ export async function routeDrive(from: Stop, to: Stop, mode: LegMode): Promise<D
   }
   if (mode === "cheapest") {
     const km = haversineM(from, to) / 1000;
-    if (km < 320) {
-      const os = await osrm(from, to).catch(() => null);
-      if (os && okRoute(os, from, to)) return withTolls(os, "cheapest", Boolean(os.hasToll));
-    }
     if (km > 1300) {
       const [fastLong, skipLong] = await Promise.all([
         routeChunked(from, to, "fastest"),
