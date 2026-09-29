@@ -70,3 +70,160 @@ export const COUNTRY_PROFILES: CountryProfile[] = [
 export function countryProfile(id: EuRegion) {
   return COUNTRY_PROFILES.find((c) => c.id === id) ?? null;
 }
+
+export type RoadFeeKind = "road-fee" | "city-parking";
+
+/** Where a planned route has to be for the suggestion to appear. */
+export type RoadFeeTrigger =
+  | { kind: "country"; country: EuRegion }
+  | { kind: "city"; cityId: string }
+  | { kind: "toll-region"; gateId: string };
+
+export type RoadFeeLink = { label: string; href: string };
+
+/** Install or sign-up only. Never a payment endpoint owned by this app. */
+export type RoadFeeApp = {
+  id: string;
+  name: string;
+  kind: RoadFeeKind;
+  summary: string;
+  triggers: RoadFeeTrigger[];
+  links: RoadFeeLink[];
+};
+
+/**
+ * Apps to suggest when the route enters the region. Every href was fetched
+ * and checked (2026-09-29). Omitted on purpose:
+ * - Germany PKW-Maut: no passenger-car toll exists (the 2015 law was annulled).
+ * - Slovenia DARS e-vinjeta: the official shop did not respond, so no link.
+ */
+export const ROAD_FEE_APPS: RoadFeeApp[] = [
+  {
+    id: "autopass",
+    name: "AutoPASS",
+    kind: "road-fee",
+    summary:
+      "Norwegian tolls are automatic. An AutoPASS agreement is the local tag and discount. This is a sign-up suggestion, not a payment.",
+    triggers: [{ kind: "country", country: "NO" }],
+    links: [
+      {
+        label: "How to sign up",
+        href: "https://www.autopass.no/en/user/foreign-vehicles-2/",
+      },
+    ],
+  },
+  {
+    id: "epass24",
+    name: "ePass24",
+    kind: "road-fee",
+    summary:
+      "For a foreign-registered vehicle in Norway or Sweden. Register the plate so tolls and congestion charges are billed to you. Sign-up only.",
+    triggers: [
+      { kind: "country", country: "NO" },
+      { kind: "country", country: "SE" },
+    ],
+    links: [
+      { label: "Sign up", href: "https://www.epass24.com/register" },
+      { label: "App Store", href: "https://apps.apple.com/no/app/epass24/id1202898735" },
+      {
+        label: "Google Play",
+        href: "https://play.google.com/store/apps/details?id=com.epass24.app",
+      },
+    ],
+  },
+  {
+    id: "bil-i-oslo",
+    name: "Bil i Oslo",
+    kind: "city-parking",
+    summary:
+      "Oslo's municipal app for street parking. Install it if you will park in the city. This does not start a session.",
+    triggers: [{ kind: "city", cityId: "oslo" }],
+    links: [
+      {
+        label: "Official parking page",
+        href: "https://www.oslo.kommune.no/english/street-transport-and-parking/prices-and-payment-for-parking-city-of-oslo/",
+      },
+      { label: "App Store", href: "https://apps.apple.com/no/app/bil-i-oslo/id1110056645" },
+      {
+        label: "Google Play",
+        href: "https://play.google.com/store/apps/details?id=no.oslokommune.parkeringsapp",
+      },
+    ],
+  },
+  {
+    id: "brobizz",
+    name: "Brobizz",
+    kind: "road-fee",
+    summary:
+      "Number-plate payment for the Storebælt and Øresund bridges. Sign up before the crossing. This does not pay the toll.",
+    triggers: [
+      { kind: "toll-region", gateId: "storebaelt" },
+      { kind: "toll-region", gateId: "oresund" },
+    ],
+    links: [
+      { label: "Sign up", href: "https://www.brobizz.com/en/" },
+      { label: "App Store", href: "https://apps.apple.com/dk/app/brobizz/id1098198172" },
+    ],
+  },
+  {
+    id: "asfinag",
+    name: "ASFINAG",
+    kind: "road-fee",
+    summary:
+      "Austria requires a vignette on motorways and expressways. The official shop is ASFINAG. Suggestion only.",
+    triggers: [{ kind: "country", country: "AT" }],
+    links: [{ label: "Official shop", href: "https://shop.asfinag.at/" }],
+  },
+  {
+    id: "edalnice",
+    name: "eDalnice",
+    kind: "road-fee",
+    summary:
+      "Czech motorways need an electronic vignette for cars up to 3.5 t. Official state e-shop. Suggestion only.",
+    triggers: [{ kind: "country", country: "CZ" }],
+    links: [{ label: "Official shop", href: "https://edalnice.gov.cz/en" }],
+  },
+  {
+    id: "eznamka",
+    name: "eZnamka",
+    kind: "road-fee",
+    summary:
+      "Slovakia requires an e-vignette on specified motorway sections. Official NDS page. Suggestion only.",
+    triggers: [{ kind: "country", country: "SK" }],
+    links: [{ label: "Official site", href: "https://eznamka.sk/en" }],
+  },
+  {
+    id: "ematric",
+    name: "e-matrica",
+    kind: "road-fee",
+    summary:
+      "Hungary requires an e-vignette on motorways. Official National Toll Payment Service page. Suggestion only.",
+    triggers: [{ kind: "country", country: "HU" }],
+    links: [
+      { label: "Official shop", href: "https://ematrica.nemzetiutdij.hu/en/vignette-purchase" },
+    ],
+  },
+  {
+    id: "swiss-e-vignette",
+    name: "Swiss e-vignette",
+    kind: "road-fee",
+    summary:
+      "Switzerland requires a vignette on motorways. Buy it only from the federal Via portal. Suggestion only.",
+    triggers: [{ kind: "country", country: "CH" }],
+    links: [
+      {
+        label: "Official page",
+        href: "https://www.bazg.admin.ch/en/electronic-vignette-via-portal-purchase",
+      },
+    ],
+  },
+  {
+    id: "bgtoll",
+    name: "BGToll",
+    kind: "road-fee",
+    summary:
+      "Bulgaria requires an e-vignette for cars on the national toll network. Official BGToll shop. Suggestion only.",
+    triggers: [{ kind: "country", country: "BG" }],
+    links: [{ label: "Official shop", href: "https://web.bgtoll.bg/" }],
+  },
+];

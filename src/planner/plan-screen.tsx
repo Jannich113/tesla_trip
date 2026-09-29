@@ -62,6 +62,7 @@ import { useChargeStore } from "@/store/charge-store";
 import { useElprisStore } from "@/store/elpris-store";
 import { NETWORK_NATIVE, scaleCatalogKr, type FxTable } from "./charge-fx";
 import { countryProfile } from "./country-profiles";
+import { RoadFeeSuggestions } from "./road-fee-suggestions";
 import { ChargerPicker } from "./charger-picker";
 import { chargePickRadiusM } from "./charger-radius";
 import { minDistToPathM, spreadAlongPath } from "./insert";
@@ -1304,6 +1305,11 @@ export function PlanScreen() {
     return out;
   }, [stops, routeMap, cheapAvoid, mapMode, showAllRoutes, optionRows]);
 
+  const overviewFeePath = useMemo(() => {
+    const path = mapRoutes.find((r) => r.id === `opt-${mapMode}-0`)?.path;
+    return path && path.length >= 2 ? path : [];
+  }, [mapRoutes, mapMode]);
+
   const mapMarkers: MapMarker[] = useMemo(() => {
     const row = optionRows.find((r) => r.mode === mapMode);
     const seq: { id: string; lat: number; lng: number; label: string; via: boolean }[] = [];
@@ -1725,6 +1731,7 @@ export function PlanScreen() {
           {viewLegs[0] ? ` · first window ${formatDateTime(viewLegs[0].departAt)}` : ""}
           {totals.requiredKwh > 0 ? ` · ${formatNumber(totals.requiredKwh, 1)} kWh required` : ""}
         </p>
+        <RoadFeeSuggestions path={overviewFeePath} className="mt-4" />
         <div className="mt-4 flex gap-2">
           {clearConfirm ? (
             <ConfirmStrip
