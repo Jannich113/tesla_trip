@@ -933,7 +933,48 @@ describe("leg modes", () => {
       detourKm: 18,
       preferredNetwork: "tesla",
     });
-    assert.equal(via, null, "no other network when a preferred one is selected");
+    assert.equal(via, null, "strict window does not invent another network");
+    const reached = pickViaAtRange({
+      path,
+      locations: [onlyIonity],
+      budgetKwh: 55,
+      minKwh: 30,
+      totalKwh: 100,
+      mode: "fastest",
+      focus: "time",
+      detourKm: 18,
+      preferredNetwork: "tesla",
+    });
+    assert.equal(reached?.id, "only-ionity", "still stop if the preferred network is not reachable");
+  });
+
+  it("fastest uses a reachable Tesla even when it sits before the 8–25% band", () => {
+    const path: [number, number][] = [];
+    for (let i = 0; i <= 20; i++) {
+      path.push([55.4 - i * 0.2, 10.4 - i * 0.05]);
+    }
+    const earlyTesla = {
+      id: "early-tesla",
+      lat: path[4][0],
+      lng: path[4][1],
+      kind: "supercharger" as const,
+      usdPerKwh: 0.5,
+      name: "Tesla Dresden",
+      short: "Dresden",
+      networkId: "tesla",
+    };
+    const via = pickViaAtRange({
+      path,
+      locations: [earlyTesla],
+      budgetKwh: 55,
+      minKwh: 30,
+      totalKwh: 100,
+      mode: "fastest",
+      focus: "time",
+      detourKm: 18,
+      preferredNetwork: "tesla",
+    });
+    assert.equal(via?.id, "early-tesla");
   });
 
   it("cheapest still price-hunts; small preferred premium OK", () => {
