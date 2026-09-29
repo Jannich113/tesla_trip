@@ -8,10 +8,8 @@ import {
   type CheapAvoid,
   addDaysYmd,
   addMinutesDateTime,
-  addMinutesHhmm,
   asDateTime,
   chargeSearchKm,
-  cheapDetourKm,
   extraMileageKr,
   chargeFitScore,
   defaultFocus,
@@ -42,12 +40,10 @@ import {
   type VariableFeed,
 } from "./variable-rates";
 import {
-  alongFraction,
   haversineM,
   minDistToPathM,
   pickViaAtRange,
   splitRoutedLeg,
-  spreadAlongPath,
   locationsNearPath,
 } from "./insert";
 import { estimateTolls } from "./tolls";
@@ -327,7 +323,7 @@ export function applyLiveRoutes(
   legs: PricedLeg[],
   lookup: (from: PlanStop, to: PlanStop, mode: LegMode) => RoutedLeg | undefined,
   speedEff: SpeedEff,
-  avoid: boolean | CheapAvoid = false,
+  _avoid: boolean | CheapAvoid = false,
 ): PricedLeg[] {
   return legs.map((leg) => {
     const live = lookup(leg.from, leg.to, leg.mode);
@@ -965,7 +961,6 @@ export function pricePlan(opts: {
     const target = userTarget ?? autoTarget;
     const wantCharge = required || suggested || userTarget != null;
     const kwhNeed = Math.max((target - soc) / 100, 0) * usableKwh;
-    const autoKwh = Math.max((autoTarget - soc) / 100, 0) * usableKwh;
     const chargeMinEst = (Math.max(kwhNeed, 5) / 150) * 60;
     const restDriveMin = route.seconds / 60 + jobs.reduce((n, j) => n + j.route.seconds / 60, 0);
     const slack = minutesBetweenDateTime(readyAt, plannedStart);

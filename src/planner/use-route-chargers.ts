@@ -105,6 +105,8 @@ export function useRouteChargers(routes: RoutedLeg[], radiusKm?: number) {
       cancelled = true;
       window.clearTimeout(timer);
     };
+    // paths is encoded in key; adding paths refetches when array identity changes without a new corridor.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, radiusKm]);
 
   const chargers = live.length ? live : local;

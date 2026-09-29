@@ -220,7 +220,7 @@ export function routeAb(
 }
 
 /** Eco is off the motorway — look farther toward services. Cheapest hunts a wider band. */
-export function chargeSearchKm(mode: LegMode, detourKm: number, focus?: ModeFocus, routeSeconds?: number) {
+export function chargeSearchKm(mode: LegMode, detourKm: number, focus?: ModeFocus, _routeSeconds?: number) {
   const km = Math.max(8, detourKm);
   if (mode === "eco" || focus === "distance") return Math.max(30, Math.round(km * 2.2));
   if (mode === "cheapest" || focus === "pris") return CHEAP_STALL_KM;

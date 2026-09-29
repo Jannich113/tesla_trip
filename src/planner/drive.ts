@@ -125,13 +125,6 @@ type OsrmRoute = {
   geometry?: { coordinates?: [number, number][] };
 };
 
-function pickOsrm(routes: OsrmRoute[]) {
-  if (!routes.length) return null;
-  return routes.reduce((best, route) =>
-    Number(route.duration ?? Infinity) < Number(best.duration ?? Infinity) ? route : best,
-  );
-}
-
 function osrmJson(route: OsrmRoute, extra: string): DriveRouteJson | null {
   const path: [number, number][] = [];
   for (const pt of route.geometry?.coordinates ?? []) {
