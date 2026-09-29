@@ -19,6 +19,20 @@ export type TripAlbum = {
   endDay?: string;
 };
 
+/** Planner save mirrored into Trips — planned, not driven. */
+export type PlannedTrip = {
+  id: string;
+  name: string;
+  from: string;
+  to: string;
+  stopCount: number;
+  startAt?: string;
+  min?: number;
+  mi?: number;
+  kr?: number;
+  savedAt: string;
+};
+
 export type AlbumDay = {
   day: string;
   label: string;
@@ -64,6 +78,7 @@ export type AlbumInsight = {
 
 type TripState = {
   albums: TripAlbum[];
+  planned: PlannedTrip[];
   seq: number;
 };
 
@@ -76,6 +91,8 @@ type TripStore = TripState & {
   renameAlbum: (id: string, name: string) => void;
   removeAlbum: (id: string) => void;
   setAlbumTrips: (id: string, tripIds: string[]) => void;
+  addPlanned: (trip: PlannedTrip) => PlannedTrip | null;
+  removePlanned: (id: string) => void;
   clearOwnerData: () => void;
 };
 
@@ -250,6 +267,7 @@ export const useTripStore = create<TripStore>()(
   persist(
     (set, get) => ({
       albums: [],
+      planned: [],
       seq: 0,
 
       addAlbum: (name, tripIds, range) => {
@@ -287,7 +305,24 @@ export const useTripStore = create<TripStore>()(
         set({ albums: get().albums.filter((a) => a.id !== id) });
       },
 
-      clearOwnerData: () => set({ albums: [], seq: 0 }),
+      clearOwnerData: () => set({ albums: [], planned: [], seq: 0 }),
+
+      addPlanned: (trip) => {
+        const label = trip.name.trim();
+        if (!label || !trip.id) return null;
+        const next: PlannedTrip = { ...trip, name: label };
+        set({
+          planned: [
+            next,
+            ...get().planned.filter((p) => p.id !== next.id && p.name !== label),
+          ],
+        });
+        return next;
+      },
+
+      removePlanned: (id) => {
+        set({ planned: get().planned.filter((p) => p.id !== id) });
+      },
 
       setAlbumTrips: (id, tripIds) => {
         const ids = uniqueIds(tripIds);
@@ -309,11 +344,12 @@ export const useTripStore = create<TripStore>()(
       name: "juniper-trip-albums",
       storage: createJSONStorage(() => safeLocalStorage()),
       skipHydration: true,
-      version: 2,
+      version: 3,
       migrate: (persisted, _fromVersion) => {
         const saved = (persisted ?? {}) as Partial<TripState>;
         return {
           albums: migrateAlbums(saved.albums),
+          planned: Array.isArray(saved.planned) ? saved.planned : [],
           seq: typeof saved.seq === "number" ? saved.seq : 0,
         };
       },
@@ -322,10 +358,11 @@ export const useTripStore = create<TripStore>()(
         return {
           ...current,
           albums: migrateAlbums(saved?.albums ?? current.albums),
+          planned: Array.isArray(saved?.planned) ? saved.planned : current.planned,
           seq: typeof saved?.seq === "number" ? saved.seq : current.seq,
         };
       },
-      partialize: (s) => ({ albums: s.albums, seq: s.seq }),
+      partialize: (s) => ({ albums: s.albums, planned: s.planned, seq: s.seq }),
     },
   ),
 );
