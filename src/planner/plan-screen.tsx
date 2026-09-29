@@ -63,6 +63,7 @@ import { useElprisStore } from "@/store/elpris-store";
 import { NETWORK_NATIVE, scaleCatalogKr, type FxTable } from "./charge-fx";
 import { countryProfile } from "./country-profiles";
 import { RoadFeeSuggestions } from "./road-fee-suggestions";
+import { appleDirectionsUrl, googleDirectionsUrl, parseMapShareUrl } from "./maps-share";
 import { ChargerPicker } from "./charger-picker";
 import { chargePickRadiusM } from "./charger-radius";
 import { minDistToPathM, spreadAlongPath } from "./insert";
@@ -536,6 +537,8 @@ export function PlanScreen() {
   const [naming, setNaming] = useState(false);
   const [clearConfirm, setClearConfirm] = useState(false);
   const [saveLabel, setSaveLabel] = useState("");
+  const [importUrl, setImportUrl] = useState("");
+  const [importError, setImportError] = useState("");
   const [pane, setPane] = useState<"plan" | "advanced" | "members">("plan");
   const [pickerStop, setPickerStop] = useState<string | null>(null);
   const [elpris, setElpris] = useState<ElprisData | null>(null);
@@ -1180,6 +1183,27 @@ export function PlanScreen() {
     toast(`Saved ${plan.name}`);
   }
 
+  function importFromMaps() {
+    let trip: ReturnType<typeof parseMapShareUrl>;
+    try {
+      trip = parseMapShareUrl(importUrl);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Could not read that share link";
+      setImportError(message);
+      toast.error(message);
+      return;
+    }
+    setImportError("");
+    reset();
+    for (const stop of trip.stops) {
+      addStopToStore({ name: stop.name, lat: stop.lat, lng: stop.lng });
+    }
+    const title = tripTitle(trip.stops);
+    if (title) setName(title);
+    setImportUrl("");
+    toast(`Imported ${trip.stops.length} stops`);
+  }
+
   async function exportToTesla(planStops: { name: string; lat: number; lng: number }[], title: string) {
     const pts = planStops.filter(
       (s) =>
@@ -1376,6 +1400,19 @@ export function PlanScreen() {
     const t = window.setTimeout(apply, 160);
     return () => window.clearTimeout(t);
   }, [routing, mapRoutes, mapMarkers]);
+
+  const sharePts = routePoints();
+  let googleHref = "";
+  let appleHref = "";
+  if (sharePts.length >= 2) {
+    try {
+      googleHref = googleDirectionsUrl(sharePts);
+      appleHref = appleDirectionsUrl(sharePts);
+    } catch {
+      googleHref = "";
+      appleHref = "";
+    }
+  }
 
   return (
     <div className="space-y-5 px-4 pb-6 [touch-action:manipulation]">
@@ -1804,6 +1841,76 @@ export function PlanScreen() {
                 Clear
               </button>
             </>
+          )}
+        </div>
+        <form
+          className="mt-3 flex gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            importFromMaps();
+          }}
+        >
+          <input
+            value={importUrl}
+            onChange={(e) => {
+              setImportUrl(e.target.value);
+              if (importError) setImportError("");
+            }}
+            placeholder="Paste a Google or Apple Maps link"
+            aria-label="Google or Apple Maps share link"
+            aria-invalid={importError ? true : undefined}
+            className="h-11 min-w-0 flex-1 rounded-xl bg-surface-2 px-3 text-sm outline-none"
+          />
+          <button
+            type="submit"
+            className="h-11 shrink-0 rounded-full bg-surface-2 px-4 text-sm font-medium text-muted"
+          >
+            Import
+          </button>
+        </form>
+        {importError ? (
+          <p role="alert" className="mt-2 text-xs text-amber-200">
+            {importError}
+          </p>
+        ) : (
+          <p className="mt-2 text-[11px] text-subtle">Stops only. Eco, Fastest, and Cheapest still run here.</p>
+        )}
+        <div className="mt-2 flex flex-wrap gap-2">
+          {googleHref ? (
+            <a
+              href={googleHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex h-9 items-center rounded-full bg-surface-2 px-3 text-[11px] font-medium text-muted"
+            >
+              Google Maps
+            </a>
+          ) : (
+            <button
+              type="button"
+              onClick={() => toast.error("Add a destination first")}
+              className="flex h-9 items-center rounded-full bg-surface-2 px-3 text-[11px] font-medium text-muted"
+            >
+              Google Maps
+            </button>
+          )}
+          {appleHref ? (
+            <a
+              href={appleHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex h-9 items-center rounded-full bg-surface-2 px-3 text-[11px] font-medium text-muted"
+            >
+              Apple Maps
+            </a>
+          ) : (
+            <button
+              type="button"
+              onClick={() => toast.error("Add a destination first")}
+              className="flex h-9 items-center rounded-full bg-surface-2 px-3 text-[11px] font-medium text-muted"
+            >
+              Apple Maps
+            </button>
           )}
         </div>
       </section>
