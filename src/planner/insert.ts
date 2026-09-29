@@ -211,10 +211,12 @@ export function pickViaOnPath(opts: {
   const preferredNetwork = opts.preferredNetwork ?? null;
   if (totalKwh <= 0 || budgetKwh <= 0 || path.length < 2) return null;
   const exclude = new Set(opts.excludeIds ?? []);
+  const fastestOnly =
+    Boolean(preferredNetwork) && (mode === "fastest" || focus === "time");
   const searchBand =
     mode === "cheapest" || focus === "pris"
-      ? CHEAP_STALL_KM * 1000
-      : Math.max(chargeSearchKm(mode, detourKm, focus) * 1000, 12_000);
+      ? Math.max(CHEAP_STALL_KM, detourKm, preferredNetwork ? 45 : 0) * 1000
+      : Math.max(chargeSearchKm(mode, detourKm, focus) * 1000, fastestOnly ? 40_000 : 12_000);
   const pool = locationsNearPath(locations, path, searchBand);
   const locRate = (loc: ViaLoc) => {
     const netId = networkIdFor(loc.kind, loc.networkId);
@@ -234,7 +236,11 @@ export function pickViaOnPath(opts: {
     const rate = locRate(loc);
     if (!(rate > 0)) continue;
     const extraKm = distM / 1000;
-    if (focus === "pris" && extraKm > CHEAP_STALL_KM) continue;
+    const capKm = Math.max(CHEAP_STALL_KM, detourKm);
+    const netId = networkIdFor(loc.kind, loc.networkId);
+    const isPref = Boolean(preferredNetwork && netId === preferredNetwork);
+    if (focus === "pris" && !isPref && extraKm > capKm) continue;
+    if (focus === "pris" && isPref && extraKm > 45) continue;
     const extraKr = extraMileageKr(distM);
     const fit = chargeFitScore(focus, {
       distM,
@@ -247,9 +253,9 @@ export function pickViaOnPath(opts: {
     const unused = (budgetKwh - energyTo) * 10;
     // Fastest/time: nearest on the motorway corridor wins inside the SOC window.
     // along/unused must not outweigh corridor proximity (legacy score preferred late-far).
-    const netId = networkIdFor(loc.kind, loc.networkId);
+    if (fastestOnly && netId !== preferredNetwork) continue;
     const preferBonus =
-      preferredNetwork && netId === preferredNetwork
+      !fastestOnly && preferredNetwork && netId === preferredNetwork
         ? focus === "pris"
           ? PREFERRED_RATE_PREMIUM_KR * 50
           : focus === "time" || mode === "fastest"
@@ -258,7 +264,9 @@ export function pickViaOnPath(opts: {
         : 0;
     const score =
       (focus === "pris"
-        ? -(rate * 50 + extraKr) + energyTo * 0.05
+        ? isPref
+          ? -(rate * 50) - extraKm * 0.05
+          : -(rate * 50 + extraKr)
         : focus === "time" || mode === "fastest"
           ? -distM + energyTo * 5 + (loc.kind === "supercharger" ? 800 : 0)
           : along - unused - fit) + preferBonus;
@@ -283,13 +291,15 @@ export function pickViaAtRange(opts: Parameters<typeof pickViaOnPath>[0]): ViaLo
   const pris = opts.mode === "cheapest" || focus === "pris";
   const memberships = opts.memberships ?? {};
   const preferredNetwork = opts.preferredNetwork ?? null;
+  const exclusiveFast =
+    Boolean(preferredNetwork) && (opts.mode === "fastest" || focus === "time");
   const locRate = (loc: ViaLoc) => {
     const netId = networkIdFor(loc.kind, loc.networkId);
     return (netId ? rateForNetwork(netId, Boolean(memberships[netId])) : null) ?? loc.usdPerKwh * 6.85;
   };
   const band = pris
-    ? CHEAP_STALL_KM * 1000
-    : Math.max(chargeSearchKm(opts.mode, opts.detourKm, focus) * 1000, 18_000);
+    ? Math.max(CHEAP_STALL_KM, opts.detourKm) * 1000
+    : Math.max(chargeSearchKm(opts.mode, opts.detourKm, focus) * 1000, exclusiveFast ? 40_000 : 18_000);
   const pool = locationsNearPath(opts.locations, opts.path, band);
   let best: ViaLoc | null = null;
   let bestScore = Infinity;
@@ -302,6 +312,7 @@ export function pickViaAtRange(opts: Parameters<typeof pickViaOnPath>[0]): ViaLo
     const d = approxM(lat, lng, loc.lat, loc.lng);
     if (d > band) continue;
     const netId = networkIdFor(loc.kind, loc.networkId);
+    if (exclusiveFast && netId !== preferredNetwork) continue;
     const isPref = Boolean(preferredNetwork && netId === preferredNetwork);
     if (pris) {
       const cost = locRate(loc) * 50 + extraMileageKr(d) - (isPref ? PREFERRED_RATE_PREMIUM_KR * 50 : 0);
@@ -320,6 +331,7 @@ export function pickViaAtRange(opts: Parameters<typeof pickViaOnPath>[0]): ViaLo
     }
   }
   if (best) return best;
+  if (exclusiveFast) return null;
   return {
     id: `range-${lat.toFixed(3)},${lng.toFixed(3)}`,
     lat,

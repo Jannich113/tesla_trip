@@ -9,7 +9,7 @@ export type ChargerPoint = {
   kind?: string;
 };
 
-/** Meters. Same band as charge search: detour for eco/fastest, cheap-stall cap for cheapest. */
+/** Meters. Eco/fastest use the detour band. Cheapest is at least 15 km and grows with charge search. */
 export function chargePickRadiusM(mode: LegMode, detourKm: number) {
   return chargeSearchKm(mode, detourKm) * 1000;
 }

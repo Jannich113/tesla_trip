@@ -528,14 +528,17 @@ function toPriced(
       fxEur: variable.fx.EUR,
     });
     if (quoted) {
+      const hasAbo = Boolean(netId && memberships[netId]);
+      const catalog = netId ? rateForNetwork(netId, hasAbo) : null;
+      const rateKr = hasAbo && catalog != null ? Math.min(quoted.rateKr, catalog) : quoted.rateKr;
       return {
         locationId: loc.id,
         name: loc.short || loc.name,
         kind: loc.kind,
         kwh: billedKwh,
-        kr: billedKwh * quoted.rateKr,
-        rateKr: quoted.rateKr,
-        label: chargerLabel(loc, Boolean(memberships[netId!])),
+        kr: billedKwh * rateKr,
+        rateKr,
+        label: chargerLabel(loc, hasAbo),
         inBand,
         distM,
         windowLabel: quoted.label,
@@ -644,11 +647,14 @@ export function pickCharges(opts: {
   const preferredNetwork = opts.preferredNetwork ?? null;
   if (kwhNeed <= 0.05 || !locations.length) return null;
   const preferCheap = focus === "pris";
-  const userBand = Math.max(Math.min(detourKm, CHEAP_STALL_KM) * 1000, 80);
+  const cheapKm = Math.max(CHEAP_STALL_KM, detourKm);
+  const userBand = preferCheap
+    ? cheapKm * 1000
+    : Math.max(Math.min(detourKm, 80) * 1000, 80);
   const searchBand = preferCheap
-    ? CHEAP_STALL_KM * 1000
+    ? cheapKm * 1000
     : Math.max(chargeSearchKm(mode, detourKm, focus, opts.routeSeconds) * 1000, userBand);
-  const maxExtraMin = preferCheap ? (CHEAP_STALL_KM / 80) * 60 : Infinity;
+  const maxExtraMin = preferCheap ? (cheapKm / 80) * 60 : Infinity;
   const locRate = (loc: ChargeLocation) => {
     const id = networkIdFor(loc.kind, loc.networkId);
     const site = variable && id ? matchVariableSite(variable.sites, loc.lat, loc.lng, id) : null;
@@ -668,7 +674,11 @@ export function pickCharges(opts: {
     return (id ? rateForNetwork(id, Boolean(memberships[id])) : null) ?? usdToKr(loc.usdPerKwh);
   };
 
-  const band = preferCheap ? CHEAP_STALL_KM * 1000 : Math.max(searchBand, 40_000);
+  const exclusiveFast = Boolean(preferredNetwork) && (mode === "fastest" || focus === "time");
+  const preferReachM = preferredNetwork ? 45_000 : 0;
+  const band = preferCheap
+    ? Math.max(cheapKm * 1000, preferReachM)
+    : Math.max(searchBand, 40_000);
   const nearby = [
     ...locationsNearPath(locations, path, band),
     ...locations.filter((l) => l.id === preferId || l.id === backupId),
@@ -679,8 +689,17 @@ export function pickCharges(opts: {
       (s) =>
         s.loc.id === preferId ||
         s.loc.id === backupId ||
+        (preferredNetwork &&
+          networkIdFor(s.loc.kind, s.loc.networkId) === preferredNetwork &&
+          s.distM <= preferReachM &&
+          locRate(s.loc) > 0.3) ||
         ((s.distM / 1000 / 80) * 60 <= maxExtraMin && locRate(s.loc) > 0.3),
-    );
+    )
+    .filter((s) => {
+      if (!exclusiveFast) return true;
+      if (s.loc.id === preferId) return true;
+      return networkIdFor(s.loc.kind, s.loc.networkId) === preferredNetwork;
+    });
   const rankedNear = preferCheap
     ? [...nearby].sort((a, b) => locRate(a.loc) - locRate(b.loc) || a.distM - b.distM).slice(0, 36)
     : [...nearby].sort((a, b) => a.distM - b.distM).slice(0, 24);
@@ -761,7 +780,10 @@ export function pickCharges(opts: {
   };
 
   const worth = preferCheap
-    ? scored.filter((s) => s.distM <= CHEAP_STALL_KM * 1000 && netSave(s) >= STALL_SAVE_KR)
+    ? scored.filter((s) => {
+        if (isPreferred(s.loc) && s.distM <= preferReachM) return true;
+        return s.distM <= cheapKm * 1000 && netSave(s) >= STALL_SAVE_KR;
+      })
     : scored;
   const rankedPool = worth.length ? worth : scored;
 
@@ -773,13 +795,27 @@ export function pickCharges(opts: {
     cheapest: locId === cheapestId,
   });
 
-  const inSearch = rankedPool.filter((s) => s.distM <= searchBand).sort(byRank);
-  const outside = rankedPool.filter((s) => s.distM > searchBand).sort(byRank);
+  const inSearch = rankedPool.filter((s) => s.distM <= searchBand || (preferCheap && isPreferred(s.loc) && s.distM <= preferReachM)).sort(byRank);
+  const outside = rankedPool.filter((s) => s.distM > searchBand && !(preferCheap && isPreferred(s.loc))).sort(byRank);
   const forced = preferId
     ? scored.find((s) => s.loc.id === preferId && s.distM <= Math.max(searchBand, 40_000))
     : null;
+  const preferredPool = preferCheap
+    ? inSearch.filter((s) => isPreferred(s.loc))
+    : [];
+  const bestPref = preferredPool.reduce<(typeof scored)[0] | null>(
+    (best, s) => (!best || s.priced.kr + extraDriveKr(s.distM) < best.priced.kr + extraDriveKr(best.distM) ? s : best),
+    null,
+  );
+  const betterDeal = bestPref
+    ? inSearch.filter((s) => {
+        if (isPreferred(s.loc)) return false;
+        if (s.distM > cheapKm * 1000) return false;
+        return s.priced.kr + extraDriveKr(s.distM) + 1 < bestPref.priced.kr + extraDriveKr(bestPref.distM);
+      })
+    : [];
   const primarySrc = preferCheap
-    ? (inSearch[0] ?? forced ?? outside[0])
+    ? (betterDeal.sort(byRank)[0] ?? bestPref ?? inSearch[0] ?? forced ?? outside[0])
     : (forced ?? inSearch[0] ?? outside[0]);
   if (!primarySrc) return null;
 
@@ -883,7 +919,7 @@ export function pricePlan(opts: {
         totalKwh: kwh,
         mode,
         focus,
-        detourKm: mode === "cheapest" ? CHEAP_STALL_KM : job.detourKm,
+        detourKm: mode === "cheapest" ? Math.max(CHEAP_STALL_KM, job.detourKm) : job.detourKm,
         excludeIds: usedVias,
         memberships: opts.memberships,
         preferredNetwork: opts.preferredNetwork,
@@ -986,7 +1022,7 @@ export function pricePlan(opts: {
       ? pickCharges({
           kwhNeed: Math.max(kwhNeed, 5),
           path: route.path,
-          detourKm: mode === "cheapest" ? CHEAP_STALL_KM : job.detourKm,
+          detourKm: mode === "cheapest" ? Math.max(CHEAP_STALL_KM, job.detourKm) : job.detourKm,
           mode,
           focus,
           locations,

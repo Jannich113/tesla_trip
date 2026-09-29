@@ -23,6 +23,7 @@ import {
   dkNowDateTime,
   detourSavings,
   epaWhPerMi,
+  defaultSpeedEff,
   fetchRoute,
   corridorKey,
   lookupCachedRoute,
@@ -180,7 +181,12 @@ function CheapAvoidToggles({ className }: { className?: string }) {
   );
 }
 
-function locationsForRoutes(all: ChargeLocation[], routes: RoutedLeg[], maxM = 22_000) {
+function locationsForRoutes(
+  all: ChargeLocation[],
+  routes: RoutedLeg[],
+  maxM = 22_000,
+  preferredNetwork?: string | null,
+) {
   const paths = routes.map((r) => r.path).filter((p) => p.length >= 2);
   if (!paths.length) return all.filter((l) => l.kind === "home");
   const near = new Map<string, ChargeLocation>();
@@ -189,7 +195,9 @@ function locationsForRoutes(all: ChargeLocation[], routes: RoutedLeg[], maxM = 2
       near.set(l.id, l);
       continue;
     }
-    if (paths.some((p) => minDistToPathM(l.lat, l.lng, p) < maxM)) near.set(l.id, l);
+    const id = l.networkId || (l.kind === "supercharger" ? "tesla" : null);
+    const limit = preferredNetwork && id === preferredNetwork ? Math.max(maxM, 45_000) : maxM;
+    if (paths.some((p) => minDistToPathM(l.lat, l.lng, p) < limit)) near.set(l.id, l);
   }
   return [...near.values()];
 }
@@ -218,6 +226,7 @@ function buildPlanLocations(
   locationsStored: ChargeLocation[],
   routeChargers: ChargeLocation[],
   searchRoutes: RoutedLeg[],
+  preferredNetwork?: string | null,
 ): ChargeLocation[] {
   if (!live) return locationsStored.filter((l) => l.kind === "home").slice(0, 4);
   const paths = searchRoutes.map((r) => r.path).filter((p) => p.length >= 2);
@@ -240,6 +249,13 @@ function buildPlanLocations(
       .sort((a, b) => a.l.usdPerKwh - b.l.usdPerKwh)
       .slice(0, 12);
     for (const s of ranked) picked.set(s.l.id, s.l);
+    if (preferredNetwork) {
+      for (const l of all) {
+        const id = l.networkId || (l.kind === "supercharger" ? "tesla" : null);
+        if (id !== preferredNetwork) continue;
+        if (minDistToPathM(l.lat, l.lng, p) < 45_000) picked.set(l.id, l);
+      }
+    }
   }
   return [...picked.values()];
 }
@@ -290,9 +306,25 @@ function sameLastOptions(
 }
 
 function modeStopChain(legs: PricedLeg[]) {
-  if (!legs.length) return [] as { name: string; via: boolean }[];
-  const out = [{ name: legs[0].from.name, via: false }];
-  for (const leg of legs) out.push({ name: leg.to.name, via: Boolean(leg.via) });
+  if (!legs.length) return [] as { name: string; via: boolean; charge: string }[];
+  const out: { name: string; via: boolean; charge: string }[] = [
+    { name: legs[0].from.name, via: false, charge: "" },
+  ];
+  for (const leg of legs) {
+    if (leg.accepted && leg.charge) {
+      const atInserted = leg.from.id.startsWith("via-");
+      const last = out[out.length - 1];
+      const label = `${formatNumber(leg.charge.kwh, 0)} kWh · ${formatKrValue(leg.charge.kr, 0)} kr`;
+      if (atInserted && last) {
+        last.via = true;
+        last.name = leg.charge.name || last.name;
+        last.charge = label;
+      } else {
+        out.push({ name: leg.charge.name || "Charge", via: true, charge: label });
+      }
+    }
+    out.push({ name: leg.to.name, via: Boolean(leg.via), charge: "" });
+  }
   return out;
 }
 
@@ -417,17 +449,18 @@ const OptionList = memo(function OptionList({
               {open ? (
                 <ol className="mt-2 space-y-1 pl-5">
                   {chain.map((s, i) => (
-                    <li key={`${row.mode}-${i}`} className="flex items-center gap-2 text-xs text-muted">
+                    <li key={`${row.mode}-${i}`} className="flex items-start gap-2 text-xs text-muted">
                       <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-background text-[10px] tabular-nums">
                         {i + 1}
                       </span>
-                      <span className="truncate">
+                      <span className="min-w-0">
                         {s.via ? (
                           <span className="mr-1 text-[10px] font-medium uppercase tracking-wide text-amber-300">
                             via
                           </span>
                         ) : null}
                         {s.name}
+                        {s.charge ? <span className="mt-0.5 block text-[11px] text-subtle">{s.charge}</span> : null}
                       </span>
                     </li>
                   ))}
@@ -484,6 +517,7 @@ export function PlanScreen() {
   const moveStop = usePlanStore((s) => s.moveStop);
   const setLegMode = usePlanStore((s) => s.setLegMode);
   const setLegDetour = usePlanStore((s) => s.setLegDetour);
+  const setAllDetours = usePlanStore((s) => s.setAllDetours);
   const setLegWait = usePlanStore((s) => s.setLegWait);
   const setAllModes = usePlanStore((s) => s.setAllModes);
   const cheapAvoidMotorways = usePlanStore((s) => s.cheapAvoidMotorways);
@@ -498,13 +532,17 @@ export function PlanScreen() {
   const when = usePlanStore((s) => s.when);
   const legWhen = usePlanStore((s) => s.legWhen);
   const whPerMiOverride = usePlanStore((s) => s.whPerMi);
+  const usableKwhOverride = usePlanStore((s) => s.usableKwh);
   const speedEffOverride = usePlanStore((s) => s.speedEff);
   const setWhenKind = usePlanStore((s) => s.setWhenKind);
   const setWhen = usePlanStore((s) => s.setWhen);
   const setLegWhen = usePlanStore((s) => s.setLegWhen);
   const setSpeedEff = usePlanStore((s) => s.setSpeedEff);
+  const setUsableKwh = usePlanStore((s) => s.setUsableKwh);
   const networkAbo = usePlanStore((s) => s.networkAbo);
   const setNetworkAbo = usePlanStore((s) => s.setNetworkAbo);
+  const preferredNetwork = usePlanStore((s) => s.preferredNetwork);
+  const setPreferredNetwork = usePlanStore((s) => s.setPreferredNetwork);
   const savePlan = usePlanStore((s) => s.savePlan);
   const loadPlan = usePlanStore((s) => s.loadPlan);
   const deleteSaved = usePlanStore((s) => s.deleteSaved);
@@ -657,10 +695,15 @@ export function PlanScreen() {
   }, [stops, detours]);
 
   const carWhPerMi = epaWhPerMi(profile.usableKwh, profile.epaRangeMi);
+  const packKwh = usableKwhOverride && usableKwhOverride > 0 ? usableKwhOverride : profile.usableKwh;
+  const generalWh = whPerMiOverride && whPerMiOverride > 0 ? whPerMiOverride : carWhPerMi;
   const speedEff = normalizeSpeedEff(
     speedEffOverride,
-    whPerMiOverride && whPerMiOverride > 0 ? whPerMiOverride : carWhPerMi,
+    whPerMiOverride && whPerMiOverride > 0 ? whPerMiOverride : epaWhPerMi(packKwh, profile.epaRangeMi),
   );
+  useEffect(() => {
+    if (preferredNetwork && !networkAbo[preferredNetwork]) setPreferredNetwork(null);
+  }, [preferredNetwork, networkAbo, setPreferredNetwork]);
   const clock = useMemo(() => asDateTime(when || dkNowDateTime()), [when]);
 
   const hours = useMemo(() => {
@@ -745,12 +788,12 @@ export function PlanScreen() {
   const chargersLoading = stableChargersLoading || cheapChargersLoading;
 
   const stableLocations = useMemo(
-    () => buildPlanLocations(live, locationsStored, stableChargers, stableSearchRoutes),
-    [live, locationsStored, stableChargers, stableSearchRoutes],
+    () => buildPlanLocations(live, locationsStored, stableChargers, stableSearchRoutes, preferredNetwork),
+    [live, locationsStored, stableChargers, stableSearchRoutes, preferredNetwork],
   );
   const locations = useMemo(
-    () => buildPlanLocations(live, locationsStored, routeChargers, searchRoutes),
-    [live, locationsStored, routeChargers, searchRoutes],
+    () => buildPlanLocations(live, locationsStored, routeChargers, searchRoutes, preferredNetwork),
+    [live, locationsStored, routeChargers, searchRoutes, preferredNetwork],
   );
   const chargerPool = useMemo(() => {
     const byId = new Map<string, ChargeLocation>();
@@ -768,7 +811,7 @@ export function PlanScreen() {
     detours: detours.length ? detours : stops.slice(1).map(() => DEFAULT_DETOUR_KM),
     waitCapMin: waits.length ? waits : stops.slice(1).map(() => DEFAULT_WAIT_MIN),
     soc,
-    usableKwh: profile.usableKwh,
+    usableKwh: packKwh,
     locations,
     hours,
     acKw: profile.acKw,
@@ -782,6 +825,7 @@ export function PlanScreen() {
     backupIds: stops.slice(1).map((_, i) => backupLoc[i] ?? null),
     preferIds: stops.slice(1).map((_, i) => prefer[i] ?? null),
     memberships: networkAbo,
+    preferredNetwork: preferredNetwork && networkAbo[preferredNetwork] ? preferredNetwork : null,
     focuses: activeModes.map((m) => (m === "cheapest" ? "pris" : m === "eco" ? "distance" : "time")),
     // Never share Cheapest avoid with Eco/Fastest via the common planArgs bag.
     avoid: NO_CHEAP_AVOID,
@@ -819,16 +863,21 @@ export function PlanScreen() {
       }
       // Eco/Fastest price from stable corridors only — Cheapest avoid must not change their stall pool.
       const locPool = mode === "cheapest" ? locations : stableLocations;
-      const cacheKey = `${mode}|${corridorStamp}|${soc}|${locPool.length}|${hours.length}|${avoid.motorways}|${avoid.tolls}|${avoid.roadFees}`;
+      const cacheKey = `${mode}|${corridorStamp}|${soc}|${locPool.length}|${hours.length}|${avoid.motorways}|${avoid.tolls}|${avoid.roadFees}|${planArgs.detours.join(",")}|${planArgs.preferredNetwork ?? ""}|stalls2`;
       const cached = pricedMemo.current.get(cacheKey);
       if (cached) return { mode, avoid, priced: cached };
       const priced = pricePlan({
         ...planArgs,
         modes: stops.slice(1).map(() => mode),
         focuses: stops.slice(1).map(() => (mode === "cheapest" ? "pris" : mode === "eco" ? "distance" : "time")),
-        detours: planArgs.detours.map((d) => (mode === "cheapest" ? 15 : d)),
+        detours: planArgs.detours.map((d) => (mode === "cheapest" ? Math.max(15, d) : d)),
         routes: optionRoutes,
-        locations: locationsForRoutes(locPool, optionRoutes),
+        locations: locationsForRoutes(
+          locPool,
+          optionRoutes,
+          mode === "fastest" && planArgs.preferredNetwork ? 45_000 : 22_000,
+          mode === "cheapest" ? planArgs.preferredNetwork : null,
+        ),
         avoid,
       });
       pricedMemo.current.set(cacheKey, priced);
@@ -840,7 +889,7 @@ export function PlanScreen() {
     });
     // planArgs and routesFor are new every render; their inputs are already listed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [live, corridorStamp, stops, detours, waits, soc, profile.usableKwh, profile.acKw, locations, stableLocations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc, prefer, networkAbo, cheapAvoid]);
+  }, [live, corridorStamp, stops, detours, waits, soc, packKwh, profile.acKw, locations, stableLocations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc, prefer, networkAbo, preferredNetwork, cheapAvoid]);
 
   const optionRows = useMemo(() => {
     const rows = pricedRows.map(({ mode, priced, avoid }) => {
@@ -1445,15 +1494,74 @@ export function PlanScreen() {
       </div>
 
       {pane === "members" ? (
-        <NetworksPanel abo={networkAbo} onToggle={setNetworkAbo} />
+        <NetworksPanel
+          abo={networkAbo}
+          onToggle={setNetworkAbo}
+          preferred={preferredNetwork}
+          onPrefer={setPreferredNetwork}
+        />
       ) : (
       <>
       {pane === "advanced" ? (
         <div className="space-y-4">
           <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
             <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Start battery</p>
-            <label className="mt-3 flex items-center justify-between gap-3 rounded-xl bg-surface-2 px-3 py-2">
-              <span className="text-xs text-muted">{profile.usableKwh} kWh usable</span>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <label className="text-[11px] text-muted">
+                Battery
+                <span className="mt-1 flex h-11 items-center gap-1 rounded-xl bg-surface-2 px-3">
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    min={20}
+                    max={200}
+                    step={0.5}
+                    value={packKwh}
+                    onChange={(e) => {
+                      const n = Number(e.target.value);
+                      if (!Number.isFinite(n)) return;
+                      setUsableKwh(Math.max(20, Math.min(200, Math.round(n * 10) / 10)));
+                    }}
+                    className="h-full w-full bg-transparent text-sm tabular-nums text-foreground outline-none"
+                  />
+                  <span className="shrink-0 text-xs text-subtle">kWh</span>
+                </span>
+              </label>
+              <label className="text-[11px] text-muted">
+                Efficiency
+                <span className="mt-1 flex h-11 items-center gap-1 rounded-xl bg-surface-2 px-3">
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    min={0.1}
+                    max={1.2}
+                    step={0.01}
+                    value={Number((generalWh / 1000).toFixed(3))}
+                    onChange={(e) => {
+                      const n = Number(e.target.value);
+                      if (!Number.isFinite(n) || n <= 0) return;
+                      setSpeedEff(defaultSpeedEff(Math.min(1.2, n) * 1000));
+                    }}
+                    className="h-full w-full bg-transparent text-sm tabular-nums text-foreground outline-none"
+                  />
+                  <span className="shrink-0 text-xs text-subtle">kWh/mi</span>
+                </span>
+              </label>
+            </div>
+            {(usableKwhOverride != null || speedEffOverride) ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setUsableKwh(null);
+                  setSpeedEff(null);
+                }}
+                className="mt-2 text-[11px] text-muted underline"
+              >
+                Reset pack and efficiency
+              </button>
+            ) : null}
+            <label className="mt-2 flex items-center justify-between gap-3 rounded-xl bg-surface-2 px-3 py-2">
+              <span className="text-xs text-muted">State of charge</span>
               <span className="flex items-center gap-1 text-sm">
                 <input
                   type="number"
@@ -1484,16 +1592,22 @@ export function PlanScreen() {
             <p className="mt-4 text-[11px] font-medium uppercase tracking-wide text-muted">Charge search</p>
             <div className="mt-1 flex gap-1">
               {DETOUR_KM.map((km) => {
-                const on = detours.length > 0 && detours.every((d) => d === km);
+                const chosen = detours.length ? detours[0] : DEFAULT_DETOUR_KM;
+                const on = chosen === km && (detours.length === 0 || detours.every((d) => d === km));
                 return (
                   <button
                     key={km}
                     type="button"
-                    onClick={() => {
-                      stops.slice(1).forEach((_, i) => setLegDetour(i, km));
+                    onPointerDown={(e) => {
+                      if (e.button !== 0) return;
+                      setAllDetours(km);
+                    }}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setAllDetours(km);
                     }}
                     className={cn(
-                      "h-9 flex-1 rounded-full text-[11px] font-medium",
+                      "h-11 flex-1 rounded-full text-[11px] font-medium",
                       on ? "bg-foreground text-background" : "bg-surface-2 text-muted",
                     )}
                   >
@@ -1717,6 +1831,7 @@ export function PlanScreen() {
         <p className="mt-1 text-[11px] text-subtle">
           Eco uses 80–100 km/t roads (not 50–60). Fastest takes motorways. Cheapest hunts the lowest kWh.
         </p>
+        <PreferNetwork abo={networkAbo} preferred={preferredNetwork} onPick={setPreferredNetwork} />
         <OptionList
           rows={optionRows}
           mixed={mixed}
@@ -2675,6 +2790,80 @@ function scaleKr(networkId: string, kr: number | null, fx: FxTable | null) {
   return scaleCatalogKr(kr, native.ccy, fx);
 }
 
+function PreferNetwork({
+  abo,
+  preferred,
+  onPick,
+}: {
+  abo: Record<string, boolean>;
+  preferred: string | null;
+  onPick: (id: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const subscribed = EU_NETWORKS.filter((n) => abo[n.id]);
+  const current = subscribed.find((n) => n.id === preferred) ?? null;
+  return (
+    <div className="relative mt-3">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex h-9 max-w-full items-center gap-2 rounded-full bg-surface-2 px-3 text-xs"
+      >
+        <span className="truncate">
+          {current ? `Prefer ${current.name}` : "Prefer a network"}
+        </span>
+        <ChevronDown className="size-3.5 shrink-0 text-muted" />
+      </button>
+      {current ? (
+        <p className="mt-1 text-[11px] text-subtle">
+          Fastest uses only {current.name}. Cheapest uses it unless another stall is cheaper.
+        </p>
+      ) : null}
+      {open ? (
+        <div className="absolute left-0 z-30 mt-1 w-64 overflow-hidden rounded-xl bg-surface shadow-[var(--shadow-border)]">
+          <button
+            type="button"
+            onClick={() => {
+              onPick(null);
+              setOpen(false);
+            }}
+            className={cn(
+              "flex w-full px-3 py-2.5 text-left text-sm",
+              !current ? "text-foreground" : "text-muted",
+            )}
+          >
+            No preference
+          </button>
+          {subscribed.length === 0 ? (
+            <p className="border-t border-border px-3 py-2.5 text-[11px] text-subtle">
+              Turn on a membership first. Only networks with an abo can be preferred.
+            </p>
+          ) : (
+            subscribed.map((n) => (
+              <button
+                key={n.id}
+                type="button"
+                onClick={() => {
+                  onPick(n.id);
+                  setOpen(false);
+                }}
+                className={cn(
+                  "flex w-full flex-col border-t border-border px-3 py-2.5 text-left",
+                  current?.id === n.id ? "bg-surface-2" : "",
+                )}
+              >
+                <span className="text-sm">{n.name}</span>
+                <span className="text-[11px] text-muted">{n.aboName}</span>
+              </button>
+            ))
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 const ABO_GROUPS: { id: string; label: string; hint: string; ids: string[] }[] = [
   { id: "car", label: "Car", hint: "Owner rate on Superchargers", ids: ["tesla"] },
   { id: "highway", label: "Highway HPC", hint: "IONITY, Fastned, Electra, Allego", ids: ["ionity", "fastned", "electra", "allego"] },
@@ -2685,9 +2874,13 @@ const ABO_GROUPS: { id: string; label: string; hint: string; ids: string[] }[] =
 function NetworksPanel({
   abo,
   onToggle,
+  preferred,
+  onPrefer,
 }: {
   abo: Record<string, boolean>;
   onToggle: (id: string, on: boolean) => void;
+  preferred: string | null;
+  onPrefer: (id: string | null) => void;
 }) {
   const [region, setRegion] = useState<EuRegion>("DK");
   const [openGroup, setOpenGroup] = useState<Record<string, boolean>>({ car: true, highway: true, nordic: true });
@@ -2742,6 +2935,7 @@ function NetworksPanel({
             : "None on — trip uses ad-hoc kWh"}
         </p>
         <p className="mt-1 text-[11px] text-subtle">Monthly fees stay out of the route total.</p>
+        <PreferNetwork abo={abo} preferred={preferred} onPick={onPrefer} />
       </div>
 
       {groups.map((group) => {

@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { chargerMark, chargePickRadiusM, chargersWithinRadius } from "./charger-radius.ts";
-import { chargeSearchKm, CHEAP_STALL_KM, stallKw } from "./modes.ts";
+import { chargeSearchKm, stallKw } from "./modes.ts";
 import { rateForNetwork } from "./networks.ts";
 
 describe("charger pick radius", () => {
   it("follows charge search for each mode", () => {
     assert.equal(chargePickRadiusM("fastest", 12), chargeSearchKm("fastest", 12) * 1000);
     assert.equal(chargePickRadiusM("eco", 12), chargeSearchKm("eco", 12) * 1000);
-    assert.equal(chargePickRadiusM("cheapest", 40), CHEAP_STALL_KM * 1000);
+    assert.equal(chargePickRadiusM("cheapest", 40), 40_000);
     assert.ok(chargePickRadiusM("eco", 12) > chargePickRadiusM("fastest", 12));
   });
 

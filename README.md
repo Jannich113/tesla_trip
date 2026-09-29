@@ -1,8 +1,8 @@
 # tesla_trip
 
-A dark, mobile-first companion for Tesla ownership — trips, charging costs, Danish spot electricity (`Elpris`), a local vehicle catalog, and an EV trip planner with eco / fastest / cheapest corridors.
+A dark, mobile-first companion for a Tesla: trips, charging costs, Danish spot prices, a local vehicle catalog, and an EV trip planner.
 
-Demo data ships out of the box. Owner-only Tesla linking is scaffolded; nothing remote is commanded.
+Demo data is included. Tesla linking is owner-only and local. The app does not send remote commands.
 
 ![Home — battery, range, and model hero](docs/readme/home.png)
 
@@ -11,78 +11,89 @@ Demo data ships out of the box. Owner-only Tesla linking is scaffolded; nothing 
 ## Features
 
 ### Home
-At-a-glance status for the selected car: parked/driving, battery %, rated range, charge limit, and the local hero image for the current model + paint.
+Status for the selected car: parked or driving, battery, rated range, and the hero for the current model and paint.
 
-- Odometer, charged energy, regen, and vs-petrol savings tiles
-- Charge limit marker on the battery bar
-- Header + bottom tab follow the selected model name
-- Link into the trip planner (`/plan`)
+- Odometer, charged energy, regen, and vs-petrol savings
+- Charge-limit marker on the battery bar
+- Header and the profile tab use the selected model name
+- Opens the trip planner at [`/plan`](/plan)
 
 ### Trip planner
-Plan a drive with three independent corridors. Opened from Home (or Trips) at [`/plan`](/plan).
+Three corridors for the same stops. Open it from Home or go to [`/plan`](/plan).
+
+The planner has three panes. **Plan** is the trip. **Advanced** is the car and the search radius. **Memberships** is which networks you pay for. A membership applies to every pane.
 
 ![Trip planner — map, stops, and colored routes](docs/readme/plan.png)
 
-- **Eco** — 80–100 km/t roads, avoids motorways and tolls when it can
-- **Fastest** — motorway corridor, time first, tolls allowed
-- **Cheapest** — same roads as Fastest unless you toggle avoid motorway / toll / road fee; hunts cheaper stalls (max ~15 km extra per leg)
-- Leave or arrive clock (date + time); wait only counts when a cheap slot actually delays you
-- Charge when SOC would drop under 25% (never below 8%); typical fill to 80%
-- Suggested optional charge in the 26–45% band when the price is good
-- EU charging networks + OpenChargeMap along the polyline; live Elpris for kWh cost
-- Save / load named plans (default name from start → end) and export to Tesla nav
+**Stops.** Add a stop at the top. Tap a stop to change the address. The first stop gets a leave time; later stops stay on Auto until you set leave or arrive. A later arrival time moves the start leave back by the drive time. Tap the time note to edit it.
+
+**Routes.** Eco, Fastest, and Cheapest stay independent. Expand a mode to see every stop, including each charge as its own via with kWh and price.
+
+| Mode | What it optimizes |
+| --- | --- |
+| Eco | 80–100 km/t roads. Uses a highway when it is the sensible road, not a motorway by default. A route about twice as slow as Fastest is penalized. |
+| Fastest | Motorways and the shortest time. Tolls and road fees are allowed. If you prefer a network, Fastest uses only that network. |
+| Cheapest | Lowest charging price inside the search radius. Stays on the preferred network unless another stall in that radius is actually cheaper. Avoid motorways, tolls, or road fees with the toggles on this row. |
+
+**Charging.** A stop is required if arrival would fall under 25%, and the plan never arrives below 8%. A normal fill goes to 80%. An optional stop in the 26–45% band is suggested only when the price is good and it adds at least 20%.
+
+**Preferred network.** Pick one network you already subscribe to. Fastest will not substitute another brand. Cheapest starts there and leaves it only for a better price in the search area.
+
+**Advanced.** Set usable battery kWh, a general kWh/mi, and the state of charge for this plan only. Charge-search distance is shared by the modes. Per-speed consumption (50 / 80 / 110 / 130 km/t) is in kWh/100 km. `kWh/mi = (kWh/100 km) × 0.0161`.
+
+**In and out.** Paste a Google Maps or Apple Maps link to import stops. Export the edited trip back to Google Maps, Apple Maps, or Tesla nav. Save uses “start → end” until you rename it, and stores the start date, total time, and cost. Clear asks before it wipes the draft. Saved plans can be opened again or filed under Trips.
 
 ![Trip planner — Eco, Fastest, Cheapest with avoid toggles](docs/readme/plan-modes.png)
 
 ### Trips
-Period filters (Day / Week / Month / Year / Total) with maps, energy charts, and expandable day/week/year subgroups.
+Day, week, month, year, and total. Each period nests into the one below it: years, then months, then weeks, then days.
 
 ![Trips — map, energy, road-trip groups](docs/readme/trips.png)
 
-- Road-trip albums you can name and date-range
-- Leaflet map of the selected period (OpenStreetMap)
-- Drive cost, energy, time, and places summary
-- Expand a day (or week/year bucket) to see individual trips
+- Named road-trip albums, including a start and end date instead of picking every drive
+- Map of the selected period
+- Drive cost, energy, time, and places
+- A day, week, or year opens to the trips inside it
 
 ### Costs
-Charging spend broken down by Home, Supercharger, and Custom locations — with editable rates and catch radius.
+Home, Supercharger, and custom locations, with your own rate and a catch radius.
 
 ![Costs — locations, map, Home / SC / Custom](docs/readme/costs.png)
 
-- Plugged-in session card with kWh to limit
-- Period pills aligned with Trips
-- Map pins for charge locations (visit counts)
-- Always-visible **Home · Supercharger · Custom · Per mile** tiles
-- Add custom places (address search or map pin) and set ¢/kWh + geofence radius
+- Session card while plugged in
+- Same period pills as Trips
+- Pins ranked by how often you charge there
+- Add a place by address or by dropping a pin, then set the price and radius
+- A logged session inside that radius is counted there
 
 ### Elpris
-Live Danish day-ahead spot prices from Energi Data Service, plus retailer tillæg.
+Danish day-ahead prices from Energi Data Service, plus the retailer tillæg.
 
 ![Elpris — DK1/DK2, elselskab, hourly bars](docs/readme/elpris.png)
 
-- Region switch: **DK1** (Vest) / **DK2** (Øst)
-- Elselskab dropdown (spot + Danish retailers with tillæg)
-- Current hour card + Today / Tomorrow hour lists
-- Color-tinted bars for cheap → expensive hours
+- **DK1** (west) or **DK2** (east)
+- Elselskab list: spot and retailers with tillæg
+- This hour, today, and tomorrow
+- Hours that have already passed are dimmed; tomorrow starts collapsed
 
-### Vehicle profile
-Pick the Tesla model and factory paint. Tab label, header, document title, and Start hero all follow the selection. Images are bundled under `public/vehicles/`.
+### Vehicle
+The model and paint you pick change the tab name, the header, and the Home hero. Images are in `public/vehicles/`.
 
 ![Vehicle — model dropdown and paint swatches](docs/readme/vehicle.png)
 
 ![Paint swap updates the hero (Pearl White)](docs/readme/vehicle-paint.png)
 
-- Models: Juniper, Highlander, Model Y, Model 3, Model S, Model X, Cybertruck
-- Factory paint swatches per model (pose-locked front/rear JPG heroes)
-- Tesla owner-access scaffold (demo VIN; no remote commands)
-- Privacy controls: precise location, show VIN, export / clear local data
-- Units: mi / km
+- Juniper, Highlander, Model Y, Model 3, Model S, Model X, Cybertruck
+- Factory paints, with a matched front and rear hero
+- Owner-access scaffold only. Demo VIN, no remote commands
+- Precise location, show VIN, export or clear local data
+- Miles or kilometres
 
 ---
 
 ## Vehicle catalog
 
-Local studio heroes — same front ¾ pose across paints within each model.
+Same front three-quarter pose for every paint of a model.
 
 | Juniper | Highlander | Model Y | Model 3 |
 |:---:|:---:|:---:|:---:|
@@ -91,8 +102,6 @@ Local studio heroes — same front ¾ pose across paints within each model.
 | Model S | Model X | Cybertruck |
 |:---:|:---:|:---:|
 | ![Model S](docs/readme/hero-model-s.jpg) | ![Model X](docs/readme/hero-model-x.jpg) | ![Cybertruck](docs/readme/hero-cybertruck.jpg) |
-
-Paint assets live at:
 
 ```text
 public/vehicles/{modelId}-{paintId}-{front|rear}.jpg
@@ -104,24 +113,24 @@ public/vehicles/{modelId}-{paintId}-{front|rear}.jpg
 
 | Tab | Route | What it does |
 | --- | --- | --- |
-| Home | `/` | Status, hero, battery & range |
-| Trips | `?tab=trips` | Driving history, maps, road trips |
-| Costs | `?tab=costs` | Charge spend & locations |
-| Elpris | `?tab=elpris` | DK spot + retailer prices |
-| Profile | `?tab=vehicle` | Model, paint, privacy, specs |
-| Trip planner | `/plan` | Eco / fastest / cheapest route + chargers |
+| Home | `/` | Status, hero, battery, range |
+| Trips | `?tab=trips` | History, map, road trips |
+| Costs | `?tab=costs` | Spend and charge places |
+| Elpris | `?tab=elpris` | DK spot and retailer prices |
+| Profile | `?tab=vehicle` | Model, paint, privacy |
+| Trip planner | `/plan` | Plan, Advanced, Memberships |
 
-The profile tab label is the selected model name (e.g. **Juniper**).
+The profile tab is named after the selected model, for example **Juniper**.
 
 ---
 
 ## Stack
 
 - **UI:** React 19, TanStack Router/Start, Tailwind CSS 4, Zustand
-- **Maps:** Leaflet + OpenStreetMap
-- **Routing:** OSRM / Valhalla alternatives, OpenChargeMap along the polyline
-- **Prices:** Energi Data Service (DK1/DK2 day-ahead) + EU network catalog
-- **Data:** Local/demo vehicle + trip/charge stores (PGlite migrations available)
+- **Maps:** Leaflet and OpenStreetMap
+- **Routing:** OSRM and Valhalla. Chargers from OpenChargeMap along the polyline
+- **Prices:** Energi Data Service (DK1/DK2) and a catalog of EU networks, including site rates where they vary by hour
+- **Data:** On-device demo stores. PGlite migrations are available
 
 ---
 
@@ -132,7 +141,7 @@ npm install
 npm run dev
 ```
 
-Dev server defaults to [http://localhost:8080](http://localhost:8080). Open [`/plan`](http://localhost:8080/plan) for the trip planner.
+The dev server is [http://localhost:8080](http://localhost:8080). The planner is [http://localhost:8080/plan](http://localhost:8080/plan).
 
 ```bash
 npm run typecheck
@@ -142,16 +151,8 @@ npm run build
 
 ---
 
-## Privacy (demo)
+## Privacy
 
-- Trip and charge data stay on-device in this demo build
-- Address find uses OpenStreetMap Nominatim only when you tap it
-- Planner charger search uses OpenChargeMap along the chosen route
-- Export / clear local data from the Vehicle tab
-- Tesla owner linking is scaffolded for demos — no remote vehicle commands
+Trip and charge data stay on this device in the demo build. Address search calls Nominatim only when you search. Charger search calls OpenChargeMap only for the route you are planning. Export or clear everything from the Vehicle tab. Nothing here starts, stops, or unlocks the car.
 
----
-
-## Screenshots
-
-Source PNGs for this README live in [`docs/readme/`](docs/readme/).
+Screenshots live in [`docs/readme/`](docs/readme/).

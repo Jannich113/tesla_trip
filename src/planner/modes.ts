@@ -43,7 +43,7 @@ export function modeLabel(mode: LegMode) {
  */
 export function modeHint(mode: LegMode) {
   if (mode === "eco") return "80–100 km/t roads. Skips motorways and tolls. A 50–60 km/t crawl is rejected.";
-  if (mode === "cheapest") return "Lowest charging cost. Max 15 km extra per leg; extra miles are subtracted from the save.";
+  if (mode === "cheapest") return "Lowest charging cost. May leave the fastest road, up to the charge-search distance (at least 15 km), for a cheaper stall.";
   return "Motorways and tolls for earliest arrival.";
 }
 
@@ -103,13 +103,12 @@ export function avoidForMode(mode: LegMode, cheapAvoid: boolean | CheapAvoid = f
   return asCheapAvoid(cheapAvoid);
 }
 
-/** Eco: own corridor. Cheapest: fastest unless Avoid motorways (eco) or avoid gates/fees (own no-toll try). */
+/** Eco: own corridor. Cheapest: own corridor so it can leave Fastest for a cheaper stall. Avoid motorways follows Eco. */
 export function pathMode(mode: LegMode, avoid: boolean | CheapAvoid = false): LegMode {
   if (mode === "eco") return "eco";
   if (mode === "cheapest") {
-    const a = asCheapAvoid(avoid);
-    if (a.motorways) return "eco";
-    if (a.tolls || a.roadFees) return "cheapest";
+    if (asCheapAvoid(avoid).motorways) return "eco";
+    return "cheapest";
   }
   return "fastest";
 }
@@ -128,8 +127,8 @@ export const STALL_SAVE_KR = 1;
 export const STALL_SAVE_WEIGHT = 1;
 /** Eco/Fastest: preferred network may sit this many meters farther than the best rival. */
 export const PREFERRED_CLOSE_M = 6_000;
-/** Cheapest: preferred network may cost this many kr/kWh more than the cheapest rival. */
-export const PREFERRED_RATE_PREMIUM_KR = 0.35;
+/** Cheapest: tie-break only. A lower stall price still wins. */
+export const PREFERRED_RATE_PREMIUM_KR = 0.01;
 /** Wear / inconvenience of each extra km, added on top of energy. */
 export const EXTRA_KM_KR = 0.6;
 
@@ -223,7 +222,7 @@ export function routeAb(
 export function chargeSearchKm(mode: LegMode, detourKm: number, focus?: ModeFocus, _routeSeconds?: number) {
   const km = Math.max(8, detourKm);
   if (mode === "eco" || focus === "distance") return Math.max(30, Math.round(km * 2.2));
-  if (mode === "cheapest" || focus === "pris") return CHEAP_STALL_KM;
+  if (mode === "cheapest" || focus === "pris") return Math.max(CHEAP_STALL_KM, Math.round(km));
   return Math.max(18, km);
 }
 
@@ -508,7 +507,7 @@ export function costingFor(mode: LegMode, avoid: boolean | CheapAvoid = false): 
   if (mode === "eco" || (mode === "cheapest" && a.motorways)) {
     return {
       shortest: false,
-      use_highways: 0.65,
+      use_highways: 0.35,
       use_tolls: mode === "eco" || a.tolls ? 0 : 1,
       use_ferry: 0.2,
       use_tracks: 0,
