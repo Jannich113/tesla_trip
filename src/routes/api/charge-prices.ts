@@ -4,6 +4,7 @@ import { type ChargePricesResponse } from "@/planner/charge-prices";
 import { COUNTRY_PROFILES } from "@/planner/country-profiles";
 import { CATALOG_FX, NETWORK_NATIVE, toDkk, type FxTable } from "@/planner/charge-fx";
 import { EU_NETWORKS, type ChargeNetwork } from "@/planner/networks";
+import { VARIABLE_RATE_NOTE, type VariableFeed } from "@/planner/variable-rates";
 
 const TTL_MS = 6 * 60 * 60 * 1000;
 
@@ -48,14 +49,35 @@ function convertNetworks(fx: FxTable): ChargeNetwork[] {
 async function gather(force: boolean): Promise<ChargePricesResponse> {
   if (!force && cache && Date.now() - cache.at < TTL_MS) return cache.body;
   const { fx, fxSource } = await loadFx();
+  let variable: VariableFeed = {
+    source: "catalog fallback",
+    updatedAt: new Date().toISOString(),
+    note: `${VARIABLE_RATE_NOTE} NDW fetch failed; catalog only.`,
+    fx,
+    sites: [],
+  };
+  try {
+    const { loadNdwTeslaSites } = await import("@/planner/ndw-variable.server");
+    const loaded = await loadNdwTeslaSites();
+    variable = {
+      source: loaded.source,
+      updatedAt: new Date().toISOString(),
+      note: VARIABLE_RATE_NOTE,
+      fx,
+      sites: loaded.sites,
+    };
+  } catch {
+    /* catalog fallback — do not invent a time-of-day rate */
+  }
   const body: ChargePricesResponse = {
-    source: "catalog + live FX",
+    source: variable.sites.length ? "catalog + live FX + NDW variable" : "catalog + live FX",
     updatedAt: new Date().toISOString(),
     ttlSec: TTL_MS / 1000,
     fx,
     fxSource,
     networks: convertNetworks(fx),
     countries: COUNTRY_PROFILES,
+    variable,
   };
   cache = { at: Date.now(), body };
   return body;

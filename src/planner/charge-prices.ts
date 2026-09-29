@@ -1,6 +1,7 @@
 import { type CountryProfile } from "./country-profiles";
 import { type FxTable } from "./charge-fx";
 import { type ChargeNetwork } from "./networks";
+import { type VariableFeed } from "./variable-rates";
 
 export type ChargePricesResponse = {
   source: string;
@@ -10,4 +11,6 @@ export type ChargePricesResponse = {
   fxSource: string;
   networks: ChargeNetwork[];
   countries: CountryProfile[];
+  /** Per-stall time-of-day rates. Missing or empty sites means catalog fallback. */
+  variable?: VariableFeed;
 };
