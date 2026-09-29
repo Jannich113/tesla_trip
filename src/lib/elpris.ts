@@ -1,4 +1,4 @@
-import type { PriceArea } from "@/lib/el-providers";
+import type { PriceArea, PriceCountry } from "@/lib/price-areas";
 
 export type HourPrice = {
   hour: string;
@@ -9,7 +9,8 @@ export type HourPrice = {
 
 export type ElprisData = {
   area: PriceArea;
-  source: "Energi Data Service";
+  country: PriceCountry;
+  source: "Nord Pool";
   updatedAt: string;
   current: HourPrice | null;
   today: HourPrice[];
