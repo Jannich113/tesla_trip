@@ -278,6 +278,38 @@ export function pickViaOnPath(opts: {
   return best;
 }
 
+/** Last stall still reachable before the 8% floor, when none sit in the 8–25% slice. */
+function pickLastReachable(
+  opts: Parameters<typeof pickViaOnPath>[0],
+  onlyNetwork: string | null,
+  bandM: number,
+): ViaLoc | null {
+  const { path, locations, budgetKwh, totalKwh } = opts;
+  if (path.length < 2 || totalKwh <= 0 || budgetKwh <= 0) return null;
+  const exclude = new Set(opts.excludeIds ?? []);
+  const minKeep = Math.max(8, budgetKwh * 0.2);
+  let best: ViaLoc | null = null;
+  let bestEnergy = -1;
+  let bestDist = Infinity;
+  for (const loc of locations) {
+    if (exclude.has(loc.id) || loc.kind === "home") continue;
+    const netId = networkIdFor(loc.kind, loc.networkId);
+    if (onlyNetwork && netId !== onlyNetwork) continue;
+    const distM = minDistToPathM(loc.lat, loc.lng, path);
+    if (distM > bandM) continue;
+    const frac = alongFraction(path, loc.lat, loc.lng);
+    if (frac < 0.06 || frac > 0.94) continue;
+    const energyTo = totalKwh * frac;
+    if (energyTo > budgetKwh * 0.99 || energyTo < minKeep) continue;
+    if (energyTo > bestEnergy + 0.4 || (Math.abs(energyTo - bestEnergy) <= 0.4 && distM < bestDist)) {
+      best = loc;
+      bestEnergy = energyTo;
+      bestDist = distM;
+    }
+  }
+  return best;
+}
+
 /** If nothing sits in the energy window, take a stall in-band near remaining range — never snap backward. */
 export function pickViaAtRange(opts: Parameters<typeof pickViaOnPath>[0]): ViaLoc | null {
   const hit = pickViaOnPath(opts);
@@ -331,6 +363,11 @@ export function pickViaAtRange(opts: Parameters<typeof pickViaOnPath>[0]): ViaLo
     }
   }
   if (best) return best;
+  const reachBand = Math.max(band, exclusiveFast ? 40_000 : 28_000);
+  const reachable =
+    pickLastReachable(opts, exclusiveFast ? preferredNetwork : null, reachBand) ??
+    (exclusiveFast ? pickLastReachable(opts, null, reachBand) : null);
+  if (reachable) return reachable;
   if (exclusiveFast) return null;
   return {
     id: `range-${lat.toFixed(3)},${lng.toFixed(3)}`,
