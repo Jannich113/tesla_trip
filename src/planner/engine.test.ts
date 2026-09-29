@@ -856,4 +856,148 @@ describe("leg modes", () => {
     }
     assert.ok(vias.length >= 4, `vias ${vias.length}`);
   });
+
+  it("preferred network biases fastest when close enough on corridor", () => {
+    const path: [number, number][] = [];
+    for (let i = 0; i <= 20; i++) {
+      path.push([55.4 - i * 0.2, 10.4 - i * 0.05]);
+    }
+    const tesla = {
+      id: "pref-tesla",
+      lat: path[8][0] + 0.015,
+      lng: path[8][1],
+      kind: "supercharger" as const,
+      usdPerKwh: 0.5,
+      name: "Tesla",
+      short: "T",
+      networkId: "tesla",
+    };
+    const ionity = {
+      id: "pref-ionity",
+      lat: path[8][0],
+      lng: path[8][1],
+      kind: "custom" as const,
+      usdPerKwh: 0.55,
+      name: "IONITY",
+      short: "I",
+      networkId: "ionity",
+    };
+    const plain = pickViaOnPath({
+      path,
+      locations: [tesla, ionity],
+      budgetKwh: 55,
+      minKwh: 30,
+      totalKwh: 100,
+      mode: "fastest",
+      focus: "time",
+      detourKm: 18,
+    });
+    assert.equal(plain?.id, "pref-ionity", "without prefer, nearer stall wins");
+    const biased = pickViaOnPath({
+      path,
+      locations: [tesla, ionity],
+      budgetKwh: 55,
+      minKwh: 30,
+      totalKwh: 100,
+      mode: "fastest",
+      focus: "time",
+      detourKm: 18,
+      preferredNetwork: "tesla",
+    });
+    assert.equal(biased?.id, "pref-tesla", "preferred Tesla wins when close enough");
+  });
+
+  it("preferred network does not skip a required in-window charge", () => {
+    const path: [number, number][] = [];
+    for (let i = 0; i <= 20; i++) {
+      path.push([55.4 - i * 0.2, 10.4 - i * 0.05]);
+    }
+    const onlyIonity = {
+      id: "only-ionity",
+      lat: path[9][0],
+      lng: path[9][1],
+      kind: "custom" as const,
+      usdPerKwh: 0.5,
+      name: "IONITY",
+      short: "I",
+      networkId: "ionity",
+    };
+    const via = pickViaOnPath({
+      path,
+      locations: [onlyIonity],
+      budgetKwh: 55,
+      minKwh: 30,
+      totalKwh: 100,
+      mode: "fastest",
+      focus: "time",
+      detourKm: 18,
+      preferredNetwork: "tesla",
+    });
+    assert.equal(via?.id, "only-ionity", "fall back when preferred is out of pool");
+  });
+
+  it("cheapest still price-hunts; small preferred premium OK", () => {
+    const path: [number, number][] = [
+      [55.4, 10.4],
+      [54.5, 10.0],
+      [53.5, 9.8],
+      [52.5, 9.5],
+      [51.5, 9.2],
+    ];
+    // Unknown networkIds so usdPerKwh*6.85 drives locRate (catalog rates would dwarf the premium).
+    const cheap = {
+      id: "cheap-stall",
+      lat: 53.5,
+      lng: 9.8,
+      kind: "custom" as const,
+      usdPerKwh: 0.4,
+      name: "Cheap",
+      short: "C",
+      networkId: "brand-cheap",
+    };
+    const preferredSlight = {
+      id: "pref-slight",
+      lat: 53.5,
+      lng: 9.8,
+      kind: "custom" as const,
+      usdPerKwh: 0.42,
+      name: "Prefer",
+      short: "P",
+      networkId: "brand-pref",
+    };
+    const preferredDear = {
+      id: "pref-dear",
+      lat: 53.5,
+      lng: 9.8,
+      kind: "custom" as const,
+      usdPerKwh: 0.7,
+      name: "Dear Prefer",
+      short: "D",
+      networkId: "brand-dear",
+    };
+    const smallPremium = pickViaOnPath({
+      path,
+      locations: [cheap, preferredSlight],
+      budgetKwh: 50,
+      minKwh: 28,
+      totalKwh: 90,
+      mode: "cheapest",
+      focus: "pris",
+      detourKm: 15,
+      preferredNetwork: "brand-pref",
+    });
+    assert.equal(smallPremium?.id, "pref-slight", "preferred wins with small premium");
+    const stillHunts = pickViaOnPath({
+      path,
+      locations: [cheap, preferredDear],
+      budgetKwh: 50,
+      minKwh: 28,
+      totalKwh: 90,
+      mode: "cheapest",
+      focus: "pris",
+      detourKm: 15,
+      preferredNetwork: "brand-dear",
+    });
+    assert.equal(stillHunts?.id, "cheap-stall", "large premium still loses to cheaper stall");
+  });
 });
