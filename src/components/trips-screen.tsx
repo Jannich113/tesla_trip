@@ -1,6 +1,6 @@
 import { lazy, Suspense, useDeferredValue, useEffect, useMemo, useState } from "react";
-import { ChevronDown, MapPinned } from "lucide-react";
-import { Link } from "@tanstack/react-router";
+import { ChevronDown, MapPinned, Trash2 } from "lucide-react";
+import { Link, useNavigate } from "@tanstack/react-router";
 import type { MapMarker, MapRoute } from "@/components/bay-map";
 import { PeriodPills } from "@/components/period-pills";
 import {
@@ -34,6 +34,7 @@ import {
   albumTotals,
   albumTrips,
   useTripStore,
+  type PlannedTrip,
   type TripAlbum,
 } from "@/store/trip-store";
 import { useVehicleStore } from "@/store/vehicle-store";
@@ -73,12 +74,15 @@ function routesFromTrips(trips: Trip[]): { routes: MapRoute[]; markers: MapMarke
 }
 
 export function TripsScreen({ visible = true }: { visible?: boolean }) {
+  const navigate = useNavigate();
   const units = useVehicleStore((s) => s.units);
   const shareLocation = useVehicleStore((s) => s.shareLocation);
   const albums = useTripStore((s) => s.albums);
+  const planned = useTripStore((s) => s.planned);
   const addAlbum = useTripStore((s) => s.addAlbum);
   const renameAlbum = useTripStore((s) => s.renameAlbum);
   const removeAlbum = useTripStore((s) => s.removeAlbum);
+  const removePlanned = useTripStore((s) => s.removePlanned);
   const locations = useChargeStore((s) => s.locations);
   const logged = useChargeStore((s) => s.logged);
   const sessions = useMemo(() => pricedSessions(locations, logged), [locations, logged]);
@@ -257,6 +261,21 @@ export function TripsScreen({ visible = true }: { visible?: boolean }) {
     setSelected(null);
   }
 
+  async function openPlanned(trip: PlannedTrip) {
+    const { usePlanStore } = await import("@/planner/store");
+    usePlanStore.getState().loadPlan(trip.id);
+    void navigate({ to: "/plan" });
+  }
+
+  async function dropPlanned(id: string) {
+    removePlanned(id);
+    // Only touch planner when it already has this plan loaded — avoid
+    // writing an empty unrehydrated store over persisted saved plans.
+    const { usePlanStore } = await import("@/planner/store");
+    const st = usePlanStore.getState();
+    if (st.saved.some((p) => p.id === id)) st.deleteSaved(id);
+  }
+
   function selectOnMap(id: string) {
     if (picking) return;
     if (id.includes("→")) {
@@ -329,6 +348,58 @@ export function TripsScreen({ visible = true }: { visible?: boolean }) {
             hint={insight.places[0] ? insight.places[0].short : undefined}
           />
         </div>
+      ) : null}
+
+      {planned.length ? (
+        <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
+          <div className="flex items-end justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium">Planned</p>
+              <p className="mt-1 text-xs text-muted">
+                From trip planner · tap to load · export to Tesla in planner
+              </p>
+            </div>
+            <p className="text-xs text-muted tabular-nums">{planned.length}</p>
+          </div>
+          <ul className="mt-2 divide-y divide-border">
+            {planned.map((trip) => (
+              <li key={trip.id} className="flex items-center gap-2 py-3">
+                <button
+                  type="button"
+                  onClick={() => openPlanned(trip)}
+                  className="min-w-0 flex-1 text-left transition-[scale] duration-150 ease-[var(--ease-out)] active:scale-[0.99]"
+                >
+                  <p className="truncate text-sm">{trip.name}</p>
+                  <p className="truncate text-xs text-muted">
+                    <span className="text-accent">Planned</span>
+                    <span className="text-subtle"> · </span>
+                    {trip.from} → {trip.to}
+                    {trip.min != null && Number.isFinite(trip.min) ? (
+                      <>
+                        <span className="text-subtle"> · </span>
+                        {minutesToHm(trip.min)}
+                      </>
+                    ) : null}
+                    {trip.mi != null && Number.isFinite(trip.mi) ? (
+                      <>
+                        <span className="text-subtle"> · </span>
+                        {formatDistance(trip.mi, units, trip.mi >= 100 ? 0 : 1)}
+                      </>
+                    ) : null}
+                  </p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => dropPlanned(trip.id)}
+                  className="flex size-9 shrink-0 items-center justify-center rounded-full text-muted"
+                  aria-label={`Remove planned ${trip.name}`}
+                >
+                  <Trash2 className="size-4" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
       ) : null}
 
       <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">

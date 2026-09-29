@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
+import { useTripStore } from "@/store/trip-store";
 import { primeRouteCache, canonRouteKey, type LegMode, type LegWhen, type PlanStop, type RoutedLeg } from "./engine";
 import { DEFAULT_DETOUR_KM, DEFAULT_WAIT_MIN, kwhPerMiFrom100km, normalizeMode, type SpeedEff } from "./modes";
 import { simplifyPath } from "./polyline";
@@ -178,6 +179,8 @@ let shellApplied = false;
 let appliedStopIds = "";
 let routeStash: Record<string, RoutedLeg> | undefined;
 let savedRouteStash: Map<string, Record<string, RoutedLeg> | undefined> | undefined;
+/** loadPlan before first shell paint — re-applied after applyDraftShell. */
+let pendingLoadId: string | null = null;
 
 function emptyRoutes(routes?: Record<string, RoutedLeg> | null) {
   return !routes || !Object.keys(routes).length;
@@ -305,10 +308,16 @@ export function applyDraftShell() {
   if (shellApplied || typeof window === "undefined") return;
   shellApplied = true;
   const shell = loadShell();
-  if (!shell) return;
-  appliedStopIds = (shell.stops ?? []).map((s) => s.id).join("|");
-  const cur = usePlanStore.getState();
-  usePlanStore.setState({ ...shell, routeCache: cur.routeCache });
+  if (shell) {
+    appliedStopIds = (shell.stops ?? []).map((s) => s.id).join("|");
+    const cur = usePlanStore.getState();
+    usePlanStore.setState({ ...shell, routeCache: cur.routeCache });
+  }
+  if (pendingLoadId) {
+    const id = pendingLoadId;
+    pendingLoadId = null;
+    usePlanStore.getState().loadPlan(id);
+  }
 }
 
 /** Slim and prime stored corridors after the shell has painted. */
@@ -615,10 +624,24 @@ export const usePlanStore = create<PlanStore>()(
           name: label,
           saved: [plan, ...saved.filter((p) => p.name !== label)],
         });
+        // Mirror into Trips as planned (not driven) so it shows under Trips.
+        useTripStore.getState().addPlanned({
+          id: plan.id,
+          name: plan.name,
+          from: stops[0]?.name ?? "",
+          to: stops[stops.length - 1]?.name ?? "",
+          stopCount: stops.length,
+          startAt: plan.startAt,
+          min: plan.min,
+          mi: plan.mi,
+          kr: plan.kr,
+          savedAt: plan.savedAt,
+        });
         return plan;
       },
 
       loadPlan: (id) => {
+        if (!shellApplied) pendingLoadId = id;
         const plan = get().saved.find((p) => p.id === id);
         if (!plan) return;
         set({
@@ -640,7 +663,10 @@ export const usePlanStore = create<PlanStore>()(
         if (plan.routes) primeRouteCache(plan.routes);
       },
 
-      deleteSaved: (id) => set({ saved: get().saved.filter((p) => p.id !== id) }),
+      deleteSaved: (id) => {
+        set({ saved: get().saved.filter((p) => p.id !== id) });
+        useTripStore.getState().removePlanned(id);
+      },
 
       reset: () => {
         const saved = get().saved;
