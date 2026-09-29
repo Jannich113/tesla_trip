@@ -62,6 +62,8 @@ import { useChargeStore } from "@/store/charge-store";
 import { useElprisStore } from "@/store/elpris-store";
 import { NETWORK_NATIVE, scaleCatalogKr, type FxTable } from "./charge-fx";
 import { countryProfile } from "./country-profiles";
+import { ChargerPicker } from "./charger-picker";
+import { chargePickRadiusM } from "./charger-radius";
 import { minDistToPathM, spreadAlongPath } from "./insert";
 import { simplifyPath } from "./polyline";
 import { useRouteChargers } from "./use-route-chargers";
@@ -519,6 +521,7 @@ export function PlanScreen() {
   const [clearConfirm, setClearConfirm] = useState(false);
   const [saveLabel, setSaveLabel] = useState("");
   const [pane, setPane] = useState<"plan" | "advanced" | "members">("plan");
+  const [pickerStop, setPickerStop] = useState<string | null>(null);
   const { data: elpris } = useLiveElpris(area);
 
   useEffect(() => {
@@ -712,6 +715,12 @@ export function PlanScreen() {
     () => buildPlanLocations(live, locationsStored, routeChargers, searchRoutes),
     [live, locationsStored, routeChargers, searchRoutes],
   );
+  const chargerPool = useMemo(() => {
+    const byId = new Map<string, ChargeLocation>();
+    for (const c of locations) byId.set(c.id, c);
+    for (const c of routeChargers) byId.set(c.id, c);
+    return [...byId.values()];
+  }, [locations, routeChargers]);
 
   const driveMinGuess = selectedRoutes.reduce((n, r) => n + r.seconds / 60, 0);
   const departHhmm =
@@ -2009,6 +2018,7 @@ export function PlanScreen() {
             const extraKr = chargedLeg?.accepted ? chargedLeg.extraKr : 0;
             const chargeRequired = Boolean(chargedLeg?.needed);
             const inStore = stops.some((s) => s.id === stop.id);
+            const pickMode = (chargedLeg?.mode ?? modes[userI] ?? "fastest") as LegMode;
             return (
               <li
                 key={stop.id}
@@ -2367,6 +2377,34 @@ export function PlanScreen() {
                       </label>
                     )}
                     <div className="mt-3">
+                        {(via || chargedLeg?.charge) && i > 0 ? (
+                          <ChargerPicker
+                            open={pickerStop === stop.id}
+                            onToggle={() => setPickerStop((cur) => (cur === stop.id ? null : stop.id))}
+                            origin={{ lat: stop.lat, lng: stop.lng, name: stop.name }}
+                            radiusM={chargePickRadiusM(pickMode, detours[userI] ?? DEFAULT_DETOUR_KM)}
+                            radiusLabel={modeLabel(pickMode)}
+                            locations={chargerPool}
+                            memberships={networkAbo}
+                            acKw={profile.acKw}
+                            activeId={
+                              chargedLeg?.charge?.locationId ??
+                              (stop.id.startsWith("via-") ? stop.id.slice("via-".length) : undefined)
+                            }
+                            onPick={(hit) => {
+                              if (inStore) {
+                                replaceStop(stop.id, hit);
+                              } else {
+                                const detour = detours[userI] ?? DEFAULT_DETOUR_KM;
+                                insertStopAt(userI + 1, hit);
+                                setLegMode(userI, pickMode);
+                                setLegDetour(userI, detour);
+                              }
+                              setPickerStop(null);
+                              toast(`Charging stop set to ${hit.name}`);
+                            }}
+                          />
+                        ) : null}
                         <BackupPicks
                           options={chargedLeg?.chargeOptions ?? []}
                           primaryId={chargedLeg?.charge?.locationId}
