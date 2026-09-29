@@ -129,6 +129,27 @@ export const STALL_SAVE_WEIGHT = 1;
 export const PREFERRED_CLOSE_M = 6_000;
 /** Cheapest: tie-break only. A lower stall price still wins. */
 export const PREFERRED_RATE_PREMIUM_KR = 0.01;
+/** True when this hop would arrive under 25% and needs a charger on the way.
+ *  Below 25% we charge at the current stop instead of stacking more vias. */
+export function legNeedsVia(kwh: number, soc: number, usableKwh: number) {
+  if (!(kwh > 0) || !(usableKwh > 0) || soc <= 25) return false;
+  const to25 = Math.max(0, ((soc - 25) / 100) * usableKwh);
+  return kwh > to25 * 0.98;
+}
+
+/** Commit a planner number field. Incomplete or empty input stays uncommitted so the box does not snap. */
+export function planFieldCommit(
+  kind: "pack" | "whmi" | "soc" | "speed" | "chargeTo",
+  n: number,
+): number | null {
+  if (!Number.isFinite(n) || n <= 0) return null;
+  if (kind === "pack") return Math.max(20, Math.min(200, Math.round(n * 10) / 10));
+  if (kind === "whmi") return Math.min(1.2, n);
+  if (kind === "soc") return Math.max(5, Math.min(100, Math.round(n)));
+  if (kind === "speed") return Math.max(8, Math.min(30, Math.round(n * 10) / 10));
+  return Math.max(5, Math.min(80, Math.round(n)));
+}
+
 /** Wear / inconvenience of each extra km, added on top of energy. */
 export const EXTRA_KM_KR = 0.6;
 

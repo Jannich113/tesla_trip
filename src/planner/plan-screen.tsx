@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import type { MapMarker, MapRoute } from "@/components/bay-map";
 import { ConfirmStrip } from "@/components/confirm-strip";
 import { searchAddress, type AddressHit } from "./search";
+import { planFieldCommit } from "./modes";
 import {
   DETOUR_KM,
   WAIT_MIN,
@@ -477,6 +478,46 @@ const OptionList = memo(function OptionList({
 
 const BayMap = lazy(() => import("@/components/bay-map").then((m) => ({ default: m.BayMap })));
 
+function DraftNumber({
+  kind,
+  value,
+  onCommit,
+  className,
+  min,
+  max,
+  step,
+}: {
+  kind: "pack" | "whmi" | "soc" | "speed" | "chargeTo";
+  value: number;
+  onCommit: (n: number) => void;
+  className?: string;
+  min?: number;
+  max?: number;
+  step?: number;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const shown = String(value);
+  return (
+    <input
+      type="number"
+      inputMode="decimal"
+      min={min}
+      max={max}
+      step={step}
+      value={draft ?? shown}
+      onFocus={() => setDraft(shown)}
+      onChange={(e) => {
+        setDraft(e.target.value);
+        const next = planFieldCommit(kind, Number(e.target.value));
+        if (next == null) return;
+        onCommit(next);
+      }}
+      onBlur={() => setDraft(null)}
+      className={className}
+    />
+  );
+}
+
 function ElprisAfterPaint({
   area,
   onData,
@@ -846,50 +887,70 @@ export function PlanScreen() {
   const deferredMap = useDeferredValue(routeMap);
 
   const pricedMemo = useRef(new Map<string, PricedLeg[]>());
+  const [pricedRows, setPricedRows] = useState<
+    { mode: LegMode; priced: PricedLeg[]; avoid: ReturnType<typeof avoidForMode> }[]
+  >(() => LEG_MODES.map((mode) => ({ mode, priced: [], avoid: avoidForMode(mode, cheapAvoid) })));
 
-  const pricedRows = useMemo(() => {
+  const priceStamp = `${corridorStamp}|${soc}|${packKwh}|${locations.length}|${stableLocations.length}|${hours.length}|${planArgs.detours.join(",")}|${planArgs.waitCapMin.join(",")}|${planArgs.preferredNetwork ?? ""}|${planArgs.departHhmm}|${JSON.stringify(cheapAvoid)}|${JSON.stringify(networkAbo)}|${planArgs.acceptCharge.join(",")}|${planArgs.chargeToSoc.join(",")}|${planArgs.backupIds.join(",")}|${planArgs.preferIds.join(",")}|${legWhen.map((w) => `${w?.kind ?? ""}:${w?.at ?? w?.hhmm ?? ""}`).join(",")}`;
+
+  useEffect(() => {
     if (!live) {
-      return LEG_MODES.map((mode) => ({
-        mode,
-        priced: [] as PricedLeg[],
-        avoid: avoidForMode(mode, cheapAvoid),
-      }));
+      setPricedRows(LEG_MODES.map((mode) => ({ mode, priced: [], avoid: avoidForMode(mode, cheapAvoid) })));
+      return;
     }
-    return LEG_MODES.map((mode) => {
+    let cancelled = false;
+    let timer = 0;
+    const acc: { mode: LegMode; priced: PricedLeg[]; avoid: ReturnType<typeof avoidForMode> }[] = [];
+    let index = 0;
+    const step = () => {
+      if (cancelled) return;
+      const mode = LEG_MODES[index];
       const avoid = avoidForMode(mode, cheapAvoid);
       const optionRoutes = routesFor(pathMode(mode, avoid));
       if (optionRoutes.length !== Math.max(0, stops.length - 1) || stops.length < 2) {
-        return { mode, priced: [] as PricedLeg[], avoid };
+        acc.push({ mode, priced: [], avoid });
+      } else {
+        const locPool = mode === "cheapest" ? locations : stableLocations;
+        const cacheKey = `${mode}|${priceStamp}|${locPool.length}`;
+        let priced = pricedMemo.current.get(cacheKey);
+        if (!priced) {
+          priced = pricePlan({
+            ...planArgs,
+            modes: stops.slice(1).map(() => mode),
+            focuses: stops.slice(1).map(() => (mode === "cheapest" ? "pris" : mode === "eco" ? "distance" : "time")),
+            detours: planArgs.detours.map((d) => (mode === "cheapest" ? Math.max(15, d) : d)),
+            routes: optionRoutes,
+            locations: locationsForRoutes(
+              locPool,
+              optionRoutes,
+              mode === "fastest" ? 40_000 : 22_000,
+              mode === "cheapest" ? planArgs.preferredNetwork : null,
+            ),
+            avoid,
+          });
+          pricedMemo.current.set(cacheKey, priced);
+          if (pricedMemo.current.size > 16) {
+            const first = pricedMemo.current.keys().next().value;
+            if (first) pricedMemo.current.delete(first);
+          }
+        }
+        acc.push({ mode, avoid, priced });
       }
-      // Eco/Fastest price from stable corridors only — Cheapest avoid must not change their stall pool.
-      const locPool = mode === "cheapest" ? locations : stableLocations;
-      const cacheKey = `${mode}|${corridorStamp}|${soc}|${locPool.length}|${hours.length}|${avoid.motorways}|${avoid.tolls}|${avoid.roadFees}|${planArgs.detours.join(",")}|${planArgs.preferredNetwork ?? ""}|stalls3`;
-      const cached = pricedMemo.current.get(cacheKey);
-      if (cached) return { mode, avoid, priced: cached };
-      const priced = pricePlan({
-        ...planArgs,
-        modes: stops.slice(1).map(() => mode),
-        focuses: stops.slice(1).map(() => (mode === "cheapest" ? "pris" : mode === "eco" ? "distance" : "time")),
-        detours: planArgs.detours.map((d) => (mode === "cheapest" ? Math.max(15, d) : d)),
-        routes: optionRoutes,
-        locations: locationsForRoutes(
-          locPool,
-          optionRoutes,
-          mode === "fastest" ? 40_000 : 22_000,
-          mode === "cheapest" ? planArgs.preferredNetwork : null,
-        ),
-        avoid,
-      });
-      pricedMemo.current.set(cacheKey, priced);
-      if (pricedMemo.current.size > 12) {
-        const first = pricedMemo.current.keys().next().value;
-        if (first) pricedMemo.current.delete(first);
+      index += 1;
+      if (index < LEG_MODES.length) {
+        timer = window.setTimeout(step, 0);
+        return;
       }
-      return { mode, avoid, priced };
-    });
-    // planArgs and routesFor are new every render; their inputs are already listed.
+      if (!cancelled) startTransition(() => setPricedRows(acc));
+    };
+    timer = window.setTimeout(step, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+    // planArgs and routesFor are new every render; priceStamp covers their inputs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [live, corridorStamp, stops, detours, waits, soc, packKwh, profile.acKw, locations, stableLocations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc, prefer, networkAbo, preferredNetwork, cheapAvoid]);
+  }, [live, priceStamp]);
 
   const optionRows = useMemo(() => {
     const rows = pricedRows.map(({ mode, priced, avoid }) => {
@@ -1510,18 +1571,13 @@ export function PlanScreen() {
               <label className="text-[11px] text-muted">
                 Battery
                 <span className="mt-1 flex h-11 items-center gap-1 rounded-xl bg-surface-2 px-3">
-                  <input
-                    type="number"
-                    inputMode="decimal"
+                  <DraftNumber
+                    kind="pack"
                     min={20}
                     max={200}
                     step={0.5}
                     value={packKwh}
-                    onChange={(e) => {
-                      const n = Number(e.target.value);
-                      if (!Number.isFinite(n)) return;
-                      setUsableKwh(Math.max(20, Math.min(200, Math.round(n * 10) / 10)));
-                    }}
+                    onCommit={setUsableKwh}
                     className="h-full w-full bg-transparent text-sm tabular-nums text-foreground outline-none"
                   />
                   <span className="shrink-0 text-xs text-subtle">kWh</span>
@@ -1530,18 +1586,13 @@ export function PlanScreen() {
               <label className="text-[11px] text-muted">
                 Efficiency
                 <span className="mt-1 flex h-11 items-center gap-1 rounded-xl bg-surface-2 px-3">
-                  <input
-                    type="number"
-                    inputMode="decimal"
+                  <DraftNumber
+                    kind="whmi"
                     min={0.1}
                     max={1.2}
                     step={0.01}
                     value={Number((generalWh / 1000).toFixed(3))}
-                    onChange={(e) => {
-                      const n = Number(e.target.value);
-                      if (!Number.isFinite(n) || n <= 0) return;
-                      setSpeedEff(defaultSpeedEff(Math.min(1.2, n) * 1000));
-                    }}
+                    onCommit={(n) => setSpeedEff(defaultSpeedEff(n * 1000))}
                     className="h-full w-full bg-transparent text-sm tabular-nums text-foreground outline-none"
                   />
                   <span className="shrink-0 text-xs text-subtle">kWh/mi</span>
@@ -1563,16 +1614,12 @@ export function PlanScreen() {
             <label className="mt-2 flex items-center justify-between gap-3 rounded-xl bg-surface-2 px-3 py-2">
               <span className="text-xs text-muted">State of charge</span>
               <span className="flex items-center gap-1 text-sm">
-                <input
-                  type="number"
+                <DraftNumber
+                  kind="soc"
                   min={5}
                   max={100}
                   value={soc}
-                  onChange={(e) => {
-                    const n = Number(e.target.value);
-                    if (!Number.isFinite(n)) return;
-                    setSocOverride(Math.max(5, Math.min(100, Math.round(n))));
-                  }}
+                  onCommit={setSocOverride}
                   className="h-10 w-14 rounded-md bg-background text-center text-sm tabular-nums outline-none"
                 />
                 %
@@ -1624,18 +1671,13 @@ export function PlanScreen() {
                 <label key={kmh} className="text-center text-[11px] text-muted">
                   {kmh}
                   <span className="text-subtle"> km/t</span>
-                  <input
-                    type="number"
-                    inputMode="decimal"
+                  <DraftNumber
+                    kind="speed"
                     min={8}
                     max={30}
                     step={0.1}
-                    value={speedEff[kmh].toFixed(1)}
-                    onChange={(e) => {
-                      const n = Number(e.target.value);
-                      if (!Number.isFinite(n) || n <= 0) return;
-                      setSpeedEff({ ...speedEff, [kmh]: n });
-                    }}
+                    value={Number(speedEff[kmh].toFixed(1))}
+                    onCommit={(n) => setSpeedEff({ ...speedEff, [kmh]: n })}
                     className="mt-1 h-11 w-full rounded-xl bg-surface-2 px-2 text-center text-sm tabular-nums text-foreground outline-none"
                   />
                 </label>
@@ -2376,16 +2418,13 @@ export function PlanScreen() {
                       )}
                     >
                       to
-                      <input
-                        type="number"
-                        min={1}
+                      <DraftNumber
+                        kind="chargeTo"
+                        min={5}
                         max={80}
                         value={Math.round(chargeTo)}
-                        onChange={(e) => {
-                          const n = Number(e.target.value);
-                          if (!Number.isFinite(n)) return;
-                          const v = Math.max(5, Math.min(80, Math.round(n)));
-                          setChargeToSoc((cur) => ({ ...cur, [userI]: v }));
+                        onCommit={(n) => {
+                          setChargeToSoc((cur) => ({ ...cur, [userI]: n }));
                           setAcceptCharge((cur) => ({ ...cur, [userI]: true }));
                         }}
                         className="h-6 w-10 bg-transparent text-center text-xs tabular-nums text-foreground outline-none"

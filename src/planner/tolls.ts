@@ -37,6 +37,14 @@ function kmRateAt(lat: number, lng: number) {
   return hit?.kr ?? 0;
 }
 
+/** True when enough of the line sits in FR/IT/ES/NO motorway-toll country. */
+export function corridorHasMotorwayToll(path: [number, number][]) {
+  if (path.length < 2) return false;
+  let hit = 0;
+  for (const [lat, lng] of path) if (kmRateAt(lat, lng) > 0) hit++;
+  return hit / path.length >= 0.12;
+}
+
 export function estimateTolls(
   path: [number, number][],
   miles: number,

@@ -1,11 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { noStore } from "@/lib/http-cache";
 import { env } from "@/lib/env.server";
-import { haversineM } from "@/planner/insert";
 import { isDcStation, networkFromOperator, networkFromOsmTags } from "@/planner/osm-operator";
 import { rateForNetwork } from "@/planner/networks";
 import { seedsAlongPath } from "@/planner/seed-chargers";
-import { encodePolyline, polylineBufferKm, chargersOnPath } from "@/planner/polyline";
+import { encodePolyline, polylineBufferKm, chargersOnPath, pathSegments, simplifyPath } from "@/planner/polyline";
 
 const DKK_PER_USD = 6.85;
 const OCM_KEY = env("OPENCHARGEMAP_KEY") ?? "d670b729-7bd0-40dd-8a17-4b881edf1a68";
@@ -23,27 +22,6 @@ export type RouteCharger = {
   preset: false;
   radiusM: number;
 };
-
-function samplePath(path: [number, number][], everyM = 40_000, maxPts = 10) {
-  if (path.length < 2) return path.slice(0, 2);
-  const out: [number, number][] = [path[0]];
-  let acc = 0;
-  for (let i = 1; i < path.length; i++) {
-    acc += haversineM(
-      { lat: path[i - 1][0], lng: path[i - 1][1] },
-      { lat: path[i][0], lng: path[i][1] },
-    );
-    if (acc >= everyM) {
-      out.push(path[i]);
-      acc = 0;
-      if (out.length >= maxPts - 1) break;
-    }
-  }
-  const last = path[path.length - 1];
-  const prev = out[out.length - 1];
-  if (haversineM({ lat: prev[0], lng: prev[1] }, { lat: last[0], lng: last[1] }) > 8_000) out.push(last);
-  return out.slice(0, maxPts);
-}
 
 function downsample(path: [number, number][], max = 80) {
   if (path.length <= max) return path;
@@ -235,15 +213,32 @@ async function fetchOcmAt(lat: number, lng: number, radiusKm: number): Promise<R
 }
 
 async function fetchOcm(path: [number, number][], samples: [number, number][], tightKm: number, wideKm: number) {
-  const tightHits = chargersOnPath(await fetchOcmPolyline(path, tightKm), path, wideKm);
-  if (wideKm <= tightKm + 1 && tightHits.length >= 8) return tightHits;
-  const wideHits = chargersOnPath(await fetchOcmPolyline(path, wideKm), path, wideKm);
+  const segments = pathSegments(path, 380);
+  const parts = await pool(segments, 3, (seg) => fetchOcmPolyline(seg, wideKm));
+  const merged = new Map<string, RouteCharger>();
+  for (const row of parts.flat()) merged.set(row.id, row);
+  const wideHits = chargersOnPath([...merged.values()], path, wideKm);
+  if (wideHits.length >= 8) return wideHits;
+  const tightHits = chargersOnPath([...merged.values()], path, tightKm);
   if (wideHits.length) return wideHits.length >= tightHits.length ? wideHits : tightHits;
   if (tightHits.length) return tightHits;
-  const chunks = await Promise.all(samples.slice(0, 4).map(([lat, lng]) => fetchOcmAt(lat, lng, wideKm)));
+  const chunks = await pool(samples, 4, ([lat, lng]) => fetchOcmAt(lat, lng, wideKm));
   const byId = new Map<string, RouteCharger>();
   for (const row of chunks.flat()) byId.set(row.id, row);
   return chargersOnPath([...byId.values()], path, wideKm);
+}
+
+async function pool<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i]);
+    }
+  });
+  await Promise.all(workers);
+  return out;
 }
 
 function mergeChargers(seed: RouteCharger[], live: RouteCharger[]) {
@@ -267,12 +262,16 @@ async function searchCorridor(path: [number, number][], asked: number) {
   );
   const radiusM = wideKm * 1000;
   const seed = seedsAlongPath(path, radiusM);
-  const samples = samplePath(path, 40_000, 8);
-  const [ocm, osmRaw] = await Promise.all([
+  const samples = simplifyPath(path, 16);
+  const osmBatches: [number, number][][] = [];
+  for (let i = 0; i < samples.length; i += 6) osmBatches.push(samples.slice(i, i + 6));
+  const [ocm, osmChunks] = await Promise.all([
     fetchOcm(path, samples, tightKm, wideKm),
-    fetchOverpass(samples, radiusM),
+    Promise.all(osmBatches.map((batch) => fetchOverpass(batch, radiusM))),
   ]);
-  const osm = chargersOnPath(osmRaw, path, wideKm);
+  const osmById = new Map<string, RouteCharger>();
+  for (const row of osmChunks.flat()) osmById.set(row.id, row);
+  const osm = chargersOnPath([...osmById.values()], path, wideKm);
   return {
     chargers: mergeChargers(seed, [...ocm, ...osm]),
     source: [ocm.length && "ocm", osm.length && "osm", seed.length && "seed"].filter(Boolean).join("+") || "none",

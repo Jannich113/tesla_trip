@@ -1,5 +1,5 @@
 /* Juniper trip PWA — network-first shell, SWR static, cache-first OSM tiles. */
-const VERSION = "juniper-sw-v2";
+const VERSION = "juniper-sw-v3";
 const SHELL = `${VERSION}-shell`;
 const RUNTIME = `${VERSION}-runtime`;
 const TILES = `${VERSION}-tiles`;
@@ -81,13 +81,18 @@ async function trim(cache, max) {
 
 async function networkFirst(request, cacheName) {
   const cache = await caches.open(cacheName);
+  const hit = request.mode === "navigate" ? await cache.match(request) : null;
+  const slow = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error("slow")), 2500);
+  });
   try {
-    const res = await fetch(request);
+    const res = await Promise.race([fetch(request), slow]);
     if (res && res.ok) await cache.put(request, res.clone());
     return res;
   } catch (err) {
-    const hit = await cache.match(request);
     if (hit) return hit;
+    const cached = await cache.match(request);
+    if (cached) return cached;
     if (request.mode === "navigate") {
       const home = await cache.match("/");
       if (home) return home;

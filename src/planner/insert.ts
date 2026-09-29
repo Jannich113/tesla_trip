@@ -24,25 +24,26 @@ const DEG = Math.PI / 180;
 const M_PER_DEG = 111_320;
 const HALF_DEG = DEG / 2;
 
-/** Equirectangular meters. Right for charger ranking and path length in Europe. */
+/** Equirectangular meters. Fine for ranking a charger a few kilometers off the road. */
 function approxM(lat: number, lng: number, plat: number, plng: number) {
   const dLat = plat - lat;
   const dLng = (plng - lng) * Math.cos((lat + plat) * HALF_DEG);
   return Math.hypot(dLat, dLng) * M_PER_DEG;
 }
 
-/** Local: equirectangular. Long haul (>15°): spherical law of cosines. */
+/** Great-circle meters. Short hops use the flat shortcut; long ones must not. */
 export function haversineM(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
   const dLat = b.lat - a.lat;
   const dLng = b.lng - a.lng;
-  if (dLat < 15 && dLat > -15 && dLng < 15 && dLng > -15) {
-    return approxM(a.lat, a.lng, b.lat, b.lng);
-  }
+  const mid = (a.lat + b.lat) * HALF_DEG;
+  const flat = Math.hypot(dLat, dLng * Math.cos(mid)) * M_PER_DEG;
+  if (flat < 150_000) return flat;
   const lat1 = a.lat * DEG;
   const lat2 = b.lat * DEG;
-  const cos =
-    Math.sin(lat1) * Math.sin(lat2) + Math.cos(lat1) * Math.cos(lat2) * Math.cos(dLng * DEG);
-  return 6_371_000 * Math.acos(Math.min(1, Math.max(-1, cos)));
+  const sLat = Math.sin(((b.lat - a.lat) * DEG) / 2);
+  const sLng = Math.sin((dLng * DEG) / 2);
+  const h = sLat * sLat + Math.cos(lat1) * Math.cos(lat2) * sLng * sLng;
+  return 2 * 6_371_000 * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
 export const distanceM = haversineM;
@@ -54,7 +55,10 @@ function cumMeters(path: [number, number][]) {
   if (hit) return hit;
   const cum = [0];
   for (let i = 1; i < path.length; i++) {
-    cum.push(cum[i - 1] + approxM(path[i - 1][0], path[i - 1][1], path[i][0], path[i][1]));
+    cum.push(cum[i - 1] + haversineM(
+      { lat: path[i - 1][0], lng: path[i - 1][1] },
+      { lat: path[i][0], lng: path[i][1] },
+    ));
   }
   cumCache.set(path, cum);
   return cum;
@@ -378,4 +382,30 @@ export function pickViaAtRange(opts: Parameters<typeof pickViaOnPath>[0]): ViaLo
     name: "Charge",
     short: "Charge",
   };
+}
+
+/** Nearest stall further down the road when none is inside the battery window. */
+export function pickNextAhead(opts: Parameters<typeof pickViaOnPath>[0]): ViaLoc | null {
+  const { path, locations } = opts;
+  if (path.length < 2) return null;
+  const exclude = new Set(opts.excludeIds ?? []);
+  const focus = opts.focus ?? defaultFocus(opts.mode);
+  const preferred = opts.preferredNetwork ?? null;
+  const exclusive = Boolean(preferred) && (opts.mode === "fastest" || focus === "time");
+  const bandM = Math.max(50_000, (opts.detourKm || 0) * 1000);
+  let best: ViaLoc | null = null;
+  let bestFrac = Infinity;
+  for (const loc of locations) {
+    if (exclude.has(loc.id) || loc.kind === "home") continue;
+    const netId = networkIdFor(loc.kind, loc.networkId);
+    if (exclusive && netId !== preferred) continue;
+    if (minDistToPathM(loc.lat, loc.lng, path) > bandM) continue;
+    const frac = alongFraction(path, loc.lat, loc.lng);
+    if (frac < 0.05 || frac > 0.98) continue;
+    if (frac < bestFrac) {
+      best = loc;
+      bestFrac = frac;
+    }
+  }
+  return best;
 }

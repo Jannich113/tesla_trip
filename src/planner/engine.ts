@@ -1,6 +1,6 @@
-import { type ChargeLocation } from "@/lib/charge-locations";
-import { type HourPrice } from "@/lib/elpris";
-import { type Units } from "@/lib/vehicle";
+import type { ChargeLocation } from "../lib/charge-locations.ts";
+import type { HourPrice } from "../lib/elpris.ts";
+import type { Units } from "../lib/vehicle.ts";
 import {
   type LegMode,
   type ModeFocus,
@@ -22,6 +22,7 @@ import {
   dkNowParts,
   driveKwhAtSpeed,
   hoursFrom,
+  legNeedsVia,
   maxDateTime,
   minutesBetweenDateTime,
   splitDateTime,
@@ -43,10 +44,11 @@ import {
   haversineM,
   minDistToPathM,
   pickViaAtRange,
+  pickNextAhead,
   splitRoutedLeg,
   locationsNearPath,
 } from "./insert";
-import { estimateTolls } from "./tolls";
+import { corridorHasMotorwayToll, estimateTolls } from "./tolls";
 import { withRetry, fetchWithTimeout } from "./retry";
 
 export { planTripMin } from "./modes";
@@ -887,6 +889,8 @@ export function pricePlan(opts: {
     route: RoutedLeg;
     userIndex: number;
     via: boolean;
+    /** This piece already leads to the one charger for this departure. Do not add another. */
+    viaLock: boolean;
     depth: number;
   };
   const jobs: Job[] = routes.map((route, i) => ({
@@ -898,6 +902,7 @@ export function pricePlan(opts: {
     route,
     userIndex: i,
     via: false,
+    viaLock: false,
     depth: 0,
   }));
   const usedVias = new Set<string>(stops.map((s) => s.id));
@@ -907,10 +912,11 @@ export function pricePlan(opts: {
     const { mode, route, userIndex, via } = job;
     const focus = job.focus;
     const kwh = driveKwh(route.miles, route.seconds, speedEff);
-    const packSoc = soc < REQUIRE_SOC ? Math.max(soc, TARGET_SOC) : soc;
-    const floorKwh = Math.max(4, ((packSoc - FLOOR_SOC) / 100) * usableKwh);
-    const bandKwh = Math.max(0, ((packSoc - REQUIRE_SOC) / 100) * usableKwh);
-    if (kwh > floorKwh * 0.98 && job.depth < 8) {
+    const atFromVia = job.from.id.startsWith("via-");
+    const departSoc = atFromVia || soc < REQUIRE_SOC ? TARGET_SOC : soc;
+    const floorKwh = Math.max(4, ((departSoc - FLOOR_SOC) / 100) * usableKwh);
+    const bandKwh = Math.max(0, ((departSoc - REQUIRE_SOC) / 100) * usableKwh);
+    if (!job.viaLock && legNeedsVia(kwh, departSoc, usableKwh) && job.depth < 16) {
       const viaOpts = {
         path: route.path,
         locations,
@@ -929,7 +935,8 @@ export function pricePlan(opts: {
         pickViaAtRange({
           ...viaOpts,
           detourKm: Math.max(viaOpts.detourKm, 50),
-        });
+        }) ??
+        pickNextAhead(viaOpts);
       const split = viaLoc ? splitRoutedLeg(route, viaLoc.lat, viaLoc.lng) : null;
       if (viaLoc && split) {
         usedVias.add(viaLoc.id);
@@ -948,6 +955,7 @@ export function pricePlan(opts: {
           route: split.after,
           userIndex,
           via: job.via,
+          viaLock: false,
           depth: job.depth + 1,
         });
         jobs.unshift({
@@ -959,6 +967,7 @@ export function pricePlan(opts: {
           route: split.before,
           userIndex,
           via: true,
+          viaLock: true,
           depth: job.depth + 1,
         });
         continue;
@@ -972,8 +981,12 @@ export function pricePlan(opts: {
     }
     const socAfter = soc - (kwh / usableKwh) * 100;
     const minArrive = FLOOR_SOC;
+    const canReachVia =
+      job.viaLock && kwh <= Math.max(0, ((soc - FLOOR_SOC) / 100) * usableKwh) * 1.02;
     const required =
-      socAfter < FLOOR_SOC || (soc < REQUIRE_SOC && (jobs.length > 0 || kwh > floorKwh * 0.5));
+      (atFromVia && soc < 50) ||
+      (!canReachVia &&
+        (socAfter < REQUIRE_SOC || (soc < REQUIRE_SOC && (jobs.length > 0 || kwh > floorKwh * 0.5))));
     const searchHours = hoursFrom(hours, readyAt);
     const cheap = cheapestHour(searchHours);
     const goodPrice = Boolean(cheap && cheap.krPerKwh <= live * CHEAP_VS_LIVE);
@@ -1054,7 +1067,7 @@ export function pricePlan(opts: {
       (suggested && Boolean(opts.acceptCharge?.[userIndex]));
     const billed = accepted && charge !== null;
     // A stall that isn't this stop has to be a via. Otherwise the price sits on the city and the route never visits a charger.
-    if (billed && charge && !atViaFrom && job.depth < 8) {
+    if (billed && charge && !atViaFrom && !job.viaLock && !job.to.id.startsWith("via-") && job.depth < 16) {
       const stall = locations.find((l) => l.id === charge.locationId);
       if (stall && stall.kind !== "home" && !usedVias.has(stall.id)) {
         const fromM = haversineM(job.from, stall);
@@ -1085,6 +1098,7 @@ export function pricePlan(opts: {
               route: split.after,
               userIndex,
               via: job.via,
+              viaLock: false,
               depth: job.depth + 1,
             });
             jobs.unshift({
@@ -1096,6 +1110,7 @@ export function pricePlan(opts: {
               route: split.before,
               userIndex,
               via: true,
+              viaLock: true,
               depth: job.depth + 1,
             });
             continue;
@@ -1127,7 +1142,8 @@ export function pricePlan(opts: {
         : charge
           ? { ...charge, waitMin }
           : null;
-    const toll = estimateTolls(route.path, route.miles, Boolean(route.hasToll), mode);
+    const tolled = Boolean(route.hasToll) || (mode === "fastest" && corridorHasMotorwayToll(route.path));
+    const toll = estimateTolls(route.path, route.miles, tolled, mode);
     out.push({
       from: job.from,
       to: job.to,

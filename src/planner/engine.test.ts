@@ -30,17 +30,19 @@ import {
   NO_CHEAP_AVOID,
   routeAb,
   stallKw,
+  legNeedsVia,
+  planFieldCommit,
   timePenalized,
 } from "./modes.ts";
 import { rateForNetwork, networkIdFor, roamExtra, EU_NETWORKS, EU_REGIONS, regionalOwn, regionalRoam } from "./networks.ts";
 import { pickCheapAvoidRoute, pickEcoRoute, pickFastestRoute, pickRouted } from "./pick-route.ts";
-import { alongFraction, haversineM, locationsNearPath, minDistToPathM, pickViaAtRange, pickViaOnPath, splitRoutedLeg } from "./insert.ts";
+import { alongFraction, haversineM, locationsNearPath, minDistToPathM, pathMeters, pickViaAtRange, pickViaOnPath, splitRoutedLeg } from "./insert.ts";
 import { encodeGeohash, geohashNeighborhood, geohashesAlongPath } from "./geohash.ts";
 import { networkFromOsmTags, isDcStation, networkFromOperator } from "./osm-operator.ts";
 import { estimateTolls, gatesOnPath } from "./tolls.ts";
 import { seedsAlongPath } from "./seed-chargers.ts";
 import { toDkk, CATALOG_FX, NETWORK_NATIVE } from "./charge-fx.ts";
-import { encodePolyline, decodePolyline, polylineBufferKm, chargersOnPath, simplifyPath } from "./polyline.ts";
+import { encodePolyline, decodePolyline, polylineBufferKm, chargersOnPath, simplifyPath, pathSegments } from "./polyline.ts";
 import { countryProfile } from "./country-profiles.ts";
 
 describe("leg modes", () => {
@@ -524,6 +526,31 @@ describe("leg modes", () => {
     assert.equal(kept.length, 1);
   });
 
+  it("long distance is great-circle kilometers, not the flat map shortcut", () => {
+    const classic = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {
+      const R = 6371000;
+      const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+      const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+      const s =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos((a.lat * Math.PI) / 180) * Math.cos((b.lat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+      return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
+    };
+    const cph = { lat: 55.6761, lng: 12.5683 };
+    const bcn = { lat: 41.3874, lng: 2.1686 };
+    const truth = classic(cph, bcn);
+    const km = haversineM(cph, bcn) / 1000;
+    assert.ok(Math.abs(haversineM(cph, bcn) - truth) / truth < 0.002, `got ${km.toFixed(1)} km`);
+    const along = pathMeters([
+      [cph.lat, cph.lng],
+      [bcn.lat, bcn.lng],
+    ]);
+    assert.ok(Math.abs(along - truth) / truth < 0.002, `path ${(along / 1000).toFixed(1)} km`);
+    const miles = truth / 1609.344;
+    assert.ok(miles > 1050 && miles < 1150, `miles ${miles.toFixed(0)}`);
+    assert.ok(Math.abs(km - miles) > 400, "kilometers must not be reported as miles");
+  });
+
   it("distance uses a fast formula that stays close to classic haversine", () => {
     const classic = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {
       const R = 6371000;
@@ -609,41 +636,67 @@ describe("leg modes", () => {
     assert.ok(avgSpeedKmh(crawl.miles, crawl.seconds) < 60);
   });
 
-  it("finds a via on the Paris–Rome corridor for every mode", () => {
-    const path: [number, number][] = [
-      [48.8566, 2.3522],
-      [47.798, 3.567],
-      [47.025, 4.848],
-      [45.748, 4.846],
-      [45.07, 7.686],
-      [45.464, 9.19],
-      [44.494, 11.342],
-      [43.77, 11.254],
-      [41.9028, 12.4964],
+  it("finds a via on each long corridor for every mode", () => {
+    const corridors: { name: string; path: [number, number][] }[] = [
+      {
+        name: "Paris–Rome",
+        path: [
+          [48.8566, 2.3522],
+          [47.798, 3.567],
+          [47.025, 4.848],
+          [45.748, 4.846],
+          [45.07, 7.686],
+          [45.464, 9.19],
+          [44.494, 11.342],
+          [43.77, 11.254],
+          [41.9028, 12.4964],
+        ],
+      },
+      {
+        name: "Hamburg–Vienna",
+        path: [
+          [53.55, 9.993],
+          [52.52, 13.405],
+          [49.995, 14.564],
+          [48.11, 16.334],
+        ],
+      },
+      {
+        name: "Lyon–Barcelona",
+        path: [
+          [45.748, 4.846],
+          [43.61, 3.877],
+          [42.698, 2.896],
+          [41.358, 2.07],
+        ],
+      },
     ];
-    const locations = seedsAlongPath(path, 40_000);
-    assert.ok(locations.length >= 4, `seeds ${locations.length}`);
-    for (const mode of ["eco", "fastest", "cheapest"] as const) {
-      const via = pickViaAtRange({
-        path,
-        locations,
-        budgetKwh: 60,
-        totalKwh: 200,
-        mode,
-        detourKm: 12,
-      });
-      assert.ok(via, `${mode} via`);
+    for (const corridor of corridors) {
+      const locations = seedsAlongPath(corridor.path, 40_000);
+      assert.ok(locations.length >= 3, `${corridor.name} seeds ${locations.length}`);
+      for (const mode of ["eco", "fastest", "cheapest"] as const) {
+        const via = pickViaAtRange({
+          path: corridor.path,
+          locations,
+          budgetKwh: 80,
+          totalKwh: 200,
+          mode,
+          detourKm: 12,
+        });
+        assert.ok(via, `${corridor.name} ${mode} via`);
+      }
     }
+    const paris = corridors[0].path;
     const near = pickViaOnPath({
-      path,
-      locations,
+      path: paris,
+      locations: seedsAlongPath(paris, 40_000),
       budgetKwh: 36,
       totalKwh: 200,
       mode: "fastest",
       detourKm: 18,
     });
     assert.ok(near, "via within current SOC range");
-    const frac = alongFraction(path, near!.lat, near!.lng);
+    const frac = alongFraction(paris, near!.lat, near!.lng);
     assert.ok(frac * 200 <= 36 * 0.96, `via at ${frac} uses too much energy`);
   });
 
@@ -803,58 +856,66 @@ describe("leg modes", () => {
   });
 
   it("1200 mile trip inserts several charge vias", () => {
-    const from = { lat: 55.4, lng: 10.4 };
-    const to = { lat: 41.9, lng: 12.5 };
-    const path: [number, number][] = [];
-    for (let i = 0; i <= 14; i++) {
-      const t = i / 14;
-      path.push([from.lat + (to.lat - from.lat) * t, from.lng + (to.lng - from.lng) * t]);
+    const hauls = [
+      { name: "Denmark–Rome", from: { lat: 55.4, lng: 10.4 }, to: { lat: 41.9, lng: 12.5 } },
+      { name: "Amsterdam–Madrid", from: { lat: 52.37, lng: 4.9 }, to: { lat: 40.42, lng: -3.7 } },
+      { name: "Hamburg–Budapest", from: { lat: 53.55, lng: 9.99 }, to: { lat: 47.5, lng: 19.04 } },
+    ];
+    for (const haul of hauls) {
+      const path: [number, number][] = [];
+      for (let i = 0; i <= 14; i++) {
+        const t = i / 14;
+        path.push([
+          haul.from.lat + (haul.to.lat - haul.from.lat) * t,
+          haul.from.lng + (haul.to.lng - haul.from.lng) * t,
+        ]);
+      }
+      const locations = path.slice(1, -1).map((p, i) => ({
+        id: `sc-${i}`,
+        lat: p[0],
+        lng: p[1],
+        kind: "supercharger" as const,
+        usdPerKwh: 0.4,
+        name: `SC ${i}`,
+        short: `SC${i}`,
+      }));
+      const eff = defaultSpeedEff(240);
+      let route: { miles: number; seconds: number; path: [number, number][]; source: "osrm" | "valhalla" | "air" } = {
+        miles: 1200,
+        seconds: 18 * 3600,
+        path,
+        source: "osrm",
+      };
+      let soc = 68;
+      const used = new Set<string>();
+      const vias: string[] = [];
+      for (let d = 0; d < 12; d++) {
+        const kwh = driveKwhAtSpeed(route.miles, route.seconds, eff);
+        const pack = soc < 25 ? 80 : soc;
+        const floorKwh = Math.max(4, ((pack - 8) / 100) * 75);
+        if (kwh <= floorKwh * 0.98) break;
+        const via = pickViaAtRange({
+          path: route.path,
+          locations,
+          budgetKwh: floorKwh,
+          minKwh: Math.max(0, ((pack - 25) / 100) * 75),
+          totalKwh: kwh,
+          mode: "fastest",
+          detourKm: 18,
+          excludeIds: used,
+        });
+        if (!via) break;
+        const split = splitRoutedLeg(route, via.lat, via.lng);
+        if (!split) break;
+        used.add(via.id);
+        vias.push(via.id);
+        const usedKwh = driveKwhAtSpeed(split.before.miles, split.before.seconds, eff);
+        soc = Math.max(15, soc - (usedKwh / 75) * 100);
+        soc = 80;
+        route = split.after;
+      }
+      assert.ok(vias.length >= 4, `${haul.name} vias ${vias.length}`);
     }
-    const locations = path.slice(1, -1).map((p, i) => ({
-      id: `sc-${i}`,
-      lat: p[0],
-      lng: p[1],
-      kind: "supercharger" as const,
-      usdPerKwh: 0.4,
-      name: `SC ${i}`,
-      short: `SC${i}`,
-    }));
-    const eff = defaultSpeedEff(240);
-    let route: { miles: number; seconds: number; path: [number, number][]; source: "osrm" | "valhalla" | "air" } = {
-      miles: 1200,
-      seconds: 18 * 3600,
-      path,
-      source: "osrm",
-    };
-    let soc = 68;
-    const used = new Set<string>();
-    const vias: string[] = [];
-    for (let d = 0; d < 12; d++) {
-      const kwh = driveKwhAtSpeed(route.miles, route.seconds, eff);
-      const pack = soc < 25 ? 80 : soc;
-      const floorKwh = Math.max(4, ((pack - 8) / 100) * 75);
-      if (kwh <= floorKwh * 0.98) break;
-      const via = pickViaAtRange({
-        path: route.path,
-        locations,
-        budgetKwh: floorKwh,
-        minKwh: Math.max(0, ((pack - 25) / 100) * 75),
-        totalKwh: kwh,
-        mode: "fastest",
-        detourKm: 18,
-        excludeIds: used,
-      });
-      if (!via) break;
-      const split = splitRoutedLeg(route, via.lat, via.lng);
-      if (!split) break;
-      used.add(via.id);
-      vias.push(via.id);
-      const usedKwh = driveKwhAtSpeed(split.before.miles, split.before.seconds, eff);
-      soc = Math.max(15, soc - (usedKwh / 75) * 100);
-      soc = 80;
-      route = split.after;
-    }
-    assert.ok(vias.length >= 4, `vias ${vias.length}`);
   });
 
   it("preferred network biases fastest when close enough on corridor", () => {
@@ -1055,5 +1116,131 @@ describe("leg modes", () => {
       preferredNetwork: "brand-dear",
     });
     assert.equal(stillHunts?.id, "cheap-stall", "large premium still loses to cheaper stall");
+  });
+
+  it("fastest inserts a charger before arrival falls under 25%", () => {
+    const usable = 75;
+    const pragueViennaKwh = 50.5;
+    assert.equal(legNeedsVia(pragueViennaKwh, 80, usable), true);
+    assert.equal(legNeedsVia(30, 80, usable), false);
+    assert.equal(legNeedsVia(48, 68, usable), true);
+    assert.equal(legNeedsVia(50, 20, usable), false);
+    assert.equal(planFieldCommit("whmi", 0), null);
+    assert.equal(planFieldCommit("whmi", Number.NaN), null);
+    assert.equal(planFieldCommit("pack", 75.24), 75.2);
+    assert.equal(planFieldCommit("soc", 120), 100);
+    assert.equal(planFieldCommit("speed", 15.5), 15.5);
+    assert.equal(planFieldCommit("chargeTo", 1), 5);
+  });
+
+  it("seeds Superchargers through Spain, not only as far as Lyon", () => {
+    const paths: { name: string; path: [number, number][]; need: string[] }[] = [
+      {
+        name: "Lyon–Sevilla",
+        path: [
+          [45.75, 4.85],
+          [43.61, 3.88],
+          [42.7, 2.89],
+          [41.98, 2.82],
+          [41.39, 2.17],
+          [41.65, -0.88],
+          [40.42, -3.7],
+          [37.39, -5.98],
+        ],
+        need: ["Girona", "Barcelona", "Zaragoza", "Madrid", "Sevilla"],
+      },
+      {
+        name: "Perpignan–Málaga",
+        path: [
+          [42.7, 2.89],
+          [41.39, 2.17],
+          [39.47, -0.38],
+          [38.35, -0.49],
+          [36.72, -4.42],
+        ],
+        need: ["Barcelona", "Valencia", "Alicante", "Málaga"],
+      },
+    ];
+    for (const trip of paths) {
+      const names = seedsAlongPath(trip.path, 40_000).map((c) => c.short);
+      for (const need of trip.need) {
+        assert.ok(names.includes(need), `${trip.name} missing ${need} in ${names.join(", ")}`);
+      }
+    }
+  });
+
+  it("splits a long corridor so the far end is its own search", () => {
+    const corridors: [number, number][][] = [
+      Array.from({ length: 21 }, (_, i) => [55 - i * 0.7, 10 - i * 0.4] as [number, number]),
+      Array.from({ length: 21 }, (_, i) => [48.5, -4 + i * 0.7] as [number, number]),
+    ];
+    for (const path of corridors) {
+      const segs = pathSegments(path, 400);
+      assert.ok(segs.length >= 2, `segments ${segs.length}`);
+      const end = path[path.length - 1];
+      const last = segs[segs.length - 1];
+      assert.deepEqual(last[last.length - 1], end);
+      const samples = simplifyPath(path, 16);
+      assert.ok(samples.length >= 8);
+      assert.deepEqual(samples[samples.length - 1], end);
+    }
+  });
+
+  it("edge cases for distance, splits, and number fields", () => {
+    const here = { lat: 55.4, lng: 10.4 };
+    assert.equal(haversineM(here, here), 0);
+    assert.equal(pathMeters([]), 0);
+    assert.equal(pathMeters([[here.lat, here.lng]]), 0);
+    assert.equal(minDistToPathM(here.lat, here.lng, []), Infinity);
+
+    const east = { lat: 0, lng: 179 };
+    const west = { lat: 0, lng: -179 };
+    const across = haversineM(east, west);
+    assert.ok(across > 180_000 && across < 260_000, `dateline ${across}`);
+
+    const hop = haversineM(here, { lat: 55.401, lng: 10.401 });
+    assert.ok(hop > 50 && hop < 200, `short hop ${hop}`);
+
+    assert.deepEqual(pathSegments([]), []);
+    assert.deepEqual(pathSegments([[55, 10]]), []);
+    const short = pathSegments(
+      [
+        [55.4, 10.4],
+        [55.5, 10.5],
+      ],
+      400,
+    );
+    assert.equal(short.length, 1);
+
+    const line: [number, number][] = [
+      [55.4, 10.4],
+      [55.2, 10.6],
+      [55.0, 10.8],
+      [54.8, 11.0],
+    ];
+    const tooShort = splitRoutedLeg({ miles: 40, seconds: 3600, path: line.slice(0, 2), source: "air" }, 55.3, 10.5);
+    assert.equal(tooShort, null);
+    const split = splitRoutedLeg({ miles: 80, seconds: 7200, path: line, source: "osrm" }, 55.2, 10.6);
+    assert.ok(split);
+    assert.ok(Math.abs(split!.before.miles + split!.after.miles - 80) < 0.01);
+    assert.ok(split!.before.miles >= 4 && split!.after.miles >= 4);
+
+    assert.equal(legNeedsVia(40, 25, 75), false);
+    assert.equal(legNeedsVia(0, 80, 75), false);
+    assert.equal(legNeedsVia(40, 80, 0), false);
+    assert.equal(legNeedsVia(40.425, 80, 75), false);
+    assert.equal(legNeedsVia(40.5, 80, 75), true);
+
+    assert.equal(planFieldCommit("pack", -1), null);
+    assert.equal(planFieldCommit("pack", Infinity), null);
+    assert.equal(planFieldCommit("pack", 19), 20);
+    assert.equal(planFieldCommit("pack", 200.4), 200);
+    assert.equal(planFieldCommit("whmi", 1.5), 1.2);
+    assert.equal(planFieldCommit("soc", 4), 5);
+    assert.equal(planFieldCommit("soc", 5), 5);
+    assert.equal(planFieldCommit("speed", 7), 8);
+    assert.equal(planFieldCommit("speed", 30.04), 30);
+    assert.equal(planFieldCommit("chargeTo", 80), 80);
+    assert.equal(planFieldCommit("chargeTo", 81), 80);
   });
 });

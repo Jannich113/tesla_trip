@@ -59,6 +59,31 @@ export function pathLengthKm(path: [number, number][]) {
   return pathMeters(path) / 1000;
 }
 
+/** Split a long corridor so each piece gets its own charger search. */
+export function pathSegments(path: [number, number][], everyKm = 400): [number, number][][] {
+  if (path.length < 2) return [];
+  if (pathLengthKm(path) <= everyKm * 1.2) return [path];
+  const segs: [number, number][][] = [];
+  let current: [number, number][] = [path[0]];
+  let acc = 0;
+  for (let i = 1; i < path.length; i++) {
+    acc +=
+      haversineM(
+        { lat: path[i - 1][0], lng: path[i - 1][1] },
+        { lat: path[i][0], lng: path[i][1] },
+      ) / 1000;
+    current.push(path[i]);
+    if (acc >= everyKm && i < path.length - 1) {
+      segs.push(current);
+      current = [path[i]];
+      acc = 0;
+    }
+  }
+  if (current.length >= 2) segs.push(current);
+  else if (segs.length) segs[segs.length - 1].push(path[path.length - 1]);
+  return segs.length ? segs : [path];
+}
+
 /**
  * OCM `distance` is half the corridor width. Motorway HPC sits 1–8 km off
  * the carriageway; 28 km was pulling in town AC. Tight first, widen if sparse.

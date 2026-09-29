@@ -149,6 +149,18 @@ npm test
 npm run build
 ```
 
+`npm test` includes the regression cases. Each one was added after a real failure, and it fails again if that bug returns.
+
+| Case | What it catches |
+| --- | --- |
+| Fastest inserts one charger and bills that stall | A long hop arriving under 25% with no stop, or a chain of every stall on the motorway |
+| A hop into Spain charges in Spain | Charger search that dies after the first 280 km, or seeds that stop at Lyon |
+| Corridor split keeps the last point | A Spain or other far end left out of the OpenChargeMap request |
+| Long distance is great-circle kilometers | A flat shortcut on a long hop, or kilometers labeled as miles |
+| Edge cases | Zero length, the date line, a route too short to split, 25% battery, and empty number fields |
+| Keeps a Tesla on the whole route | Same check for Svendborg–Barcelona, Oslo–Rome, Amsterdam–Madrid, Hamburg–Budapest, and Copenhagen–Milan |
+| Service worker cache is versioned | A page load that waits forever on the network |
+
 ---
 
 ## Privacy
