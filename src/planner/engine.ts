@@ -18,6 +18,8 @@ import {
   DEFAULT_DETOUR_KM,
   CHEAP_STALL_KM,
   STALL_SAVE_KR,
+  PREFERRED_CLOSE_M,
+  PREFERRED_RATE_PREMIUM_KR,
   dkNowDateTime,
   dkNowParts,
   driveKwhAtSpeed,
@@ -558,10 +560,12 @@ export function pickCharges(opts: {
   backupId?: string | null;
   preferId?: string | null;
   memberships?: Record<string, boolean>;
+  preferredNetwork?: string | null;
   routeSeconds?: number;
 }): { primary: PricedCharge; backup: PricedCharge | null; options: PricedCharge[] } | null {
   const { kwhNeed, path, detourKm, mode, locations, acKr, hours, acKw, speedEff, clockHhmm, maxWaitMin, backupId, preferId, memberships = {} } = opts;
   const focus = opts.focus ?? defaultFocus(mode);
+  const preferredNetwork = opts.preferredNetwork ?? null;
   if (kwhNeed <= 0.05 || !locations.length) return null;
   const preferCheap = focus === "pris";
   const userBand = Math.max(Math.min(detourKm, CHEAP_STALL_KM) * 1000, 80);
@@ -630,22 +634,37 @@ export function pickCharges(opts: {
   const baselineKr = onPath[0]?.priced.kr ?? [...scored].sort((a, b) => a.distM - b.distM)[0]?.priced.kr ?? 0;
   const netSave = (s: (typeof scored)[0]) => baselineKr - s.priced.kr - extraDriveKr(s.distM);
 
+  const isPreferred = (loc: ChargeLocation) => {
+    const id = networkIdFor(loc.kind, loc.networkId);
+    return Boolean(preferredNetwork && id === preferredNetwork);
+  };
+  const preferSave = PREFERRED_RATE_PREMIUM_KR * Math.max(kwhNeed, 5);
+  const preferFit =
+    focus === "time"
+      ? ((PREFERRED_CLOSE_M / 1000) / 130) * 60
+      : (PREFERRED_CLOSE_M / 1000) * 14;
   const byRank = (a: (typeof scored)[0], b: (typeof scored)[0]) => {
-    if (preferCheap) return netSave(b) - netSave(a) || a.distM - b.distM;
-    const as = chargeFitScore(focus, {
-      distM: a.distM,
-      kr: a.priced.kr,
-      dc: a.loc.kind === "supercharger",
-      extraDriveKr: extraDriveKr(a.distM),
-      extraKwh: extraDriveKr(a.distM) / Math.max(acKr, 0.01),
-    });
-    const bs = chargeFitScore(focus, {
-      distM: b.distM,
-      kr: b.priced.kr,
-      dc: b.loc.kind === "supercharger",
-      extraDriveKr: extraDriveKr(b.distM),
-      extraKwh: extraDriveKr(b.distM) / Math.max(acKr, 0.01),
-    });
+    if (preferCheap) {
+      const aSave = netSave(a) + (isPreferred(a.loc) ? preferSave : 0);
+      const bSave = netSave(b) + (isPreferred(b.loc) ? preferSave : 0);
+      return bSave - aSave || a.distM - b.distM;
+    }
+    const as =
+      chargeFitScore(focus, {
+        distM: a.distM,
+        kr: a.priced.kr,
+        dc: a.loc.kind === "supercharger",
+        extraDriveKr: extraDriveKr(a.distM),
+        extraKwh: extraDriveKr(a.distM) / Math.max(acKr, 0.01),
+      }) - (isPreferred(a.loc) ? preferFit : 0);
+    const bs =
+      chargeFitScore(focus, {
+        distM: b.distM,
+        kr: b.priced.kr,
+        dc: b.loc.kind === "supercharger",
+        extraDriveKr: extraDriveKr(b.distM),
+        extraKwh: extraDriveKr(b.distM) / Math.max(acKr, 0.01),
+      }) - (isPreferred(b.loc) ? preferFit : 0);
     return as - bs || a.distM - b.distM;
   };
 
@@ -719,6 +738,7 @@ export function pricePlan(opts: {
   chargeToSoc?: Array<number | null | undefined>;
   backupIds?: Array<string | null | undefined>;
   memberships?: Record<string, boolean>;
+  preferredNetwork?: string | null;
   waitCapMin?: number[];
   focuses?: ModeFocus[];
   preferIds?: Array<string | null | undefined>;
@@ -775,6 +795,7 @@ export function pricePlan(opts: {
         detourKm: mode === "cheapest" ? CHEAP_STALL_KM : job.detourKm,
         excludeIds: usedVias,
         memberships: opts.memberships,
+        preferredNetwork: opts.preferredNetwork,
       };
       const viaLoc =
         pickViaAtRange(viaOpts) ??
@@ -892,6 +913,7 @@ export function pricePlan(opts: {
             ? job.from.id.replace(/^via-/, "")
             : opts.preferIds?.[userIndex] ?? null,
           memberships: opts.memberships,
+          preferredNetwork: opts.preferredNetwork,
           routeSeconds: route.seconds,
         })
       : null;

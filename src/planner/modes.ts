@@ -126,6 +126,10 @@ export const MIN_SAVE_KR = 25;
 /** Cheapest takes a stall if net save (after extra miles) is at least this. */
 export const STALL_SAVE_KR = 1;
 export const STALL_SAVE_WEIGHT = 1;
+/** Eco/Fastest: preferred network may sit this many meters farther than the best rival. */
+export const PREFERRED_CLOSE_M = 6_000;
+/** Cheapest: preferred network may cost this many kr/kWh more than the cheapest rival. */
+export const PREFERRED_RATE_PREMIUM_KR = 0.35;
 /** Wear / inconvenience of each extra km, added on top of energy. */
 export const EXTRA_KM_KR = 0.6;
 
