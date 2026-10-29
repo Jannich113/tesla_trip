@@ -1,9 +1,9 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { useTripStore } from "@/store/trip-store";
-import { primeRouteCache, canonRouteKey, type LegMode, type LegWhen, type PlanStop, type RoutedLeg } from "./engine";
+import { primeRouteCache, canonRouteKey, routeTooCoarse, type LegMode, type LegWhen, type PlanStop, type RoutedLeg } from "./engine";
 import { DEFAULT_DETOUR_KM, DEFAULT_WAIT_MIN, kwhPerMiFrom100km, normalizeMode, type SpeedEff } from "./modes";
-import { simplifyPath } from "./polyline";
+import { routePointBudget, simplifyPath } from "./polyline";
 import { cacheInvalidate } from "./cache";
 
 export type WhenKind = "depart" | "arrive";
@@ -58,6 +58,8 @@ function slimRoutes(routes: Record<string, RoutedLeg> | undefined) {
   const byMode = new Map<string, { key: string; route: RoutedLeg; miles: number }[]>();
   for (const [key, route] of Object.entries(routes)) {
     if (!route?.path?.length || route.source === "air" || route.path.length < 3) continue;
+    // Stored by an older version with too few points: drop it so the route is fetched again.
+    if (routeTooCoarse(route)) continue;
     const canon = canonRouteKey(key);
     const mode = canon.split("|")[2] ?? "";
     if (mode !== "eco" && mode !== "fastest" && mode !== "cheapest") continue;
@@ -69,7 +71,8 @@ function slimRoutes(routes: Record<string, RoutedLeg> | undefined) {
   for (const list of byMode.values()) {
     list.sort((a, b) => b.miles - a.miles);
     for (const row of list.slice(0, 2)) {
-      out[row.key] = { ...row.route, path: simplifyPath(row.route.path, 40) };
+      // Enough points that the stored road still follows the real one on long trips.
+      out[row.key] = { ...row.route, path: simplifyPath(row.route.path, routePointBudget(row.route.miles * 1.609)) };
     }
   }
   return out;

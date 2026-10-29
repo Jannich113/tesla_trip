@@ -78,16 +78,36 @@ export function geohashNeighborhood(hash: string): string[] {
 }
 
 /** Unique precision-4 cells covering a polyline, with neighbors. */
+/** Path sample spacing; well under a precision-4 cell's short side (~19 km). */
+const SAMPLE_KM = 8;
+
+/**
+ * Cells (with neighbours) covering the whole path. Samples by distance, not by count:
+ * a fixed 48 samples left 50+ km holes on long trips and dropped chargers beside the road.
+ */
 export function geohashesAlongPath(path: [number, number][], precision = 4): Set<string> {
   const cells = new Set<string>();
   if (path.length < 2) return cells;
-  const step = Math.max(1, Math.floor(path.length / 48));
-  for (let i = 0; i < path.length; i += step) {
-    const hash = encodeGeohash(path[i][0], path[i][1], precision);
+  let lastHash = "";
+  const addAt = (lat: number, lng: number) => {
+    const hash = encodeGeohash(lat, lng, precision);
+    if (hash === lastHash) return;
+    lastHash = hash;
     for (const c of geohashNeighborhood(hash)) cells.add(c);
+  };
+  addAt(path[0][0], path[0][1]);
+  for (let i = 1; i < path.length; i++) {
+    const [aLat, aLng] = path[i - 1];
+    const [bLat, bLng] = path[i];
+    const km = Math.hypot(
+      (bLat - aLat) * 111.2,
+      (bLng - aLng) * 111.2 * Math.cos((((aLat + bLat) / 2) * Math.PI) / 180),
+    );
+    const steps = Math.max(1, Math.ceil(km / SAMPLE_KM));
+    for (let s = 1; s <= steps; s++) {
+      addAt(aLat + ((bLat - aLat) * s) / steps, aLng + ((bLng - aLng) * s) / steps);
+    }
   }
-  const last = path[path.length - 1];
-  for (const c of geohashNeighborhood(encodeGeohash(last[0], last[1], precision))) cells.add(c);
   return cells;
 }
 

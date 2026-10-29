@@ -60,20 +60,47 @@ function cumMeters(path: [number, number][]) {
   return cum;
 }
 
+/** Sampled path points sit at most about this far apart. */
+const PATH_SAMPLE_M = 4_000;
+
+/**
+ * Vertex stride that keeps samples ~4 km apart. A fixed 48 samples put them ~54 km
+ * apart on long trips, so a charger beside the road could measure 27 km away.
+ */
 function sampleStep(path: [number, number][]) {
-  return Math.max(1, Math.floor(path.length / 48));
+  if (path.length < 3) return 1;
+  const cum = cumMeters(path);
+  const total = cum[cum.length - 1] ?? 0;
+  if (total <= 0) return 1;
+  return Math.max(1, Math.floor(PATH_SAMPLE_M / (total / (path.length - 1))));
 }
 
+/** Distance from a point to the segment a→b, in a local equirectangular projection. */
+function segmentM(lat: number, lng: number, a: [number, number], b: [number, number]) {
+  const k = Math.cos(lat * DEG);
+  const ax = (a[1] - lng) * k;
+  const ay = a[0] - lat;
+  const bx = (b[1] - lng) * k;
+  const by = b[0] - lat;
+  const dx = bx - ax;
+  const dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 > 0 ? Math.min(1, Math.max(0, -(ax * dx + ay * dy) / len2)) : 0;
+  return Math.hypot(ax + t * dx, ay + t * dy) * M_PER_DEG;
+}
+
+/** Distance to the road itself (its segments), not just to its sampled points. */
 export function minDistToPathM(lat: number, lng: number, path: [number, number][]) {
   if (path.length === 0) return Infinity;
+  if (path.length === 1) return approxM(lat, lng, path[0][0], path[0][1]);
   const step = sampleStep(path);
+  const last = path.length - 1;
   let best = Infinity;
-  for (let i = 0; i < path.length; i += step) {
-    const d = approxM(lat, lng, path[i][0], path[i][1]);
+  for (let i = 0; i < last; i += step) {
+    const d = segmentM(lat, lng, path[i], path[Math.min(i + step, last)]);
     if (d < best) best = d;
   }
-  const last = path[path.length - 1];
-  return Math.min(best, approxM(lat, lng, last[0], last[1]));
+  return best;
 }
 
 export function pathMeters(path: [number, number][]) {
@@ -145,6 +172,15 @@ export function locationsNearPath<T extends { lat: number; lng: number }>(
 }
 
 /** Keep stalls spread along the corridor, not the 40 nearest (those all sit in one country). */
+/**
+ * How many evenly spread chargers to keep for a route: one per ~15 km, at least 28.
+ * A fixed count thins long trips to one charger per ~90 km, which leaves the range
+ * window empty and the planner falling back to "no known charger" stops.
+ */
+export function spreadBuckets(pathKm: number): number {
+  return Math.min(200, Math.max(28, Math.ceil(pathKm / 15)));
+}
+
 export function spreadAlongPath<T extends { id: string; lat: number; lng: number }>(
   locations: T[],
   path: [number, number][],

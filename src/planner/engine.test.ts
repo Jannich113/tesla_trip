@@ -862,10 +862,12 @@ describe("leg modes", () => {
     for (let i = 0; i <= 20; i++) {
       path.push([55.4 - i * 0.2, 10.4 - i * 0.05]);
     }
+    // ~1.5 km beside the road (east). Offsetting along the road put it on the road itself
+    // once distance is measured to the road rather than to sampled points.
     const tesla = {
       id: "pref-tesla",
-      lat: path[8][0] + 0.015,
-      lng: path[8][1],
+      lat: path[8][0],
+      lng: path[8][1] + 0.025,
       kind: "supercharger" as const,
       usdPerKwh: 0.5,
       name: "Tesla",

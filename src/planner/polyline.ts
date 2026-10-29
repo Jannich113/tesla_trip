@@ -79,6 +79,15 @@ export function chargersOnPath<T extends { lat: number; lng: number }>(
   return chargers.filter((c) => minDistToPathM(c.lat, c.lng, path) <= band);
 }
 
+/**
+ * Points to keep when simplifying a route of `km`: one per ~10 km (40–260). A flat
+ * count made long routes so coarse (one point per ~70 km) that the "road" cut corners
+ * by tens of km and chargers on the real road looked too far away to use.
+ */
+export function routePointBudget(km: number): number {
+  return Math.min(260, Math.max(40, Math.ceil(km / 10) + 1));
+}
+
 /** Keep shape, drop dense GPS points so Leaflet/OCM stay cheap. */
 export function simplifyPath(path: [number, number][], maxPts = 160): [number, number][] {
   if (path.length <= maxPts) return path;
@@ -96,5 +105,29 @@ export function simplifyPath(path: [number, number][], maxPts = 160): [number, n
   }
   const last = path[path.length - 1];
   if (out[out.length - 1] !== last) out.push(last);
+  return out;
+}
+/**
+ * Cut a route into sections of about `sectionKm`, each sharing its first point with the
+ * previous section's last. Charger lookups cap results per request, so one request for a
+ * whole long route leaves stretches empty; one per section does not.
+ */
+export function splitPathByKm(path: [number, number][], sectionKm: number): [number, number][][] {
+  if (path.length < 2 || sectionKm <= 0) return path.length >= 2 ? [path] : [];
+  const out: [number, number][][] = [];
+  let current: [number, number][] = [path[0]];
+  let km = 0;
+  for (let i = 1; i < path.length; i++) {
+    const [lat, lng] = path[i];
+    const [plat, plng] = path[i - 1];
+    km += haversineM({ lat: plat, lng: plng }, { lat, lng }) / 1000;
+    current.push(path[i]);
+    if (km >= sectionKm && i < path.length - 1) {
+      out.push(current);
+      current = [path[i]];
+      km = 0;
+    }
+  }
+  if (current.length >= 2) out.push(current);
   return out;
 }

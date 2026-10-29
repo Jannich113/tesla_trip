@@ -5,7 +5,7 @@ import { haversineM } from "@/planner/insert";
 import { isDcStation, networkFromOperator, networkFromOsmTags } from "@/planner/osm-operator";
 import { rateForNetwork } from "@/planner/networks";
 import { seedsAlongPath } from "@/planner/seed-chargers";
-import { encodePolyline, polylineBufferKm, chargersOnPath } from "@/planner/polyline";
+import { encodePolyline, polylineBufferKm, chargersOnPath, splitPathByKm } from "@/planner/polyline";
 
 const DKK_PER_USD = 6.85;
 const OCM_KEY = env("OPENCHARGEMAP_KEY") ?? "d670b729-7bd0-40dd-8a17-4b881edf1a68";
@@ -234,6 +234,24 @@ async function fetchOcmAt(lat: number, lng: number, radiusKm: number): Promise<R
   }
 }
 
+/** Route sections looked up separately; OCM returns at most 200 chargers per request. */
+const OCM_SECTION_KM = 250;
+const OCM_PARALLEL = 3;
+
+async function fetchOcmSections(path: [number, number][], tightKm: number, wideKm: number) {
+  const sections = splitPathByKm(path, OCM_SECTION_KM);
+  if (sections.length <= 1) return fetchOcm(path, samplePath(path, 40_000, 8), tightKm, wideKm);
+  const byId = new Map<string, RouteCharger>();
+  for (let i = 0; i < sections.length; i += OCM_PARALLEL) {
+    const batch = sections.slice(i, i + OCM_PARALLEL);
+    const found = await Promise.all(
+      batch.map((part) => fetchOcm(part, samplePath(part, 40_000, 8), tightKm, wideKm)),
+    );
+    for (const row of found.flat()) byId.set(row.id, row);
+  }
+  return [...byId.values()];
+}
+
 async function fetchOcm(path: [number, number][], samples: [number, number][], tightKm: number, wideKm: number) {
   const tightHits = chargersOnPath(await fetchOcmPolyline(path, tightKm), path, wideKm);
   if (wideKm <= tightKm + 1 && tightHits.length >= 8) return tightHits;
@@ -269,7 +287,7 @@ async function searchCorridor(path: [number, number][], asked: number) {
   const seed = seedsAlongPath(path, radiusM);
   const samples = samplePath(path, 40_000, 8);
   const [ocm, osmRaw] = await Promise.all([
-    fetchOcm(path, samples, tightKm, wideKm),
+    fetchOcmSections(path, tightKm, wideKm),
     fetchOverpass(samples, radiusM),
   ]);
   const osm = chargersOnPath(osmRaw, path, wideKm);

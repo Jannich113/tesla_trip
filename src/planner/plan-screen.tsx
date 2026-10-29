@@ -1,10 +1,11 @@
-import { useEffect, useLayoutEffect, useMemo, useState, useDeferredValue, useRef, lazy, Suspense, memo, startTransition } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useDeferredValue, useRef, lazy, Suspense, memo, startTransition } from "react";
 import type { KeyboardEvent } from "react";
 import { ChevronDown, ChevronUp, MapPin, MoreHorizontal, Navigation, Plus, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import type { MapMarker, MapRoute } from "@/components/bay-map";
 import { ConfirmStrip } from "@/components/confirm-strip";
 import { parseCoordinates, reverseAddress, searchAddress, suggestAddress, type AddressHit } from "./search";
+import { chargeChain, type ChainEntry, type ChargeStatus } from "./charge-chain";
 
 /**
  * Address suggestions under a stop field: the picked row is highlighted, and a spelling fix
@@ -158,13 +159,13 @@ import { RoadFeeSuggestions } from "./road-fee-suggestions";
 import { appleDirectionsUrl, googleDirectionsUrl, parseMapShareUrl } from "./maps-share";
 import { ChargerPicker } from "./charger-picker";
 import { chargePickRadiusM } from "./charger-radius";
-import { minDistToPathM, spreadAlongPath } from "./insert";
-import { simplifyPath } from "./polyline";
+import { minDistToPathM, spreadAlongPath, spreadBuckets } from "./insert";
+import { pathLengthKm, simplifyPath } from "./polyline";
 import { useRouteChargers } from "./use-route-chargers";
 import { useChargePrices } from "./use-charge-prices";
 import { cacheGet, cacheOpenDisk } from "./cache";
 import { useLiveElpris } from "./use-live-elpris";
-import { EU_BLOCS, EU_NETWORKS, EU_REGIONS, type EuRegion, regionalExtra, regionalOwn, regionalRoam, roamExtra, roamRate } from "./networks";
+import { EU_BLOCS, EU_NETWORKS, EU_REGIONS, type EuRegion, networkIdFor, networkLabel, regionalExtra, regionalOwn, regionalRoam, roamExtra, roamRate } from "./networks";
 import { useVehicleProfile } from "@/hooks/use-vehicle-profile";
 import { TESLA_MODELS, type TeslaModelId } from "@/lib/tesla-models";
 import { useVehicleStore } from "@/store/vehicle-store";
@@ -335,7 +336,7 @@ function buildPlanLocations(
   if (!paths.length) return all;
   const picked = new Map<string, ChargeLocation>();
   for (const p of paths) {
-    for (const l of spreadAlongPath(all, p, 28, 55_000)) picked.set(l.id, l);
+    for (const l of spreadAlongPath(all, p, spreadBuckets(pathLengthKm(p)), 55_000)) picked.set(l.id, l);
     const ranked = all
       .map((l) => ({ l, d: minDistToPathM(l.lat, l.lng, p) }))
       .filter((s) => s.d < 50_000)
@@ -398,27 +399,74 @@ function sameLastOptions(
   return true;
 }
 
-function modeStopChain(legs: PricedLeg[]) {
-  if (!legs.length) return [] as { name: string; via: boolean; charge: string }[];
-  const out: { name: string; via: boolean; charge: string }[] = [
-    { name: legs[0].from.name, via: false, charge: "" },
-  ];
-  for (const leg of legs) {
-    if (leg.accepted && leg.charge) {
-      const atInserted = leg.from.id.startsWith("via-");
-      const last = out[out.length - 1];
-      const label = `${formatNumber(leg.charge.kwh, 0)} kWh · ${formatKrValue(leg.charge.kr, 0)} kr`;
-      if (atInserted && last) {
-        last.via = true;
-        last.name = leg.charge.name || last.name;
-        last.charge = label;
-      } else {
-        out.push({ name: leg.charge.name || "Charge", via: true, charge: label });
-      }
-    }
-    out.push({ name: leg.to.name, via: Boolean(leg.via), charge: "" });
+const CHARGE_BADGE: Record<ChargeStatus, { label: string; className: string }> = {
+  required: { label: "Required", className: "bg-amber-400/15 text-amber-300" },
+  planned: { label: "Planned", className: "bg-surface text-muted" },
+  "optional-added": { label: "Optional · added", className: "bg-emerald-400/15 text-emerald-300" },
+  optional: { label: "Optional · good price", className: "bg-emerald-400/10 text-emerald-300/80" },
+};
+
+/** Google Maps search for chargers around a point where the planner knows none. */
+function chargerSearchHref(lat: number, lng: number) {
+  return `https://www.google.com/maps/search/EV+charging+station/@${lat.toFixed(5)},${lng.toFixed(5)},11z`;
+}
+
+function ChainRow({
+  entry,
+  onToggleOptional,
+}: {
+  entry: ChainEntry;
+  onToggleOptional: (userIndex: number) => void;
+}) {
+  if (entry.type === "stop") {
+    return <span className="font-medium text-foreground">{entry.name}</span>;
   }
-  return out;
+  if (entry.type === "pass") {
+    return <span className="text-subtle">Passes {entry.name} (no charge)</span>;
+  }
+  const badge = entry.placeholder
+    ? { label: "Estimate", className: "bg-red-400/15 text-red-300" }
+    : CHARGE_BADGE[entry.status];
+  const optional = entry.status === "optional" || entry.status === "optional-added";
+  return (
+    <div className={cn(entry.status === "optional" && "opacity-80")}>
+      <span className="flex flex-wrap items-center gap-1.5">
+        <span className={cn("rounded-full px-1.5 py-0.5 text-[10px] font-medium", badge.className)}>{badge.label}</span>
+        <span className="text-foreground">{entry.name}</span>
+      </span>
+      <span className="mt-0.5 block text-[11px] text-muted">
+        {entry.placeholder
+          ? `No charger known near here · about ${formatNumber(entry.kwh, 0)} kWh ≈ ${formatKrValue(entry.kr, 0)} kr`
+          : [
+              entry.network,
+              `${formatKrValue(entry.rateKr, 2)} kr/kWh`,
+              `${formatNumber(entry.kwh, 0)} kWh`,
+              `${formatKrValue(entry.kr, 0)} kr`,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+      </span>
+      {entry.placeholder && entry.lat !== null && entry.lng !== null ? (
+        <a
+          href={chargerSearchHref(entry.lat, entry.lng)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-1 inline-flex h-7 items-center rounded-full bg-background px-2.5 text-[11px] font-medium text-foreground"
+        >
+          Find chargers near here
+        </a>
+      ) : null}
+      {optional ? (
+        <button
+          type="button"
+          onClick={() => onToggleOptional(entry.userIndex)}
+          className="mt-1 inline-flex h-7 items-center rounded-full bg-background px-2.5 text-[11px] font-medium text-foreground"
+        >
+          {entry.status === "optional" ? "Add this charge" : "Remove"}
+        </button>
+      ) : null}
+    </div>
+  );
 }
 
 type OptionRowView = {
@@ -437,6 +485,8 @@ const OptionList = memo(function OptionList({
   units,
   cheapAvoid,
   onPick,
+  networkOf,
+  onToggleOptional,
 }: {
   rows: OptionRowView[];
   mixed: boolean;
@@ -445,6 +495,8 @@ const OptionList = memo(function OptionList({
   units: Units;
   cheapAvoid: { motorways: boolean; tolls: boolean; roadFees: boolean };
   onPick: (mode: LegMode) => void;
+  networkOf: (charge: PricedCharge) => string | null;
+  onToggleOptional: (userIndex: number) => void;
 }) {
   const fastest = rows.find((r) => r.mode === "fastest")?.totals;
   const picked = mixed ? null : rows.find((r) => r.mode === active) ?? null;
@@ -453,7 +505,8 @@ const OptionList = memo(function OptionList({
   const pickedSlow = Boolean(
     pt && fastest && picked?.mode === "eco" && timePenalized(fastest.driveMin, pt.driveMin),
   );
-  const chain = picked ? modeStopChain(picked.legs) : [];
+  const chain = picked ? chargeChain(picked.legs, networkOf) : [];
+  const estimates = chain.filter((e) => e.type === "charge" && e.placeholder).length;
   return (
     <div className="mt-2">
       {/* One card per mode: compare time, price and charges at a glance. */}
@@ -526,17 +579,17 @@ const OptionList = memo(function OptionList({
                 })()
               : ""}
           </p>
+          {estimates ? (
+            <p className="mt-2 rounded-lg bg-red-400/10 px-2.5 py-2 text-[11px] text-red-200">
+              {estimates === 1 ? "One charge stop has" : `${estimates} charge stops have`} no known charger nearby. The
+              price is an estimate; check for a charger before you go.
+            </p>
+          ) : null}
           {chain.length ? (
-            <ol className="mt-3 space-y-2 border-l border-border pl-3">
-              {chain.map((s, i) => (
+            <ol className="mt-3 space-y-2.5 border-l border-border pl-3">
+              {chain.map((entry, i) => (
                 <li key={`${picked.mode}-${i}`} className="text-xs">
-                  {s.via ? (
-                    <span className="mr-1 text-[10px] font-medium uppercase tracking-wide text-amber-300">
-                      Charge
-                    </span>
-                  ) : null}
-                  <span className="text-foreground">{s.name}</span>
-                  {s.charge ? <span className="mt-0.5 block text-[11px] text-muted">{s.charge}</span> : null}
+                  <ChainRow entry={entry} onToggleOptional={onToggleOptional} />
                 </li>
               ))}
             </ol>
@@ -920,6 +973,27 @@ export function PlanScreen() {
   const locations = useMemo(
     () => buildPlanLocations(live, locationsStored, routeChargers, searchRoutes, preferredNetwork),
     [live, locationsStored, routeChargers, searchRoutes, preferredNetwork],
+  );
+  const chargerById = useMemo(() => {
+    const byId = new Map<string, ChargeLocation>();
+    for (const c of locations) byId.set(c.id, c);
+    for (const c of routeChargers) byId.set(c.id, c);
+    return byId;
+  }, [locations, routeChargers]);
+  /** "Tesla Supercharger · member price", "IONITY"… for a charge in the route list. */
+  const networkOf = useCallback(
+    (charge: PricedCharge) => {
+      const id = networkIdFor(charge.kind, chargerById.get(charge.locationId)?.networkId);
+      if (!id) return null;
+      const net = EU_NETWORKS.find((n) => n.id === id);
+      if (!net) return networkLabel(id, Boolean(networkAbo[id]));
+      return networkAbo[id] ? `${net.name} · member price` : net.name;
+    },
+    [chargerById, networkAbo],
+  );
+  const toggleOptionalCharge = useCallback(
+    (userIndex: number) => setAcceptCharge((cur) => ({ ...cur, [userIndex]: !cur[userIndex] })),
+    [],
   );
   const chargerPool = useMemo(() => {
     const byId = new Map<string, ChargeLocation>();
@@ -2153,6 +2227,8 @@ export function PlanScreen() {
               units={units}
               cheapAvoid={cheapAvoid}
               onPick={setAllModes}
+              networkOf={networkOf}
+              onToggleOptional={toggleOptionalCharge}
             />
             <PreferNetwork abo={networkAbo} preferred={preferredNetwork} onPick={setPreferredNetwork} />
           </>

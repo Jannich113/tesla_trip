@@ -1,0 +1,121 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import type { ChargeLocation } from "@/lib/charge-locations";
+import { chargeChain } from "./charge-chain.ts";
+import { pricePlan, type PlanStop, type PricedCharge, type PricedLeg, type RoutedLeg } from "./engine.ts";
+import { defaultSpeedEff } from "./modes.ts";
+
+const KM_PER_DEG = 111.2;
+
+function road(km: number): RoutedLeg {
+  const steps = Math.round(km / 5);
+  const path: [number, number][] = Array.from({ length: steps + 1 }, (_, i) => [55 + (km / KM_PER_DEG) * (i / steps), 10]);
+  return { miles: km / 1.609, seconds: (km / 100) * 3600, path, source: "osrm" };
+}
+
+function sc(id: string, km: number): ChargeLocation {
+  return { id, name: id, short: id, usdPerKwh: 0.5, lat: 55 + km / KM_PER_DEG, lng: 10.002, kind: "supercharger", preset: false, radiusM: 250 };
+}
+
+function trip(km: number, locations: ChargeLocation[]) {
+  return pricePlan({
+    stops: [
+      { id: "a", name: "Odense", lat: 55, lng: 10 },
+      { id: "b", name: "Malmi", lat: 55 + km / KM_PER_DEG, lng: 10 },
+    ],
+    modes: ["fastest"],
+    detours: [12],
+    routes: [road(km)],
+    soc: 80,
+    usableKwh: 75,
+    locations,
+    hours: [],
+    acKw: 11,
+    acKr: 2,
+    speedEff: defaultSpeedEff(250),
+    departHhmm: "",
+  });
+}
+
+const tesla = () => "Tesla ad-hoc";
+
+describe("chargeChain", () => {
+  it("lists start, each required charge with network and price, then the destination", () => {
+    const chain = chargeChain(trip(700, [sc("sc-220", 220), sc("sc-480", 480)]), tesla);
+    assert.deepEqual(
+      chain.map((e) => (e.type === "charge" ? `charge:${e.name}:${e.status}` : `${e.type}:${e.name}`)),
+      ["stop:Odense", "charge:sc-220:required", "charge:sc-480:required", "stop:Malmi"],
+    );
+    for (const e of chain) {
+      if (e.type !== "charge") continue;
+      assert.equal(e.network, "Tesla ad-hoc");
+      assert.ok(e.kwh > 0 && e.kr > 0 && e.rateKr > 0);
+      assert.equal(e.placeholder, false);
+    }
+  });
+
+  it("never shows a bare drive-past row for a real trip", () => {
+    const chain = chargeChain(trip(700, [sc("sc-220", 220), sc("sc-480", 480)]), tesla);
+    assert.deepEqual(chain.filter((e) => e.type === "pass"), []);
+  });
+
+  it("flags stops with no known charger, with a location to search from and no network", () => {
+    const chain = chargeChain(trip(700, []), tesla);
+    const est = chain.filter((e) => e.type === "charge");
+    assert.ok(est.length >= 1);
+    for (const e of est) {
+      if (e.type !== "charge") continue;
+      assert.equal(e.placeholder, true);
+      assert.equal(e.name, "No known charger");
+      assert.equal(e.network, null);
+      assert.ok(e.lat !== null && e.lng !== null, "needs coordinates for the charger search link");
+      assert.ok(e.kwh > 0 && e.kr > 0);
+    }
+  });
+
+  // Hand-made legs for the cases a straight test road does not produce.
+  const stop = (id: string, name: string): PlanStop => ({ id, name, lat: 55, lng: 10 });
+  const charge = (name: string): PricedCharge =>
+    ({ locationId: name, name, kind: "custom", kwh: 20, kr: 60, rateKr: 3, label: "", inBand: true, distM: 0, windowLabel: "", cheapWindow: false, waitMin: 0 });
+  const leg = (from: PlanStop, to: PlanStop, extra: Partial<PricedLeg>): PricedLeg =>
+    ({ from, to, userIndex: 0, accepted: false, needed: false, suggested: false, advice: null, charge: null, ...extra }) as PricedLeg;
+
+  it("offers a cheap optional charge without putting it in the plan", () => {
+    const chain = chargeChain(
+      [leg(stop("a", "A"), stop("b", "B"), { suggested: true, advice: "suggested", charge: charge("Clever Kolding") })],
+      () => "Clever",
+    );
+    const c = chain.find((e) => e.type === "charge");
+    assert.equal(c?.type === "charge" && c.status, "optional");
+  });
+
+  it("marks an optional charge the user added", () => {
+    const chain = chargeChain(
+      [leg(stop("a", "A"), stop("b", "B"), { suggested: true, accepted: true, advice: "suggested", charge: charge("Clever Kolding") })],
+      () => "Clever",
+    );
+    const c = chain.find((e) => e.type === "charge");
+    assert.equal(c?.type === "charge" && c.status, "optional-added");
+  });
+
+  it("puts a via's charge in the via's place instead of listing the via twice", () => {
+    const via = stop("via-sc-1", "Moraberg");
+    const chain = chargeChain(
+      [
+        leg(stop("a", "A"), via, {}),
+        leg(via, stop("b", "B"), { accepted: true, needed: true, advice: "required", charge: charge("Moraberg") }),
+      ],
+      () => "Tesla ad-hoc",
+    );
+    assert.deepEqual(
+      chain.map((e) => `${e.type}:${e.name}`),
+      ["stop:A", "charge:Moraberg", "stop:B"],
+    );
+  });
+
+  it("keeps a drive-past via visible if the engine ever produces one", () => {
+    const via = stop("via-sc-1", "Moraberg");
+    const chain = chargeChain([leg(stop("a", "A"), via, {}), leg(via, stop("b", "B"), {})], () => null);
+    assert.deepEqual(chain.map((e) => `${e.type}:${e.name}`), ["stop:A", "pass:Moraberg", "stop:B"]);
+  });
+});

@@ -152,7 +152,20 @@ export type PricedCharge = {
   waitMin: number;
   nearest?: boolean;
   cheapest?: boolean;
+  /** No charger is known here; kWh and price are an estimate at a typical rate. */
+  placeholder?: boolean;
 };
+
+/**
+ * Each charge stop splits a leg one level deeper. 8 levels covered ~2,000 km; longer trips
+ * left the last stretch unsplit, needing more than a full battery while showing 8% on arrival.
+ */
+const MAX_SPLIT_DEPTH = 40;
+/** Safety cap on legs per plan (stops plus inserted charge stops). */
+const MAX_LEGS = 96;
+
+/** Estimate for a charge where no charger is known (0.48 USD/kWh, as insert.ts assumes). */
+export const UNKNOWN_CHARGER_KR_PER_KWH = 0.48 * 6.85;
 
 export type PricedLeg = {
   from: PlanStop;
@@ -233,10 +246,23 @@ export function canonRouteKey(key: string) {
   return key;
 }
 
+/**
+ * Stored routes used to keep 40 points whatever their length, so a 2,500 km route had a
+ * point every ~65 km and chargers on the real road looked too far away. Refetch those.
+ */
+const MAX_STORED_POINT_GAP_KM = 25;
+
+/** True for a stored route whose points are too far apart to plan charge stops on. */
+export function routeTooCoarse(route: RoutedLeg): boolean {
+  if (!(route?.path?.length >= 2)) return true;
+  return (route.miles * 1.609) / (route.path.length - 1) > MAX_STORED_POINT_GAP_KM;
+}
+
 export function primeRouteCache(entries: Record<string, RoutedLeg>) {
   for (const [key, route] of Object.entries(entries)) {
     if (route?.source === "air") continue;
     if (!(route?.path?.length >= 2) || !Number.isFinite(route.miles)) continue;
+    if (routeTooCoarse(route)) continue;
     routeCache.set(key, route);
     const canon = canonRouteKey(key);
     if (canon !== key) routeCache.set(canon, route);
@@ -888,6 +914,8 @@ export function pricePlan(opts: {
     userIndex: number;
     via: boolean;
     depth: number;
+    /** Starts at a charger inserted because the car must charge there. */
+    chargeAtFrom?: boolean;
   };
   const jobs: Job[] = routes.map((route, i) => ({
     from: stops[i],
@@ -902,15 +930,17 @@ export function pricePlan(opts: {
   }));
   const usedVias = new Set<string>(stops.map((s) => s.id));
   const out: PricedLeg[] = [];
-  while (jobs.length && out.length < 32) {
+  while (jobs.length && out.length < MAX_LEGS) {
     const job = jobs.shift()!;
     const { mode, route, userIndex, via } = job;
     const focus = job.focus;
     const kwh = driveKwh(route.miles, route.seconds, speedEff);
-    const packSoc = soc < REQUIRE_SOC ? Math.max(soc, TARGET_SOC) : soc;
+    // At a stop inserted to charge, judge the range after that charge; otherwise the
+    // pre-charge SOC splits the leg again and the car drives past the charger.
+    const packSoc = soc < REQUIRE_SOC || job.chargeAtFrom ? Math.max(soc, TARGET_SOC) : soc;
     const floorKwh = Math.max(4, ((packSoc - FLOOR_SOC) / 100) * usableKwh);
     const bandKwh = Math.max(0, ((packSoc - REQUIRE_SOC) / 100) * usableKwh);
-    if (kwh > floorKwh * 0.98 && job.depth < 8) {
+    if (kwh > floorKwh * 0.98 && job.depth < MAX_SPLIT_DEPTH) {
       const viaOpts = {
         path: route.path,
         locations,
@@ -949,6 +979,8 @@ export function pricePlan(opts: {
           userIndex,
           via: job.via,
           depth: job.depth + 1,
+          // The range ran out here: charge at this stop, never just drive past it.
+          chargeAtFrom: true,
         });
         jobs.unshift({
           from: job.from,
@@ -960,6 +992,8 @@ export function pricePlan(opts: {
           userIndex,
           via: true,
           depth: job.depth + 1,
+          // Still starts where the previous split said to charge.
+          chargeAtFrom: job.chargeAtFrom,
         });
         continue;
       }
@@ -973,7 +1007,9 @@ export function pricePlan(opts: {
     const socAfter = soc - (kwh / usableKwh) * 100;
     const minArrive = FLOOR_SOC;
     const required =
-      socAfter < FLOOR_SOC || (soc < REQUIRE_SOC && (jobs.length > 0 || kwh > floorKwh * 0.5));
+      Boolean(job.chargeAtFrom) ||
+      socAfter < FLOOR_SOC ||
+      (soc < REQUIRE_SOC && (jobs.length > 0 || kwh > floorKwh * 0.5));
     const searchHours = hoursFrom(hours, readyAt);
     const cheap = cheapestHour(searchHours);
     const goodPrice = Boolean(cheap && cheap.krPerKwh <= live * CHEAP_VS_LIVE);
@@ -1018,34 +1054,64 @@ export function pricePlan(opts: {
           : suggested
             ? maxNoDelay
             : 0;
-    const pick = wantCharge
-      ? pickCharges({
-          kwhNeed: Math.max(kwhNeed, 5),
-          path: route.path,
-          detourKm: mode === "cheapest" ? Math.max(CHEAP_STALL_KM, job.detourKm) : job.detourKm,
-          mode,
-          focus,
-          locations,
-          acKr: searchHours[0]?.krPerKwh ?? acKr,
-          hours: searchHours,
-          acKw,
-          speedEff,
-          clockHhmm: readyAt,
-          maxWaitMin,
-          backupId: job.to.id.startsWith("via-")
-            ? job.to.id.replace(/^via-/, "")
-            : (opts.backupIds?.[userIndex] ?? null),
-          preferId:
-            atViaFrom && mode !== "cheapest"
-              ? job.from.id.replace(/^via-/, "")
-              : (opts.preferIds?.[userIndex] ?? null),
-          memberships: opts.memberships,
-          preferredNetwork: opts.preferredNetwork,
-          routeSeconds: route.seconds,
-          variable: opts.variable,
-        })
-      : null;
-    const charge = pick?.primary ?? null;
+    const pickOpts: Parameters<typeof pickCharges>[0] = {
+      kwhNeed: Math.max(kwhNeed, 5),
+      path: route.path,
+      detourKm: mode === "cheapest" ? Math.max(CHEAP_STALL_KM, job.detourKm) : job.detourKm,
+      mode,
+      focus,
+      locations,
+      acKr: searchHours[0]?.krPerKwh ?? acKr,
+      hours: searchHours,
+      acKw,
+      speedEff,
+      clockHhmm: readyAt,
+      maxWaitMin,
+      backupId: job.to.id.startsWith("via-")
+        ? job.to.id.replace(/^via-/, "")
+        : (opts.backupIds?.[userIndex] ?? null),
+      preferId:
+        atViaFrom && mode !== "cheapest"
+          ? job.from.id.replace(/^via-/, "")
+          : (opts.preferIds?.[userIndex] ?? null),
+      memberships: opts.memberships,
+      preferredNetwork: opts.preferredNetwork,
+      routeSeconds: route.seconds,
+      variable: opts.variable,
+    };
+    const pick = wantCharge ? pickCharges(pickOpts) : null;
+    const viaLocId = atViaFrom ? job.from.id.replace(/^via-/, "") : null;
+    const atRangeGap = Boolean(viaLocId?.startsWith("range-"));
+    // The route already goes to this via's stall, so charge there rather than at a look-alike
+    // nearby — or at a stall further down the road, which would charge before getting there.
+    let atVia = viaLocId ? pick?.options.find((o) => o.locationId === viaLocId) : undefined;
+    if (!atVia && wantCharge && job.chargeAtFrom && viaLocId && !atRangeGap) {
+      const stall = locations.find((l) => l.id === viaLocId);
+      if (stall) {
+        atVia = pickCharges({ ...pickOpts, locations: [stall], preferId: stall.id, backupId: null })?.primary;
+      }
+    }
+    // No known charger where the range ran out: plan the charge right here at a typical price,
+    // and say so. Never book a stall further along instead: the car cannot reach it yet.
+    const placeholder: PricedCharge | null =
+      wantCharge && viaLocId && atRangeGap
+        ? {
+            locationId: viaLocId,
+            name: "No known charger",
+            kind: "custom",
+            kwh: Math.max(kwhNeed, 5),
+            kr: Math.max(kwhNeed, 5) * UNKNOWN_CHARGER_KR_PER_KWH,
+            rateKr: UNKNOWN_CHARGER_KR_PER_KWH,
+            label: "",
+            inBand: true,
+            distM: 0,
+            windowLabel: "",
+            cheapWindow: false,
+            waitMin: 0,
+            placeholder: true,
+          }
+        : null;
+    const charge = placeholder ?? atVia ?? pick?.primary ?? null;
     const backup = pick?.backup ?? null;
     const advice: ChargeAdvice = required ? "required" : suggested ? "suggested" : null;
     const accepted =
@@ -1054,7 +1120,7 @@ export function pricePlan(opts: {
       (suggested && Boolean(opts.acceptCharge?.[userIndex]));
     const billed = accepted && charge !== null;
     // A stall that isn't this stop has to be a via. Otherwise the price sits on the city and the route never visits a charger.
-    if (billed && charge && !atViaFrom && job.depth < 8) {
+    if (billed && charge && !atViaFrom && job.depth < MAX_SPLIT_DEPTH) {
       const stall = locations.find((l) => l.id === charge.locationId);
       if (stall && stall.kind !== "home" && !usedVias.has(stall.id)) {
         const fromM = haversineM(job.from, stall);
@@ -1086,6 +1152,8 @@ export function pricePlan(opts: {
               userIndex,
               via: job.via,
               depth: job.depth + 1,
+              // This stall was inserted to take the charge picked above.
+              chargeAtFrom: true,
             });
             jobs.unshift({
               from: job.from,
