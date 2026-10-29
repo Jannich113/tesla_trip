@@ -259,8 +259,12 @@ export function ElprisScreen() {
     setProviderId(id);
   }
 
+  const ready = !(loading && !data) && !(error && !data);
+
   return (
-    <div className="flex flex-col px-4 pb-4 pt-2">
+    // Wide screens: settings and "now" on the left, the hour lists on the right.
+    <div className="px-4 pb-4 pt-2 lg:grid lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:items-start lg:gap-6">
+    <div className="flex flex-col">
       <div className="mb-3 flex items-start justify-between gap-3 px-1">
         <div>
           <p className="text-xs font-medium uppercase tracking-wide text-muted">Elpris</p>
@@ -338,7 +342,6 @@ export function ElprisScreen() {
           </button>
         </section>
       ) : (
-        <>
           <section className="rounded-xl bg-surface px-5 py-6 shadow-[var(--shadow-border)]">
             <p className="text-xs font-medium uppercase tracking-wide text-muted">Nu</p>
             {current ? (
@@ -356,8 +359,12 @@ export function ElprisScreen() {
             )}
             {error ? <p className="mt-2 text-xs text-warn">{error}</p> : null}
           </section>
+      )}
+    </div>
 
-          <section className="mt-4 rounded-xl bg-surface px-3 py-4 shadow-[var(--shadow-border)]">
+      {ready ? (
+        <div className="flex flex-col">
+          <section className="mt-4 rounded-xl bg-surface px-3 py-4 shadow-[var(--shadow-border)] lg:mt-0">
             <div className="mb-2 flex items-baseline justify-between px-2">
               <p className="text-xs font-medium uppercase tracking-wide text-muted">I dag</p>
               <p className="text-[11px] text-subtle">{data?.today.length ?? 0} timer</p>
@@ -403,8 +410,8 @@ export function ElprisScreen() {
               : "—"}
             .
           </p>
-        </>
-      )}
+        </div>
+      ) : null}
     </div>
   );
 }

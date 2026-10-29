@@ -499,7 +499,6 @@ export function PlanScreen() {
   const vehicleSoc = useVehicleStore((s) => Math.round(s.soc));
   const [socOverride, setSocOverride] = useState<number | null>(null);
   const soc = socOverride ?? vehicleSoc;
-  const shareLocation = useVehicleStore((s) => s.shareLocation);
   const { profile } = useVehicleProfile();
   const locationsStored = useChargeStore((s) => s.locations);
   const area = useElprisStore((s) => s.area);
@@ -1506,7 +1505,7 @@ export function PlanScreen() {
       ) : (
       <>
       {pane === "advanced" ? (
-        <div className="space-y-4">
+        <div className="space-y-4 lg:grid lg:grid-cols-2 lg:items-start lg:gap-4 lg:space-y-0">
           <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
             <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Car</p>
             <label className="relative mt-3 block">
@@ -1701,7 +1700,9 @@ export function PlanScreen() {
       ) : null}
 
       {pane === "plan" ? (
-      <>
+      // Wide screens: stops and options on the left, the map stays in view on the right.
+      <div className="space-y-5 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] lg:items-start lg:gap-6 lg:space-y-0">
+      <div className="space-y-5">
 
       <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
         <input
@@ -2137,8 +2138,9 @@ export function PlanScreen() {
           </ul>
         </section>
       ) : null}
+      </div>
 
-      <div className="space-y-2">
+      <div className="space-y-2 lg:sticky lg:top-4">
         <div className="flex items-center gap-1">
           <button
             type="button"
@@ -2185,7 +2187,7 @@ export function PlanScreen() {
                     ? "All modes · tap a leg or charger"
                     : `${modeLabel(mapMode)} · full route`
               }
-              hidden={!shareLocation}
+              mapClassName="lg:h-[calc(100dvh-12rem)] lg:min-h-96"
             />
           ) : (
             <div className="h-52 rounded-xl bg-surface shadow-[var(--shadow-border)]" />
@@ -2193,9 +2195,9 @@ export function PlanScreen() {
         </Suspense>
       </div>
 
-      </>
+      </div>
       ) : pane === "advanced" ? (
-      <>
+      <div className="space-y-5 lg:grid lg:grid-cols-2 lg:items-start lg:gap-6 lg:space-y-0">
       <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
         <p className="text-sm font-medium">Compare modes</p>
         {(() => {
@@ -2819,7 +2821,7 @@ export function PlanScreen() {
           )}
         </div>
       </section>
-      </>
+      </div>
       ) : null}
       </>
       )}

@@ -94,9 +94,10 @@ export function Dashboard({ startTab = "plan" }: { startTab?: Tab }) {
   }, []);
 
   return (
-    <div className="min-h-dvh overflow-x-hidden bg-background text-foreground">
-      <div className="mx-auto flex min-h-dvh w-full max-w-lg flex-col">
-        <header className="flex items-center gap-3 px-5 pb-1 pt-[max(0.75rem,env(safe-area-inset-top))]">
+    // overflow-x-clip (not hidden) so the planner's map can stay sticky on wide screens.
+    <div className="min-h-dvh overflow-x-clip bg-background text-foreground">
+      <div className="mx-auto flex min-h-dvh w-full max-w-lg flex-col md:max-w-3xl lg:max-w-6xl">
+        <header className="flex items-center gap-3 px-5 pb-1 pt-[max(0.75rem,env(safe-area-inset-top))] md:pb-3 md:pt-5">
           <LightBar />
           <div>
             <p className="text-sm font-medium leading-none">
@@ -104,9 +105,38 @@ export function Dashboard({ startTab = "plan" }: { startTab?: Tab }) {
             </p>
             <p className="mt-1 text-[11px] text-muted">{SUBTITLE[tab]}</p>
           </div>
+          {/* Wider screens: tabs sit in the header instead of the bottom bar. */}
+          <nav className="ml-auto hidden md:block" aria-label="Primary">
+            <ul className="flex rounded-full bg-surface-2 p-1">
+              {TABS.map((item) => {
+                const Icon = item.icon;
+                const current = tab === item.id;
+                return (
+                  <li key={item.id}>
+                    <a
+                      href={tabHref(item.id)}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        selectTab(item.id);
+                      }}
+                      className={cn(
+                        "flex h-9 items-center gap-2 rounded-full px-4 text-xs font-medium no-underline",
+                        "transition-[background-color,color,scale] duration-150 ease-[var(--ease-out)] active:scale-[0.96]",
+                        current ? "bg-foreground text-background" : "text-muted hover:text-foreground",
+                      )}
+                      aria-current={current ? "page" : undefined}
+                    >
+                      <Icon className="size-4" strokeWidth={current ? 2.2 : 1.8} />
+                      {item.label}
+                    </a>
+                  </li>
+                );
+              })}
+            </ul>
+          </nav>
         </header>
 
-        <main className="flex-1 overflow-y-auto pb-32">
+        <main className="flex-1 overflow-y-auto pb-32 md:overflow-visible md:pb-10">
           {opened.includes("plan") && (
             <div className={tab === "plan" ? undefined : "pointer-events-none hidden"} aria-hidden={tab !== "plan"}>
               <Suspense fallback={<PlanFallback />}>
@@ -122,7 +152,7 @@ export function Dashboard({ startTab = "plan" }: { startTab?: Tab }) {
         </main>
 
         <nav
-          className="fixed inset-x-0 bottom-0 z-[100] mx-auto max-w-lg border-t border-border bg-background/95 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-1 backdrop-blur-sm"
+          className="fixed inset-x-0 bottom-0 z-[100] mx-auto max-w-lg border-t border-border bg-background/95 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-1 backdrop-blur-sm md:hidden"
           aria-label="Primary"
         >
           <ul className="grid grid-cols-2">

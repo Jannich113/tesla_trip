@@ -144,6 +144,7 @@ function BayMapImpl({
   hidden = false,
   focus,
   interactive = false,
+  mapClassName,
 }: {
   markers: MapMarker[];
   routes?: MapRoute[];
@@ -157,6 +158,8 @@ function BayMapImpl({
   focus?: { lat: number; lng: number; zoom?: number } | null;
   /** Pan, zoom, and tap pins. Overview maps stay static. */
   interactive?: boolean;
+  /** Overrides the map height, e.g. a taller map on wide screens. */
+  mapClassName?: string;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<import("leaflet").Map | null>(null);
@@ -460,7 +463,12 @@ function BayMapImpl({
     <div className="relative isolate overflow-hidden rounded-xl bg-surface shadow-[var(--shadow-border)]">
       <div
         ref={hostRef}
-        className={cn("bay-map h-80 w-full", interactive && "bay-map-live", dropping && "cursor-crosshair")}
+        className={cn(
+          "bay-map h-80 w-full",
+          mapClassName,
+          interactive && "bay-map-live",
+          dropping && "cursor-crosshair",
+        )}
       />
       {!ready ? (
         <p className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-muted">
