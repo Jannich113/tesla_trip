@@ -144,6 +144,7 @@ function BayMapImpl({
   hidden = false,
   focus,
   interactive = false,
+  autoFit,
   className,
   mapClassName,
 }: {
@@ -159,6 +160,8 @@ function BayMapImpl({
   focus?: { lat: number; lng: number; zoom?: number } | null;
   /** Pan, zoom, and tap pins. Overview maps stay static. */
   interactive?: boolean;
+  /** Fit the view when the routes or pins change. Defaults to on for static maps only. */
+  autoFit?: boolean;
   /** Outer frame, e.g. to fill a full-height column. */
   className?: string;
   /** Overrides the map height, e.g. a taller map on wide screens. */
@@ -174,11 +177,14 @@ function BayMapImpl({
   const ringsRef = useRef(new Map<string, Circle>());
   const onSelectRef = useRef(onSelect);
   const onDropRef = useRef(onDrop);
+  const droppingRef = useRef(dropping);
   const fitKeyRef = useRef("");
   const drawKeyRef = useRef("");
   const [ready, setReady] = useState(false);
   onSelectRef.current = onSelect;
   onDropRef.current = onDrop;
+  droppingRef.current = dropping;
+  const fit = autoFit ?? !interactive;
 
   useEffect(() => {
     if (hidden) return;
@@ -233,6 +239,9 @@ function BayMapImpl({
           map.attributionControl?.setPosition("bottomleft");
           // Denmark until there are stops to fit.
           map.setView([56.0, 10.4], 7);
+          map.on("click", (e) => {
+            if (droppingRef.current) onDropRef.current?.(e.latlng.lat, e.latlng.lng);
+          });
           mapRef.current = map;
           if (!cancelled) setReady(true);
         }, 600);
@@ -415,21 +424,21 @@ function BayMapImpl({
         }),
         ...pins.map((m) => [m.lat, m.lng] as [number, number]),
       ];
-      if (!interactive && fitPts.length >= 2 && fitKeyRef.current !== focusKey) {
+      if (fit && fitPts.length >= 2 && fitKeyRef.current !== focusKey) {
         fitKeyRef.current = focusKey;
         map.fitBounds(L.latLngBounds(fitPts), {
           padding: [28, 28],
           maxZoom: 7,
           animate: false,
         });
-      } else if (!interactive && fitPts.length === 1 && fitKeyRef.current !== focusKey) {
+      } else if (fit && fitPts.length === 1 && fitKeyRef.current !== focusKey) {
         fitKeyRef.current = focusKey;
         map.setView(fitPts[0], 12, { animate: false });
       }
     }, 400);
 
     return () => cancelDraw();
-  }, [ready, hidden, interactive, markers, routes, selectedId, selectedIds, dropping]);
+  }, [ready, hidden, interactive, fit, markers, routes, selectedId, selectedIds, dropping]);
 
   useEffect(() => {
     if (!ready || !focus) return;
@@ -464,15 +473,17 @@ function BayMapImpl({
   }
 
   return (
-    <div className={cn("relative isolate overflow-hidden rounded-xl bg-surface shadow-[var(--shadow-border)]", className)}>
+    <div
+      className={cn(
+        "relative isolate overflow-hidden rounded-xl bg-surface shadow-[var(--shadow-border)]",
+        // Crosshair goes on the frame: changing the host's className would strip Leaflet's own classes.
+        dropping && "[&_.leaflet-container]:!cursor-crosshair",
+        className,
+      )}
+    >
       <div
         ref={hostRef}
-        className={cn(
-          "bay-map h-80 w-full",
-          mapClassName,
-          interactive && "bay-map-live",
-          dropping && "cursor-crosshair",
-        )}
+        className={cn("bay-map h-80 w-full", mapClassName, interactive && "bay-map-live")}
       />
       {!ready ? (
         <p className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-muted">

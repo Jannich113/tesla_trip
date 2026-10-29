@@ -1,9 +1,15 @@
 import { useEffect, useLayoutEffect, useMemo, useState, useDeferredValue, useRef, lazy, Suspense, memo, startTransition } from "react";
-import { ChevronDown, ChevronUp, MoreHorizontal, Navigation, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, MapPin, MoreHorizontal, Navigation, Plus, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import type { MapMarker, MapRoute } from "@/components/bay-map";
 import { ConfirmStrip } from "@/components/confirm-strip";
-import { searchAddress, type AddressHit } from "./search";
+import { parseCoordinates, reverseAddress, searchAddress, type AddressHit } from "./search";
+
+/** "Vestergade 12" from "Vestergade 12, Odense, Danmark"; bare coordinates stay whole. */
+function stopName(hit: AddressHit) {
+  if (parseCoordinates(hit.label)) return hit.label;
+  return hit.label.split(",")[0] || hit.label;
+}
 import {
   DETOUR_KM,
   WAIT_MIN,
@@ -553,6 +559,7 @@ export function PlanScreen() {
   const [backupLoc, setBackupLoc] = useState<Record<number, string>>({});
   const [openStops, setOpenStops] = useState<Record<string, boolean>>({});
   const [showAllRoutes, setShowAllRoutes] = useState(false);
+  const [picking, setPicking] = useState(false);
   const [abA, setAbA] = useState<LegMode>("fastest");
   const [abB, setAbB] = useState<LegMode>("cheapest");
   const [naming, setNaming] = useState(false);
@@ -1072,7 +1079,7 @@ export function PlanScreen() {
   function addStop(hit: AddressHit) {
     const idx = stops.length;
     const at = asDateTime(addAt || clock);
-    addStopToStore({ name: hit.label.split(",")[0] || hit.label, lat: hit.lat, lng: hit.lng });
+    addStopToStore({ name: stopName(hit), lat: hit.lat, lng: hit.lng });
     if (idx === 0) {
       setWhenKind("depart");
       setWhen(at);
@@ -1086,9 +1093,19 @@ export function PlanScreen() {
     setSelected(`leg-${Math.max(0, idx - 1)}`);
   }
 
+  async function addStopFromMap(lat: number, lng: number) {
+    setPicking(false);
+    const what = stops.length === 0 ? "start" : stops.length === 1 ? "destination" : "stop";
+    const pending = toast.loading(`Finding the address for your ${what}…`);
+    const hit = await reverseAddress(lat, lng);
+    toast.dismiss(pending);
+    addStop(hit);
+    toast(`Added ${stopName(hit)}`);
+  }
+
   function replaceStopPlace(id: string, hit: AddressHit) {
     replaceStop(id, {
-      name: hit.label.split(",")[0] || hit.label,
+      name: stopName(hit),
       lat: hit.lat,
       lng: hit.lng,
     });
@@ -1523,6 +1540,19 @@ export function PlanScreen() {
               </>
             )}
           </p>
+          <button
+            type="button"
+            onClick={() => setPicking((on) => !on)}
+            aria-pressed={picking}
+            className={cn(
+              "ml-auto flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-[11px] font-medium",
+              "transition-[background-color,color,scale] duration-150 ease-[var(--ease-out)] active:scale-[0.96]",
+              picking ? "bg-foreground text-background" : "bg-surface-2 text-muted",
+            )}
+          >
+            {picking ? <X className="size-3.5" /> : <MapPin className="size-3.5" />}
+            {picking ? "Cancel" : "Pick on map"}
+          </button>
         </div>
         <Suspense fallback={<div className="h-[38dvh] min-h-56 rounded-xl bg-surface lg:h-auto lg:flex-1" />}>
           {live ? (
@@ -1532,7 +1562,17 @@ export function PlanScreen() {
               selectedId={selected}
               selectedIds={selectedIds}
               onSelect={onMapSelect}
-              caption={routing ? "Routing…" : undefined}
+              interactive
+              autoFit
+              dropping={picking}
+              onDrop={(lat, lng) => void addStopFromMap(lat, lng)}
+              caption={
+                picking
+                  ? `Tap the map to add your ${stops.length === 0 ? "start" : stops.length === 1 ? "destination" : "next stop"}`
+                  : routing
+                    ? "Routing…"
+                    : undefined
+              }
               className="lg:min-h-0 lg:flex-1"
               mapClassName="h-[38dvh] min-h-56 lg:h-full lg:min-h-0"
             />
@@ -1905,7 +1945,7 @@ export function PlanScreen() {
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder={stops.length === 0 ? "Add a start" : stops.length === 1 ? "Add a destination" : "Add a stop"}
+                placeholder={`${stops.length === 0 ? "Add a start" : stops.length === 1 ? "Add a destination" : "Add a stop"} · address or lat, lng`}
                 className="h-11 w-full rounded-xl bg-surface-2 px-3 text-sm outline-none placeholder:text-subtle"
               />
               {(() => {
