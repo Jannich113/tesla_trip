@@ -74,6 +74,7 @@ import { cacheGet, cacheOpenDisk } from "./cache";
 import { useLiveElpris } from "./use-live-elpris";
 import { EU_BLOCS, EU_NETWORKS, EU_REGIONS, type EuRegion, regionalExtra, regionalOwn, regionalRoam, roamExtra, roamRate } from "./networks";
 import { useVehicleProfile } from "@/hooks/use-vehicle-profile";
+import { TESLA_MODELS, type TeslaModelId } from "@/lib/tesla-models";
 import { useVehicleStore } from "@/store/vehicle-store";
 
 function offsetPath(path: [number, number][], meters: number): [number, number][] {
@@ -493,6 +494,8 @@ function ElprisAfterPaint({
 
 export function PlanScreen() {
   const units = useVehicleStore((s) => s.units);
+  const setUnits = useVehicleStore((s) => s.setUnits);
+  const setModelId = useVehicleStore((s) => s.setModelId);
   const vehicleSoc = useVehicleStore((s) => Math.round(s.soc));
   const [socOverride, setSocOverride] = useState<number | null>(null);
   const soc = socOverride ?? vehicleSoc;
@@ -1504,6 +1507,47 @@ export function PlanScreen() {
       <>
       {pane === "advanced" ? (
         <div className="space-y-4">
+          <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Car</p>
+            <label className="relative mt-3 block">
+              <span className="sr-only">Tesla model</span>
+              <select
+                value={profile.id}
+                onChange={(e) => setModelId(e.target.value as TeslaModelId)}
+                className="h-11 w-full appearance-none rounded-xl bg-surface-2 py-2 pl-3 pr-9 text-sm font-medium text-foreground outline-none"
+              >
+                {TESLA_MODELS.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown
+                className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted"
+                aria-hidden
+              />
+            </label>
+            <div className="mt-2 flex items-center justify-between gap-3 rounded-xl bg-surface-2 px-3 py-2">
+              <span className="text-xs text-muted">Units</span>
+              <div className="flex rounded-full bg-background p-1">
+                {(["km", "mi"] as const).map((u) => (
+                  <button
+                    key={u}
+                    type="button"
+                    onClick={() => setUnits(u)}
+                    aria-pressed={units === u}
+                    className={cn(
+                      "h-9 min-w-12 rounded-full px-3 text-sm font-medium",
+                      "transition-[background-color,color,scale] duration-150 ease-[var(--ease-out)] active:scale-[0.96]",
+                      units === u ? "bg-foreground text-background" : "text-muted",
+                    )}
+                  >
+                    {u}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </section>
           <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
             <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Start battery</p>
             <div className="mt-3 grid grid-cols-2 gap-2">
