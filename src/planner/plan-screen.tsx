@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useState, useDeferredValue, useRef, lazy, Suspense, memo, startTransition } from "react";
-import { ChevronDown, ChevronUp, Navigation, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, MoreHorizontal, Navigation, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import type { MapMarker, MapRoute } from "@/components/bay-map";
 import { ConfirmStrip } from "@/components/confirm-strip";
@@ -329,17 +329,6 @@ function modeStopChain(legs: PricedLeg[]) {
   return out;
 }
 
-function modeStopSummary(legs: PricedLeg[]) {
-  const chain = modeStopChain(legs);
-  if (!chain.length) return "";
-  const start = chain[0]?.name;
-  const end = chain.at(-1)?.name;
-  const vias = chain.filter((s) => s.via).length;
-  if (chain.length <= 2) return chain.map((s) => s.name).join(" → ");
-  if (vias) return `${start} → ${vias} via → ${end}`;
-  return `${start} → ${chain.length - 2} stops → ${end}`;
-}
-
 type OptionRowView = {
   mode: LegMode;
   totals: ReturnType<typeof snapTotals> | null;
@@ -366,113 +355,104 @@ const OptionList = memo(function OptionList({
   onPick: (mode: LegMode) => void;
 }) {
   const fastest = rows.find((r) => r.mode === "fastest")?.totals;
+  const picked = mixed ? null : rows.find((r) => r.mode === active) ?? null;
+  const pt = picked?.totals ?? null;
+  const pickedSave = pt && fastest && picked && picked.mode !== "fastest" ? detourSavings(fastest, pt) : null;
+  const pickedSlow = Boolean(
+    pt && fastest && picked?.mode === "eco" && timePenalized(fastest.driveMin, pt.driveMin),
+  );
+  const chain = picked ? modeStopChain(picked.legs) : [];
   return (
-    <ul className="mt-2 divide-y divide-border rounded-xl bg-surface-2">
-      {rows.map((row) => {
-        const on = !mixed && active === row.mode;
-        const t = row.totals;
-        const save = t && fastest && row.mode !== "fastest" ? detourSavings(fastest, t) : null;
-        const slow = Boolean(t && fastest && row.mode === "eco" && timePenalized(fastest.driveMin, t.driveMin));
-        const chain = modeStopChain(row.legs);
-        const open = on && chain.length > 0;
-        return (
-          <li key={row.mode}>
-            <div className={cn("px-3 py-3", on && "bg-background/40")}>
-              <button
-                type="button"
-                onPointerDown={(e) => {
-                  if (e.button !== 0) return;
-                  onPick(row.mode);
-                }}
-                onClick={(e) => {
-                  e.preventDefault();
-                  onPick(row.mode);
-                }}
-                className="flex w-full items-start gap-3 text-left"
-              >
-                <span
-                  className="mt-1.5 size-2.5 shrink-0 rounded-full"
-                  style={{ background: modeColor(row.mode) }}
-                />
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-baseline justify-between gap-2">
-                    <span className="text-sm font-medium">{modeLabel(row.mode)}</span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="text-sm tabular-nums">{t ? `${formatKrValue(t.kr, 0)} kr` : "—"}</span>
-                      {chain.length ? (
-                        <ChevronDown className={cn("size-4 text-muted transition", open && "rotate-180")} />
-                      ) : null}
+    <div className="mt-2">
+      {/* One card per mode: compare time, price and charges at a glance. */}
+      <div className="grid grid-cols-3 gap-2">
+        {rows.map((row) => {
+          const on = !mixed && active === row.mode;
+          const t = row.totals;
+          return (
+            <button
+              key={row.mode}
+              type="button"
+              onPointerDown={(e) => {
+                if (e.button !== 0) return;
+                onPick(row.mode);
+              }}
+              onClick={(e) => {
+                e.preventDefault();
+                onPick(row.mode);
+              }}
+              aria-pressed={on}
+              className={cn(
+                "min-w-0 rounded-xl bg-surface-2 px-2.5 py-2 text-left shadow-[inset_0_0_0_1px_var(--color-border)]",
+                "transition-[box-shadow,scale] duration-150 ease-[var(--ease-out)] active:scale-[0.98]",
+              )}
+              style={on ? { boxShadow: `inset 0 0 0 2px ${modeColor(row.mode)}` } : undefined}
+            >
+              <span className="flex items-center gap-1.5 text-[11px] text-muted">
+                <span className="size-2 shrink-0 rounded-full" style={{ background: modeColor(row.mode) }} />
+                <span className="truncate">{modeLabel(row.mode)}</span>
+              </span>
+              <span className="mt-1 block text-sm font-medium tabular-nums">
+                {t ? minutesToHm(t.driveMin) : routing ? "…" : "—"}
+              </span>
+              <span className="block text-xs tabular-nums text-muted">
+                {t ? `${formatKrValue(t.kr, 0)} kr` : " "}
+              </span>
+              <span className="block truncate text-[11px] text-subtle">
+                {t ? (t.charges > 0 ? `${t.charges} ${t.charges === 1 ? "charge" : "charges"}` : "no charge") : " "}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* The picked mode, step by step. */}
+      {picked && pt ? (
+        <div className="mt-3 rounded-xl bg-surface-2 px-3 py-3">
+          <p className="text-xs text-muted">
+            {formatDistance(pt.mi, units, pt.mi >= 100 ? 0 : 1)}
+            <span className="text-subtle"> · </span>
+            avg {formatNumber(picked.kmh, 0)} km/t
+            {pickedSlow ? " · 2× slower" : ""}
+            {pt.tollKr >= 1 ? ` · toll ${formatKrValue(pt.tollKr, 0)} kr` : " · no toll"}
+            {pickedSave && pickedSave.significant
+              ? ` · saves ${formatKrValue(pickedSave.net, 0)} kr${pickedSave.extraMin >= 1 ? ` for +${minutesToHm(pickedSave.extraMin)}` : ""}`
+              : pickedSave && pickedSave.net <= -1
+                ? ` · ${formatKrValue(-pickedSave.net, 0)} kr more`
+                : ""}
+            {picked.mode === "cheapest" || pt.waitMin > 0
+              ? ` · ${pt.waitMin > 0 ? minutesToHm(pt.waitMin) : "no"} wait`
+              : ""}
+            {picked.mode === "cheapest"
+              ? (() => {
+                  const bits = [
+                    cheapAvoid.motorways && "no motorways",
+                    cheapAvoid.tolls && pt.tollKr < 1 && "no toll gates",
+                    cheapAvoid.roadFees && "no road fees",
+                  ].filter(Boolean);
+                  return bits.length ? ` · ${bits.join(" · ")}` : " · cheapest stalls";
+                })()
+              : ""}
+          </p>
+          {chain.length ? (
+            <ol className="mt-3 space-y-2 border-l border-border pl-3">
+              {chain.map((s, i) => (
+                <li key={`${picked.mode}-${i}`} className="text-xs">
+                  {s.via ? (
+                    <span className="mr-1 text-[10px] font-medium uppercase tracking-wide text-amber-300">
+                      Charge
                     </span>
-                  </span>
-                  {t ? (
-                    <>
-                      <span className="mt-0.5 block text-xs text-muted">
-                        {formatDistance(t.mi, units, t.mi >= 100 ? 0 : 1)}
-                        <span className="text-subtle"> · </span>
-                        {minutesToHm(t.driveMin)} drive
-                        <span className="text-subtle"> · </span>
-                        avg {formatNumber(row.kmh, 0)} km/t
-                        {slow ? " · 2× slower" : ""}
-                        {row.mode === "cheapest"
-                          ? (() => {
-                              const bits = [
-                                cheapAvoid.motorways && "no motorways",
-                                cheapAvoid.tolls && t.tollKr < 1 && "no toll gates",
-                                cheapAvoid.roadFees && "no road fees",
-                              ].filter(Boolean);
-                              return bits.length ? ` · ${bits.join(" · ")}` : " · cheapest stalls";
-                            })()
-                          : ""}
-                      </span>
-                      <span className="mt-0.5 block text-xs text-muted">
-                        {t.charges > 0
-                          ? `${t.charges} ${t.charges === 1 ? "charge" : "charges"} · ${formatKrValue(Math.max(0, t.kr - t.tollKr), 0)} kr`
-                          : "no charge"}
-                        {t.tollKr >= 1 ? ` · toll ${formatKrValue(t.tollKr, 0)} kr` : " · no toll"}
-                        {save && save.significant
-                          ? ` · saves ${formatKrValue(save.net, 0)} kr${save.extraMin >= 1 ? ` for +${minutesToHm(save.extraMin)}` : ""}`
-                          : save && save.net <= -1
-                            ? ` · ${formatKrValue(-save.net, 0)} kr more`
-                            : ""}
-                        {row.mode === "cheapest" || t.waitMin > 0
-                          ? ` · ${t.waitMin > 0 ? minutesToHm(t.waitMin) : "no"} wait`
-                          : ""}
-                      </span>
-                      {!open && chain.length ? (
-                        <span className="mt-1 block truncate text-xs text-subtle">{modeStopSummary(row.legs)}</span>
-                      ) : null}
-                    </>
-                  ) : (
-                    <span className="mt-0.5 block text-xs text-subtle">{routing ? "Routing…" : "Add a stop"}</span>
-                  )}
-                </span>
-              </button>
-              {open ? (
-                <ol className="mt-2 space-y-1 pl-5">
-                  {chain.map((s, i) => (
-                    <li key={`${row.mode}-${i}`} className="flex items-start gap-2 text-xs text-muted">
-                      <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-background text-[10px] tabular-nums">
-                        {i + 1}
-                      </span>
-                      <span className="min-w-0">
-                        {s.via ? (
-                          <span className="mr-1 text-[10px] font-medium uppercase tracking-wide text-amber-300">
-                            via
-                          </span>
-                        ) : null}
-                        {s.name}
-                        {s.charge ? <span className="mt-0.5 block text-[11px] text-subtle">{s.charge}</span> : null}
-                      </span>
-                    </li>
-                  ))}
-                </ol>
-              ) : null}
-              {row.mode === "cheapest" ? <CheapAvoidToggles className="mt-2 pl-5" /> : null}
-            </div>
-          </li>
-        );
-      })}
-    </ul>
+                  ) : null}
+                  <span className="text-foreground">{s.name}</span>
+                  {s.charge ? <span className="mt-0.5 block text-[11px] text-muted">{s.charge}</span> : null}
+                </li>
+              ))}
+            </ol>
+          ) : null}
+          {picked.mode === "cheapest" ? <CheapAvoidToggles className="mt-3" /> : null}
+        </div>
+      ) : null}
+    </div>
   );
 });
 
@@ -560,6 +540,8 @@ export function PlanScreen() {
   const [hits, setHits] = useState<AddressHit[]>([]);
   const [addKind, setAddKind] = useState<"auto" | "depart" | "arrive">("depart");
   const [addAt, setAddAt] = useState("");
+  const [addWhenOpen, setAddWhenOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const [editWhen, setEditWhen] = useState<string | null>(null);
   const [editStop, setEditStop] = useState<string | null>(null);
   const [editQuery, setEditQuery] = useState("");
@@ -1477,8 +1459,90 @@ export function PlanScreen() {
   }
 
   return (
-    <div className="space-y-5 px-4 pb-6 [touch-action:manipulation]">
+    // Phones: map on top, everything else below. Laptops: fixed sidebar, map fills the rest.
+    <div className="[touch-action:manipulation] lg:grid lg:h-full lg:grid-cols-[400px_minmax(0,1fr)]">
       {live ? <ElprisAfterPaint area={area} onData={setElpris} /> : null}
+
+      <div
+        className={cn(
+          "px-4 pb-4 lg:order-last lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:py-4 lg:pl-0 lg:pr-4",
+          pane !== "plan" && "hidden lg:flex",
+        )}
+      >
+        <div className="mb-2 flex min-h-8 flex-wrap items-center gap-x-3 gap-y-1">
+          {stops.length >= 2 ? (
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onPointerDown={(e) => {
+                  if (e.button !== 0) return;
+                  setShowAllRoutes(false);
+                }}
+                onClick={() => setShowAllRoutes(false)}
+                className={cn(
+                  "h-8 rounded-full px-3 text-[11px] font-medium",
+                  !showAllRoutes ? "text-background" : "bg-surface-2 text-muted",
+                )}
+                style={!showAllRoutes ? { background: modeColor(mapMode) } : undefined}
+              >
+                {modeLabel(mapMode)}
+              </button>
+              <button
+                type="button"
+                onPointerDown={(e) => {
+                  if (e.button !== 0) return;
+                  setShowAllRoutes(true);
+                }}
+                onClick={() => setShowAllRoutes(true)}
+                className={cn(
+                  "h-8 rounded-full px-3 text-[11px] font-medium",
+                  showAllRoutes ? "bg-foreground text-background" : "bg-surface-2 text-muted",
+                )}
+              >
+                All 3
+              </button>
+            </div>
+          ) : null}
+          <p className="min-w-0 text-xs tabular-nums text-muted">
+            {stops.length < 2 ? (
+              stops.length === 0 ? "Add a start and a destination" : "Add a destination"
+            ) : routing ? (
+              "Routing…"
+            ) : (
+              <>
+                <span className="text-sm font-medium text-foreground">
+                  {formatDistance(headline.mi, units, headline.mi >= 100 ? 0 : 1)}
+                </span>
+                {headline.driveMin > 0
+                  ? ` · ${minutesToHm(headlineLive && totals.min > 0 ? totals.min : headline.driveMin)}`
+                  : ""}
+                {` · ${formatKrValue(headline.kr, 0)} kr`}
+                {headlineLive && totals.chargeKwh > 0 ? ` · ${formatNumber(totals.chargeKwh, 1)} kWh charge` : ""}
+                {` · ${whenKind === "arrive" ? `Arrive ${formatDateTime(clock)}` : `Leave ${formatDateTime(departHhmm)}`}`}
+                {chargersLoading ? " · Finding chargers…" : ""}
+              </>
+            )}
+          </p>
+        </div>
+        <Suspense fallback={<div className="h-[38dvh] min-h-56 rounded-xl bg-surface lg:h-auto lg:flex-1" />}>
+          {live ? (
+            <BayMap
+              markers={idleMap.markers}
+              routes={idleMap.routes}
+              selectedId={selected}
+              selectedIds={selectedIds}
+              onSelect={onMapSelect}
+              caption={routing ? "Routing…" : undefined}
+              className="lg:min-h-0 lg:flex-1"
+              mapClassName="h-[38dvh] min-h-56 lg:h-full lg:min-h-0"
+            />
+          ) : (
+            <div className="h-[38dvh] min-h-56 rounded-xl bg-surface lg:h-auto lg:flex-1" />
+          )}
+        </Suspense>
+      </div>
+
+      <div className="space-y-5 px-4 pb-6 lg:h-full lg:overflow-y-auto lg:py-4">
       <div className="flex rounded-full bg-surface-2 p-1">
         {(["plan", "advanced", "members"] as const).map((id) => (
           <button
@@ -1490,7 +1554,7 @@ export function PlanScreen() {
               pane === id ? "bg-foreground text-background" : "text-muted",
             )}
           >
-            {id === "plan" ? "Plan" : id === "advanced" ? "Advanced" : "Memberships"}
+            {id === "plan" ? "Trip" : id === "advanced" ? "Car" : "Networks"}
           </button>
         ))}
       </div>
@@ -1505,7 +1569,7 @@ export function PlanScreen() {
       ) : (
       <>
       {pane === "advanced" ? (
-        <div className="space-y-4 lg:grid lg:grid-cols-2 lg:items-start lg:gap-4 lg:space-y-0">
+        <div className="space-y-4">
           <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
             <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Car</p>
             <label className="relative mt-3 block">
@@ -1700,8 +1764,6 @@ export function PlanScreen() {
       ) : null}
 
       {pane === "plan" ? (
-      // Wide screens: stops and options on the left, the map stays in view on the right.
-      <div className="space-y-5 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] lg:items-start lg:gap-6 lg:space-y-0">
       <div className="space-y-5">
 
       <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
@@ -1846,13 +1908,33 @@ export function PlanScreen() {
                 placeholder={stops.length === 0 ? "Add a start" : stops.length === 1 ? "Add a destination" : "Add a stop"}
                 className="h-11 w-full rounded-xl bg-surface-2 px-3 text-sm outline-none placeholder:text-subtle"
               />
-              <WhenFields
-                kind={stops.length === 0 ? "depart" : addKind}
-                at={asDateTime(addAt || clock)}
-                allowAuto={stops.length > 0}
-                onKind={setAddKind}
-                onAt={setAddAt}
-              />
+              {(() => {
+                const kind = stops.length === 0 ? "depart" : addKind;
+                const label =
+                  kind === "auto"
+                    ? "Auto time"
+                    : `${kind === "arrive" ? "Arrive" : "Leave"} ${addAt ? formatDateTime(addAt) : "now"}`;
+                return (
+                  <button
+                    type="button"
+                    onClick={() => setAddWhenOpen((open) => !open)}
+                    aria-expanded={addWhenOpen}
+                    className="mt-1 flex h-8 items-center gap-1 px-1 text-xs text-muted"
+                  >
+                    {label}
+                    <ChevronDown className={cn("size-3.5 transition", addWhenOpen && "rotate-180")} />
+                  </button>
+                );
+              })()}
+              {addWhenOpen ? (
+                <WhenFields
+                  kind={stops.length === 0 ? "depart" : addKind}
+                  at={asDateTime(addAt || clock)}
+                  allowAuto={stops.length > 0}
+                  onKind={setAddKind}
+                  onAt={setAddAt}
+                />
+              ) : null}
               {hits.length ? (
                 <ul className="mt-1 overflow-hidden rounded-xl bg-surface-2">
                   {hits.map((hit) => (
@@ -1872,73 +1954,22 @@ export function PlanScreen() {
           </li>
         </ol>
 
-        <p className="mt-5 text-[11px] font-medium uppercase tracking-wide text-muted">Route options</p>
-        <p className="mt-1 text-[11px] text-subtle">
-          Eco uses 80–100 km/t roads (not 50–60). Fastest takes motorways. Cheapest hunts the lowest kWh.
-        </p>
-        <PreferNetwork abo={networkAbo} preferred={preferredNetwork} onPick={setPreferredNetwork} />
-        <OptionList
-          rows={optionRows}
-          mixed={mixed}
-          active={activeModes[0] ?? "fastest"}
-          routing={routing}
-          units={units}
-          cheapAvoid={cheapAvoid}
-          onPick={setAllModes}
-        />
+        {stops.length >= 2 ? (
+          <>
+            <p className="mt-5 text-[11px] font-medium uppercase tracking-wide text-muted">Routes</p>
+            <OptionList
+              rows={optionRows}
+              mixed={mixed}
+              active={activeModes[0] ?? "fastest"}
+              routing={routing}
+              units={units}
+              cheapAvoid={cheapAvoid}
+              onPick={setAllModes}
+            />
+            <PreferNetwork abo={networkAbo} preferred={preferredNetwork} onPick={setPreferredNetwork} />
+          </>
+        ) : null}
 
-        <p className="mt-4 text-xs font-medium text-muted">
-          {stops.length === 0
-            ? "Add a start"
-            : stops.length < 2
-            ? "Add a destination"
-            : routing
-              ? "Routing…"
-              : mixed
-                ? "Mixed legs"
-                : `${modeLabel(activeModes[0] ?? "fastest")} · ${viewLegs.length} ${viewLegs.length === 1 ? "leg" : "legs"}`}
-        </p>
-        <p className="mt-2 text-4xl font-medium tracking-tight tabular-nums">
-          {formatDistance(headline.mi, units, headline.mi >= 100 ? 0 : 1)}
-        </p>
-        <p className="mt-2 text-sm text-muted">
-          {headlineLive ? (
-            <>
-              {formatNumber(totals.kwh, 1)} kWh drive
-              <span className="text-subtle"> · </span>
-              {totals.chargeKwh > 0 ? `${formatNumber(totals.chargeKwh, 1)} kWh charge` : `${formatNumber(soc, 0)}% start`}
-              <span className="text-subtle"> · </span>
-              {minutesToHm(totals.driveMin)} drive
-              {totals.min - totals.driveMin >= 5 ? (
-                <>
-                  <span className="text-subtle"> · </span>
-                  {minutesToHm(totals.min)} total
-                </>
-              ) : null}
-            </>
-          ) : headline.driveMin > 0 || headline.kr > 0 ? (
-            <>
-              {minutesToHm(headline.driveMin)} drive
-              {headline.charges > 0 ? ` · ${headline.charges} ${headline.charges === 1 ? "charge" : "charges"}` : ""}
-            </>
-          ) : stops.length >= 2 ? (
-            "—"
-          ) : (
-            "Add a destination"
-          )}
-        </p>
-        <p className="mt-3 text-2xl font-medium tabular-nums">
-          {formatKrValue(headline.kr, 2)} <span className="text-base text-muted">kr</span>
-        </p>
-        <p className="mt-1 text-xs text-subtle">
-          {headline.tollKr > 0
-            ? `Toll ${formatKrValue(headline.tollKr, 0)} kr${viewLegs.find((l) => l.tollLabel)?.tollLabel ? ` · ${[...new Set(viewLegs.map((l) => l.tollLabel).filter(Boolean))].join(" · ")}` : ""} · `
-            : ""}
-          {chargersLoading ? "Finding chargers along route · " : routeChargers.length ? `${routeChargers.length} chargers on corridor · ` : ""}
-          {whenKind === "arrive" ? `Arrive ${formatDateTime(clock)}` : `Leave ${formatDateTime(departHhmm)}`}
-          {viewLegs[0] ? ` · first window ${formatDateTime(viewLegs[0].departAt)}` : ""}
-          {totals.requiredKwh > 0 ? ` · ${formatNumber(totals.requiredKwh, 1)} kWh required` : ""}
-        </p>
         <RoadFeeSuggestions path={overviewFeePath} className="mt-4" />
         <div className="mt-4 flex gap-2">
           {clearConfirm ? (
@@ -1989,33 +2020,45 @@ export function PlanScreen() {
               <button
                 type="button"
                 onClick={onSave}
-                className="h-11 flex-1 rounded-full bg-foreground text-sm font-medium text-background"
+                className="h-11 flex-1 rounded-full bg-surface-2 text-sm font-medium text-foreground"
               >
-                Save plan
+                Save
               </button>
               <button
                 type="button"
                 onClick={() => void exportToTesla(routePoints(), name.trim() || "Tesla trip")}
-                className="flex h-11 items-center gap-1.5 rounded-full bg-surface-2 px-4 text-sm font-medium text-muted"
+                className="flex h-11 flex-[1.4] items-center justify-center gap-1.5 rounded-full bg-foreground text-sm font-medium text-background"
               >
                 <Navigation className="size-4" />
-                Tesla
+                Send to Tesla
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setNaming(false);
-                  setClearConfirm(true);
-                }}
-                className="h-11 rounded-full bg-surface-2 px-4 text-sm font-medium text-muted"
+                onClick={() => setMoreOpen((open) => !open)}
+                aria-expanded={moreOpen}
+                aria-label="More actions"
+                className="flex size-11 shrink-0 items-center justify-center rounded-full bg-surface-2 text-muted"
               >
-                Clear
+                <MoreHorizontal className="size-4" />
               </button>
             </>
           )}
         </div>
+        {moreOpen ? (
+        <div className="mt-3 space-y-2 border-t border-border pt-3">
+        <button
+          type="button"
+          onClick={() => {
+            setNaming(false);
+            setMoreOpen(false);
+            setClearConfirm(true);
+          }}
+          className="h-9 rounded-full bg-surface-2 px-4 text-xs font-medium text-muted"
+        >
+          Clear plan
+        </button>
         <form
-          className="mt-3 flex gap-2"
+          className="flex gap-2"
           onSubmit={(e) => {
             e.preventDefault();
             importFromMaps();
@@ -2084,6 +2127,8 @@ export function PlanScreen() {
             </button>
           )}
         </div>
+        </div>
+        ) : null}
       </section>
 
       {saved.length ? (
@@ -2139,65 +2184,8 @@ export function PlanScreen() {
         </section>
       ) : null}
       </div>
-
-      <div className="space-y-2 lg:sticky lg:top-4">
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onPointerDown={(e) => {
-              if (e.button !== 0) return;
-              setShowAllRoutes(false);
-            }}
-            onClick={() => setShowAllRoutes(false)}
-            className={cn(
-              "h-8 rounded-full px-3 text-[11px] font-medium",
-              !showAllRoutes ? "text-background" : "bg-surface-2 text-muted",
-            )}
-            style={!showAllRoutes ? { background: modeColor(mapMode) } : undefined}
-          >
-            {modeLabel(mapMode)}
-          </button>
-          <button
-            type="button"
-            onPointerDown={(e) => {
-              if (e.button !== 0) return;
-              setShowAllRoutes(true);
-            }}
-            onClick={() => setShowAllRoutes(true)}
-            className={cn(
-              "h-8 rounded-full px-3 text-[11px] font-medium",
-              showAllRoutes ? "bg-foreground text-background" : "bg-surface-2 text-muted",
-            )}
-          >
-            All 3
-          </button>
-        </div>
-        <Suspense fallback={<div className="h-52 rounded-xl bg-surface shadow-[var(--shadow-border)]" />}>
-          {live ? (
-            <BayMap
-              markers={idleMap.markers}
-              routes={idleMap.routes}
-              selectedId={selected}
-              selectedIds={selectedIds}
-              onSelect={onMapSelect}
-              caption={
-                routing
-                  ? "Routing…"
-                  : showAllRoutes
-                    ? "All modes · tap a leg or charger"
-                    : `${modeLabel(mapMode)} · full route`
-              }
-              mapClassName="lg:h-[calc(100dvh-12rem)] lg:min-h-96"
-            />
-          ) : (
-            <div className="h-52 rounded-xl bg-surface shadow-[var(--shadow-border)]" />
-          )}
-        </Suspense>
-      </div>
-
-      </div>
       ) : pane === "advanced" ? (
-      <div className="space-y-5 lg:grid lg:grid-cols-2 lg:items-start lg:gap-6 lg:space-y-0">
+      <div className="space-y-5">
       <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
         <p className="text-sm font-medium">Compare modes</p>
         {(() => {
@@ -2825,6 +2813,7 @@ export function PlanScreen() {
       ) : null}
       </>
       )}
+      </div>
     </div>
   );
 }

@@ -144,6 +144,7 @@ function BayMapImpl({
   hidden = false,
   focus,
   interactive = false,
+  className,
   mapClassName,
 }: {
   markers: MapMarker[];
@@ -158,6 +159,8 @@ function BayMapImpl({
   focus?: { lat: number; lng: number; zoom?: number } | null;
   /** Pan, zoom, and tap pins. Overview maps stay static. */
   interactive?: boolean;
+  /** Outer frame, e.g. to fill a full-height column. */
+  className?: string;
   /** Overrides the map height, e.g. a taller map on wide screens. */
   mapClassName?: string;
 }) {
@@ -228,7 +231,8 @@ function BayMapImpl({
               '&copy; <a href="https://www.openstreetmap.org/copyright" rel="noreferrer" target="_blank">OpenStreetMap</a>',
           }).addTo(map);
           map.attributionControl?.setPosition("bottomleft");
-          map.setView([37.45, -122.15], 10);
+          // Denmark until there are stops to fit.
+          map.setView([56.0, 10.4], 7);
           mapRef.current = map;
           if (!cancelled) setReady(true);
         }, 600);
@@ -460,7 +464,7 @@ function BayMapImpl({
   }
 
   return (
-    <div className="relative isolate overflow-hidden rounded-xl bg-surface shadow-[var(--shadow-border)]">
+    <div className={cn("relative isolate overflow-hidden rounded-xl bg-surface shadow-[var(--shadow-border)]", className)}>
       <div
         ref={hostRef}
         className={cn(

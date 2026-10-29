@@ -94,10 +94,10 @@ export function Dashboard({ startTab = "plan" }: { startTab?: Tab }) {
   }, []);
 
   return (
-    // overflow-x-clip (not hidden) so the planner's map can stay sticky on wide screens.
+    // Laptops: the app is exactly one screen tall; the planner sidebar and Elpris scroll inside it.
     <div className="min-h-dvh overflow-x-clip bg-background text-foreground">
-      <div className="mx-auto flex min-h-dvh w-full max-w-lg flex-col md:max-w-3xl lg:max-w-6xl">
-        <header className="flex items-center gap-3 px-5 pb-1 pt-[max(0.75rem,env(safe-area-inset-top))] md:pb-3 md:pt-5">
+      <div className="mx-auto flex min-h-dvh w-full max-w-lg flex-col md:max-w-3xl lg:h-dvh lg:max-w-none">
+        <header className="flex items-center gap-3 px-5 pb-2 pt-[max(0.75rem,env(safe-area-inset-top))] md:border-b md:border-border md:py-3">
           <LightBar />
           <div>
             <p className="text-sm font-medium leading-none">
@@ -136,16 +136,19 @@ export function Dashboard({ startTab = "plan" }: { startTab?: Tab }) {
           </nav>
         </header>
 
-        <main className="flex-1 overflow-y-auto pb-32 md:overflow-visible md:pb-10">
+        <main className="flex-1 pb-32 md:pb-10 lg:min-h-0 lg:overflow-y-auto lg:pb-0">
           {opened.includes("plan") && (
-            <div className={tab === "plan" ? undefined : "pointer-events-none hidden"} aria-hidden={tab !== "plan"}>
+            <div className={tab === "plan" ? "lg:h-full" : "pointer-events-none hidden"} aria-hidden={tab !== "plan"}>
               <Suspense fallback={<PlanFallback />}>
                 <PlanScreen />
               </Suspense>
             </div>
           )}
           {opened.includes("elpris") && (
-            <div className={tab === "elpris" ? undefined : "pointer-events-none hidden"} aria-hidden={tab !== "elpris"}>
+            <div
+              className={tab === "elpris" ? "lg:mx-auto lg:max-w-6xl lg:pt-4" : "pointer-events-none hidden"}
+              aria-hidden={tab !== "elpris"}
+            >
               <ElprisScreen />
             </div>
           )}
