@@ -1,9 +1,95 @@
 import { useEffect, useLayoutEffect, useMemo, useState, useDeferredValue, useRef, lazy, Suspense, memo, startTransition } from "react";
+import type { KeyboardEvent } from "react";
 import { ChevronDown, ChevronUp, MapPin, MoreHorizontal, Navigation, Plus, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import type { MapMarker, MapRoute } from "@/components/bay-map";
 import { ConfirmStrip } from "@/components/confirm-strip";
-import { parseCoordinates, reverseAddress, searchAddress, type AddressHit } from "./search";
+import { parseCoordinates, reverseAddress, searchAddress, suggestAddress, type AddressHit } from "./search";
+
+/**
+ * Address suggestions under a stop field: the picked row is highlighted, and a spelling fix
+ * is called out so the user sees why "Odnese" turned into Odense.
+ */
+function HitList({
+  query,
+  hits,
+  active,
+  searching,
+  onPick,
+  onHover,
+}: {
+  query: string;
+  hits: AddressHit[];
+  active: number;
+  searching: boolean;
+  onPick: (hit: AddressHit) => void;
+  onHover: (i: number) => void;
+}) {
+  if (!hits.length) {
+    return searching && query.trim().length >= 2 ? (
+      <p className="mt-1 px-3 text-[11px] text-subtle">Searching…</p>
+    ) : null;
+  }
+  const top = hits[0];
+  return (
+    <div className="mt-1">
+      {top.corrected && top.name ? (
+        <p className="px-3 pb-1 text-[11px] text-muted">
+          Did you mean <span className="font-medium text-foreground">{top.name}</span>?
+        </p>
+      ) : null}
+      <ul className="overflow-hidden rounded-xl bg-surface-2" role="listbox">
+        {hits.map((hit, i) => {
+          const name = hit.name ?? hit.label.split(",")[0];
+          const rest = hit.label.startsWith(name) ? hit.label.slice(name.length).replace(/^,\s*/, "") : hit.label;
+          return (
+            <li key={`${hit.lat},${hit.lng},${i}`} className="border-t border-border first:border-0">
+              <button
+                type="button"
+                role="option"
+                aria-selected={i === active}
+                onMouseEnter={() => onHover(i)}
+                onClick={() => onPick(hit)}
+                className={cn("flex w-full flex-col px-3 py-2 text-left", i === active && "bg-background/50")}
+              >
+                <span className="truncate text-sm">{name}</span>
+                {rest ? <span className="truncate text-[11px] text-subtle">{rest}</span> : null}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+/** Arrow keys move through suggestions, Enter picks, Escape closes. */
+function suggestKeys(
+  e: KeyboardEvent<HTMLInputElement>,
+  opts: {
+    hits: AddressHit[];
+    active: number;
+    setActive: (i: number) => void;
+    onPick: (hit: AddressHit) => void;
+    onClose: () => void;
+    onSearch: () => void;
+  },
+) {
+  const { hits, active } = opts;
+  if (e.key === "ArrowDown" && hits.length) {
+    e.preventDefault();
+    opts.setActive((active + 1) % hits.length);
+  } else if (e.key === "ArrowUp" && hits.length) {
+    e.preventDefault();
+    opts.setActive((active - 1 + hits.length) % hits.length);
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    if (hits.length) opts.onPick(hits[Math.min(active, hits.length - 1)]);
+    else opts.onSearch();
+  } else if (e.key === "Escape") {
+    opts.onClose();
+  }
+}
 
 /** "Vestergade 12" from "Vestergade 12, Odense, Danmark"; bare coordinates stay whole. */
 function stopName(hit: AddressHit) {
@@ -544,6 +630,10 @@ export function PlanScreen() {
   const [routing, setRouting] = useState(false);
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<AddressHit[]>([]);
+  const [hitActive, setHitActive] = useState(0);
+  const [searching, setSearching] = useState(false);
+  const [editActive, setEditActive] = useState(0);
+  const [editSearching, setEditSearching] = useState(false);
   const [addKind, setAddKind] = useState<"auto" | "depart" | "arrive">("depart");
   const [addAt, setAddAt] = useState("");
   const [addWhenOpen, setAddWhenOpen] = useState(false);
@@ -594,17 +684,38 @@ export function PlanScreen() {
     return () => window.clearTimeout(t);
   }, []);
 
+  // Suggestions lean towards the last stop, so "Vestergade" finds the one in the trip's town.
+  const lastStop = stops.at(-1);
+  const suggestBias = lastStop ? { lat: lastStop.lat, lng: lastStop.lng } : undefined;
+  const biasKey = suggestBias ? `${suggestBias.lat.toFixed(1)},${suggestBias.lng.toFixed(1)}` : "";
+
   useEffect(() => {
     const q = query.trim();
-    if (q.length < 3) {
+    if (q.length < 2) {
       setHits([]);
+      setSearching(false);
       return;
     }
+    const ctrl = new AbortController();
+    setSearching(true);
     const t = window.setTimeout(() => {
-      void searchAddress(q).then(setHits);
-    }, 280);
-    return () => window.clearTimeout(t);
-  }, [query]);
+      void suggestAddress(q, { bias: suggestBias, signal: ctrl.signal })
+        .then((next) => {
+          setHits(next);
+          setHitActive(0);
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (!ctrl.signal.aborted) setSearching(false);
+        });
+    }, 250);
+    return () => {
+      window.clearTimeout(t);
+      ctrl.abort();
+    };
+    // biasKey stands in for suggestBias so a new object each render does not refetch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, biasKey]);
 
   useEffect(() => {
     if (!editStop) {
@@ -612,15 +723,39 @@ export function PlanScreen() {
       return;
     }
     const q = editQuery.trim();
-    if (q.length < 3) {
+    if (q.length < 2) {
       setEditHits([]);
+      setEditSearching(false);
       return;
     }
+    const near = stops.find((s) => s.id === editStop);
+    const ctrl = new AbortController();
+    setEditSearching(true);
     const t = window.setTimeout(() => {
-      void searchAddress(q).then(setEditHits);
-    }, 280);
-    return () => window.clearTimeout(t);
+      void suggestAddress(q, { bias: near ? { lat: near.lat, lng: near.lng } : undefined, signal: ctrl.signal })
+        .then((next) => {
+          setEditHits(next);
+          setEditActive(0);
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (!ctrl.signal.aborted) setEditSearching(false);
+        });
+    }, 250);
+    return () => {
+      window.clearTimeout(t);
+      ctrl.abort();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editQuery, editStop]);
+
+  /** Enter with no suggestions: one full search (Nominatim knows Danish names like "Hamborg"). */
+  async function searchNow(q: string, apply: (hits: AddressHit[]) => void) {
+    if (q.trim().length < 3) return;
+    const found = await searchAddress(q).catch(() => []);
+    if (found.length) apply(found);
+    else toast(`No places found for "${q.trim()}"`);
+  }
 
   useEffect(() => {
     setAddKind(stops.length === 0 ? "depart" : "auto");
@@ -1881,24 +2016,32 @@ export function PlanScreen() {
                         autoFocus
                         value={editQuery}
                         onChange={(e) => setEditQuery(e.target.value)}
-                        placeholder="Search address"
+                        onKeyDown={(e) =>
+                          suggestKeys(e, {
+                            hits: editHits,
+                            active: editActive,
+                            setActive: setEditActive,
+                            onPick: (hit) => replaceStopPlace(stop.id, hit),
+                            onClose: () => {
+                              setEditStop(null);
+                              setEditQuery("");
+                            },
+                            onSearch: () => void searchNow(editQuery, setEditHits),
+                          })
+                        }
+                        placeholder="Search address or lat, lng"
+                        autoComplete="off"
+                        aria-autocomplete="list"
                         className="h-11 w-full rounded-xl bg-surface-2 px-3 text-sm outline-none placeholder:text-subtle"
                       />
-                      {editHits.length ? (
-                        <ul className="mt-1 overflow-hidden rounded-xl bg-surface-2">
-                          {editHits.map((hit) => (
-                            <li key={`${hit.lat},${hit.lng}`} className="border-t border-border first:border-0">
-                              <button
-                                type="button"
-                                onClick={() => replaceStopPlace(stop.id, hit)}
-                                className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm"
-                              >
-                                <span className="truncate">{hit.label}</span>
-                              </button>
-                            </li>
-                          ))}
-                        </ul>
-                      ) : null}
+                      <HitList
+                        query={editQuery}
+                        hits={editHits}
+                        active={editActive}
+                        searching={editSearching}
+                        onPick={(hit) => replaceStopPlace(stop.id, hit)}
+                        onHover={setEditActive}
+                      />
                     </div>
                   ) : null}
                   {editWhen === stop.id ? (
@@ -1945,6 +2088,18 @@ export function PlanScreen() {
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) =>
+                  suggestKeys(e, {
+                    hits,
+                    active: hitActive,
+                    setActive: setHitActive,
+                    onPick: addStop,
+                    onClose: () => setHits([]),
+                    onSearch: () => void searchNow(query, setHits),
+                  })
+                }
+                autoComplete="off"
+                aria-autocomplete="list"
                 placeholder={`${stops.length === 0 ? "Add a start" : stops.length === 1 ? "Add a destination" : "Add a stop"} · address or lat, lng`}
                 className="h-11 w-full rounded-xl bg-surface-2 px-3 text-sm outline-none placeholder:text-subtle"
               />
@@ -1975,21 +2130,14 @@ export function PlanScreen() {
                   onAt={setAddAt}
                 />
               ) : null}
-              {hits.length ? (
-                <ul className="mt-1 overflow-hidden rounded-xl bg-surface-2">
-                  {hits.map((hit) => (
-                    <li key={`${hit.lat},${hit.lng}`} className="border-t border-border first:border-0">
-                      <button
-                        type="button"
-                        onClick={() => addStop(hit)}
-                        className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm"
-                      >
-                        <span className="truncate">{hit.label}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
+              <HitList
+                query={query}
+                hits={hits}
+                active={hitActive}
+                searching={searching}
+                onPick={addStop}
+                onHover={setHitActive}
+              />
             </div>
           </li>
         </ol>
