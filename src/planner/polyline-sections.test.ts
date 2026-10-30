@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { locationsNearPath, minDistToPathM, spreadAlongPath, spreadBuckets } from "./insert.ts";
-import { pathLengthKm, routePointBudget, simplifyPath, splitPathByKm } from "./polyline.ts";
+import { pathCoveredBy, pathLengthKm, routePointBudget, simplifyPath, splitPathByKm } from "./polyline.ts";
 
 // Due north from 55°N in 10 km steps: 2,600 km, like Odense to Helsinki.
 const KM_PER_DEG = 111.2;
@@ -86,4 +86,15 @@ test("the old flat 40-point route lost chargers on a winding road (documents the
   const stored = simplifyPath(winding, 40);
   const far = onRoad.filter((c) => minDistToPathM(c.lat, c.lng, stored) > 12_000);
   assert.ok(far.length >= 20, `expected many lost chargers, got ${far.length}`);
+});
+
+test("pathCoveredBy treats a parallel road a few km away as covered", () => {
+  const twin = route.map(([lat, lng]) => [lat, lng + 0.05] as [number, number]); // ~3 km east
+  for (const part of splitPathByKm(twin, 250)) assert.equal(pathCoveredBy(part, [route], 8_000), true);
+});
+
+test("pathCoveredBy does not treat a different road as covered", () => {
+  const other = route.map(([lat, lng]) => [lat, lng + 1] as [number, number]); // ~60 km east
+  assert.equal(pathCoveredBy(other.slice(0, 30), [route], 8_000), false);
+  assert.equal(pathCoveredBy(route.slice(0, 30), [], 8_000), false);
 });

@@ -5,7 +5,8 @@ import { haversineM } from "@/planner/insert";
 import { isDcStation, networkFromOperator, networkFromOsmTags } from "@/planner/osm-operator";
 import { rateForNetwork } from "@/planner/networks";
 import { seedsAlongPath } from "@/planner/seed-chargers";
-import { encodePolyline, polylineBufferKm, chargersOnPath, splitPathByKm } from "@/planner/polyline";
+import { encodePolyline, polylineBufferKm, chargersOnPath, pathCoveredBy, splitPathByKm } from "@/planner/polyline";
+import { TtlCache } from "@/lib/ttl-cache";
 
 const DKK_PER_USD = 6.85;
 const OCM_KEY = env("OPENCHARGEMAP_KEY") ?? "d670b729-7bd0-40dd-8a17-4b881edf1a68";
@@ -176,92 +177,100 @@ function ocmToCharger(poi: OcmPoi): RouteCharger | null {
   };
 }
 
-async function fetchOcmPolyline(path: [number, number][], radiusKm: number): Promise<RouteCharger[]> {
-  const encoded = encodePolyline(path);
+/** What one corridor search ran into; any trouble marks the answer as partial. */
+type OcmStats = { requests: number; cached: number; throttled: number; failed: number };
+
+const newStats = (): OcmStats => ({ requests: 0, cached: 0, throttled: 0, failed: 0 });
+
+/**
+ * OpenChargeMap answers by URL (minus the API key) for 12 hours. Chargers rarely move, and
+ * OCM throttles hard (HTTP 429), so asking again for the same stretch is the main risk.
+ */
+const ocmCache = new TtlCache<OcmPoi[]>(12 * 60 * 60 * 1000, 800);
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** One OCM request: cached, retried once when throttled. null = no answer (not "no chargers"). */
+async function ocmGet(url: string, stats: OcmStats, timeoutMs = 10_000): Promise<OcmPoi[] | null> {
+  const key = url.replace(/&key=[^&]*/, "");
+  const hit = ocmCache.get(key);
+  if (hit) {
+    stats.cached++;
+    return hit;
+  }
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      stats.requests++;
+      const res = await fetch(url, { headers: { Accept: "application/json", "X-API-Key": OCM_KEY }, signal: ctrl.signal });
+      if (res.status === 429) {
+        stats.throttled++;
+        const wait = Number(res.headers.get("retry-after"));
+        await sleep(Math.min(3_000, Number.isFinite(wait) && wait > 0 ? wait * 1000 : 1_500));
+        continue;
+      }
+      if (!res.ok) break;
+      const body = (await res.json()) as OcmPoi[];
+      if (!Array.isArray(body)) break;
+      ocmCache.set(key, body);
+      return body;
+    } catch {
+      break;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  stats.failed++;
+  return null;
+}
+
+const toChargers = (rows: OcmPoi[]) => rows.map(ocmToCharger).filter((c): c is RouteCharger => Boolean(c));
+
+/** Chargers along one section. null = OCM gave no answer, so the section is unknown. */
+async function fetchOcmPolyline(path: [number, number][], radiusKm: number, stats: OcmStats): Promise<RouteCharger[] | null> {
   const dist = Math.max(5, Math.min(18, Math.round(radiusKm)));
   const base =
     `https://api.openchargemap.io/v3/poi/?output=json&compact=false&verbose=false` +
     `&client=tesla-trip` +
     `&key=${encodeURIComponent(OCM_KEY)}` +
-    `&polyline=${encodeURIComponent(encoded)}` +
+    `&polyline=${encodeURIComponent(encodePolyline(path))}` +
     `&distance=${dist}&distanceunit=KM` +
     `&minpowerkw=50&levelid=3&statustypeid=50` +
     `&maxresults=200`;
-  const urls = [
-    `${base}&connectiontypeid=33,30`,
-    base,
-  ];
-  for (const url of urls) {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 10_000);
-    try {
-      const res = await fetch(url, {
-        headers: { Accept: "application/json", "X-API-Key": OCM_KEY },
-        signal: ctrl.signal,
-      });
-      if (!res.ok) continue;
-      const body = (await res.json()) as OcmPoi[];
-      if (!Array.isArray(body) || !body.length) continue;
-      const rows = body.map(ocmToCharger).filter((c): c is RouteCharger => Boolean(c));
-      if (rows.length) return rows;
-    } catch {
-      /* try looser filters */
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-  return [];
-}
-
-async function fetchOcmAt(lat: number, lng: number, radiusKm: number): Promise<RouteCharger[]> {
-  const url =
-    `https://api.openchargemap.io/v3/poi/?output=json&compact=false&verbose=false` +
-    `&key=${encodeURIComponent(OCM_KEY)}` +
-    `&latitude=${lat.toFixed(5)}&longitude=${lng.toFixed(5)}` +
-    `&distance=${Math.round(radiusKm)}&distanceunit=KM&maxresults=40&minpowerkw=50`;
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 8_000);
-  try {
-    const res = await fetch(url, { headers: { Accept: "application/json", "X-API-Key": OCM_KEY }, signal: ctrl.signal });
-    if (!res.ok) return [];
-    const body = (await res.json()) as OcmPoi[];
-    if (!Array.isArray(body)) return [];
-    return body.map(ocmToCharger).filter((c): c is RouteCharger => Boolean(c));
-  } catch {
-    return [];
-  } finally {
-    clearTimeout(timer);
-  }
+  // CCS / Tesla first; the looser query only when that finds nothing.
+  const strict = await ocmGet(`${base}&connectiontypeid=33,30`, stats);
+  if (strict === null) return null;
+  if (strict.length) return toChargers(strict);
+  const loose = await ocmGet(base, stats);
+  return loose === null ? null : toChargers(loose);
 }
 
 /** Route sections looked up separately; OCM returns at most 200 chargers per request. */
 const OCM_SECTION_KM = 250;
-const OCM_PARALLEL = 3;
+const OCM_PARALLEL = 2;
 
-async function fetchOcmSections(path: [number, number][], tightKm: number, wideKm: number) {
-  const sections = splitPathByKm(path, OCM_SECTION_KM);
-  if (sections.length <= 1) return fetchOcm(path, samplePath(path, 40_000, 8), tightKm, wideKm);
+/**
+ * One OCM lookup per ~250 km section, skipping sections an earlier route already covered
+ * (Eco and Fastest usually share most of the road).
+ */
+async function fetchOcmSections(
+  path: [number, number][],
+  wideKm: number,
+  searched: [number, number][][],
+  stats: OcmStats,
+): Promise<RouteCharger[]> {
+  const sections = splitPathByKm(path, OCM_SECTION_KM).filter(
+    (part) => !pathCoveredBy(part, searched, Math.min(8_000, wideKm * 500)),
+  );
   const byId = new Map<string, RouteCharger>();
   for (let i = 0; i < sections.length; i += OCM_PARALLEL) {
     const batch = sections.slice(i, i + OCM_PARALLEL);
-    const found = await Promise.all(
-      batch.map((part) => fetchOcm(part, samplePath(part, 40_000, 8), tightKm, wideKm)),
-    );
-    for (const row of found.flat()) byId.set(row.id, row);
+    const found = await Promise.all(batch.map((part) => fetchOcmPolyline(part, wideKm, stats)));
+    for (const rows of found) for (const row of chargersOnPath(rows ?? [], path, wideKm)) byId.set(row.id, row);
   }
+  searched.push(path);
   return [...byId.values()];
-}
-
-async function fetchOcm(path: [number, number][], samples: [number, number][], tightKm: number, wideKm: number) {
-  const tightHits = chargersOnPath(await fetchOcmPolyline(path, tightKm), path, wideKm);
-  if (wideKm <= tightKm + 1 && tightHits.length >= 8) return tightHits;
-  const wideHits = chargersOnPath(await fetchOcmPolyline(path, wideKm), path, wideKm);
-  if (wideHits.length) return wideHits.length >= tightHits.length ? wideHits : tightHits;
-  if (tightHits.length) return tightHits;
-  const chunks = await Promise.all(samples.slice(0, 4).map(([lat, lng]) => fetchOcmAt(lat, lng, wideKm)));
-  const byId = new Map<string, RouteCharger>();
-  for (const row of chunks.flat()) byId.set(row.id, row);
-  return chargersOnPath([...byId.values()], path, wideKm);
 }
 
 function mergeChargers(seed: RouteCharger[], live: RouteCharger[]) {
@@ -276,7 +285,7 @@ function mergeChargers(seed: RouteCharger[], live: RouteCharger[]) {
   return [...out.values()];
 }
 
-async function searchCorridor(path: [number, number][], asked: number) {
+async function searchCorridor(path: [number, number][], asked: number, searched: [number, number][][], stats: OcmStats) {
   const buf = polylineBufferKm(path);
   const tightKm = buf.tight;
   const wideKm = Math.min(
@@ -287,7 +296,7 @@ async function searchCorridor(path: [number, number][], asked: number) {
   const seed = seedsAlongPath(path, radiusM);
   const samples = samplePath(path, 40_000, 8);
   const [ocm, osmRaw] = await Promise.all([
-    fetchOcmSections(path, tightKm, wideKm),
+    fetchOcmSections(path, wideKm, searched, stats),
     fetchOverpass(samples, radiusM),
   ]);
   const osm = chargersOnPath(osmRaw, path, wideKm);
@@ -318,7 +327,10 @@ export const Route = createFileRoute("/api/chargers")({
             .slice(0, 6);
           if (!rawPaths.length) return Response.json({ chargers: [], source: "none" }, { headers: noStore });
           const asked = Number(body.radiusKm);
-          const chunks = await Promise.all(rawPaths.map((path) => searchCorridor(path, asked)));
+          const searched: [number, number][][] = [];
+          const stats = newStats();
+          const chunks = [];
+          for (const path of rawPaths) chunks.push(await searchCorridor(path, asked, searched, stats));
           let chargers: RouteCharger[] = [];
           let seed = 0;
           let ocm = 0;
@@ -342,6 +354,11 @@ export const Route = createFileRoute("/api/chargers")({
             ocm,
             samples,
             polyline: true,
+            // Some sections got no answer (OCM throttled or failed): the list is incomplete.
+            partial: stats.failed > 0,
+            ocmRequests: stats.requests,
+            ocmCached: stats.cached,
+            ocmThrottled: stats.throttled,
             corridors: rawPaths.length,
             bufferKm,
             updatedAt: new Date().toISOString(),

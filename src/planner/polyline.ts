@@ -131,3 +131,25 @@ export function splitPathByKm(path: [number, number][], sectionKm: number): [num
   if (current.length >= 2) out.push(current);
   return out;
 }
+
+/**
+ * True when every point of `section` (checked every ~10 km) lies within `maxM` of one of
+ * the `searched` paths. Eco and Fastest often share a road; their sections then need only
+ * one charger lookup.
+ */
+export function pathCoveredBy(section: [number, number][], searched: [number, number][][], maxM: number): boolean {
+  if (section.length < 2 || !searched.length) return false;
+  let km = 0;
+  for (let i = 0; i < section.length; i++) {
+    if (i > 0) {
+      const [plat, plng] = section[i - 1];
+      km += haversineM({ lat: plat, lng: plng }, { lat: section[i][0], lng: section[i][1] }) / 1000;
+    }
+    const check = i === 0 || i === section.length - 1 || km >= 10;
+    if (!check) continue;
+    km = 0;
+    const [lat, lng] = section[i];
+    if (!searched.some((p) => minDistToPathM(lat, lng, p) <= maxM)) return false;
+  }
+  return true;
+}
