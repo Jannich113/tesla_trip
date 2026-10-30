@@ -266,28 +266,29 @@ function AvoidToggles({ className }: { className?: string }) {
   ];
   return (
     <div className={className}>
-      <div className="flex flex-wrap items-center gap-1.5">
-        <span className="mr-0.5 text-xs text-muted">Avoid</span>
+      {/* One row at every width: four equal cells, no wrap. */}
+      <div className="grid grid-cols-4 gap-1" role="group" aria-label="Avoid on the route">
         {chips.map((chip) => (
           <button
             key={chip.label}
             type="button"
             aria-pressed={chip.on}
+            aria-label={`Avoid ${chip.label.toLowerCase()}`}
             onClick={() => chip.set(!chip.on)}
             className={cn(
-              "inline-flex h-8 items-center gap-1 rounded-full border px-3 text-xs transition-colors",
+              "inline-flex h-8 min-w-0 items-center justify-center gap-1 rounded-full border px-1 text-[11px] transition-colors",
               chip.on
-                ? "border-foreground/60 bg-foreground/10 text-foreground"
+                ? "border-foreground bg-foreground text-background"
                 : "border-border bg-surface-2 text-muted hover:text-foreground",
             )}
           >
-            {chip.on ? <X className="size-3" aria-hidden /> : null}
-            {chip.label}
-            {chip.cheapOnly ? <span className="size-1.5 rounded-full bg-amber-400" aria-hidden /> : null}
+            <span className="truncate">{chip.label}</span>
+            {chip.cheapOnly ? <span className="size-1.5 shrink-0 rounded-full bg-amber-400" aria-hidden /> : null}
           </button>
         ))}
       </div>
       <p className="mt-1.5 flex items-center gap-1 text-[10px] text-subtle">
+        Tap to avoid ·
         <span className="size-1.5 rounded-full bg-amber-400" aria-hidden />
         Cheapest only · ferries apply to every route
       </p>
