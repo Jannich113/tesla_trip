@@ -38,6 +38,7 @@ export type OptionSnap = {
   driveMin: number;
   charges: number;
   tollKr: number;
+  ferryKr?: number;
   kmh: number;
 };
 

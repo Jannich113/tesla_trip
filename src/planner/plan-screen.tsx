@@ -140,6 +140,7 @@ import {
   pricePlan,
   remainingHours,
   routeAb,
+  chargeKrOf,
   timePenalized,
   SPEED_KMH,
   splitDateTime,
@@ -295,6 +296,7 @@ function snapTotals(snap: OptionSnap) {
     kwh: 0,
     kr: snap.kr,
     tollKr: snap.tollKr,
+    ferryKr: snap.ferryKr ?? 0,
     min: snap.driveMin,
     driveMin: snap.driveMin,
     chargeMin: 0,
@@ -315,7 +317,7 @@ function sameLastOptions(
     const b = next.rows[mode];
     if (!a && !b) continue;
     if (!a || !b) return false;
-    if (a.mi !== b.mi || a.kr !== b.kr || a.driveMin !== b.driveMin || a.charges !== b.charges || a.tollKr !== b.tollKr) {
+    if (a.mi !== b.mi || a.kr !== b.kr || a.driveMin !== b.driveMin || a.charges !== b.charges || a.tollKr !== b.tollKr || a.ferryKr !== b.ferryKr) {
       return false;
     }
   }
@@ -369,8 +371,8 @@ function ChainRow({
         </span>
         <span className="mt-0.5 block text-[11px] text-subtle">
           {f.priceKr
-            ? `≈ ${formatKrValue(f.priceKr.from, 0)}–${formatKrValue(f.priceKr.to, 0)} kr one way with car (rough estimate; varies by departure)`
-            : "Price unknown: check with the ferry operator"}
+            ? `≈ ${formatKrValue(f.fareKr, 0)} kr in the trip price (usually ${formatKrValue(f.priceKr.from, 0)}–${formatKrValue(f.priceKr.to, 0)} kr one way with car; rough estimate, varies by departure)`
+            : `≈ ${formatKrValue(f.fareKr, 0)} kr in the trip price (a guess: fare unknown, check with the operator)`}
         </span>
         <a
           href={booking}
@@ -520,16 +522,12 @@ const OptionList = memo(function OptionList({
             {pickedSlow ? " · 2× slower" : ""}
             {pt.tollKr >= 1 ? ` · toll ${formatKrValue(pt.tollKr, 0)} kr` : " · no toll"}
             {(() => {
-              // Ferry fares are estimates, so they stay out of the trip price and show here (#71).
+              // Ferry fares are in the trip price; they are estimates, so say so (#71).
               const ferries = picked.legs.filter((l) => l.ferry);
               if (!ferries.length) return "";
-              const priced = ferries.filter((l) => l.ferry?.priceKr);
-              const from = priced.reduce((n, l) => n + (l.ferry?.priceKr?.from ?? 0), 0);
-              const to = priced.reduce((n, l) => n + (l.ferry?.priceKr?.to ?? 0), 0);
               const label = ferries.length === 1 ? "ferry" : `${ferries.length} ferries`;
-              return priced.length
-                ? ` · ${label} ≈ ${formatKrValue(from, 0)}–${formatKrValue(to, 0)} kr extra`
-                : ` · ${label}, price unknown`;
+              const guessed = ferries.some((l) => !l.ferry?.priceKr);
+              return ` · ${label} ≈ ${formatKrValue(pt.ferryKr, 0)} kr${guessed ? " (guessed)" : ""}`;
             })()}
             {pickedSave && pickedSave.significant
               ? ` · saves ${formatKrValue(pickedSave.net, 0)} kr${pickedSave.extraMin >= 1 ? ` for +${minutesToHm(pickedSave.extraMin)}` : ""}`
@@ -1121,6 +1119,7 @@ export function PlanScreen() {
         driveMin: row.totals.driveMin,
         charges: row.totals.charges,
         tollKr: row.totals.tollKr,
+        ferryKr: row.totals.ferryKr,
         kmh: row.kmh,
       };
     }
@@ -2480,11 +2479,18 @@ export function PlanScreen() {
                     {cell("a", ab.time, minutesToHm(ta.driveMin))}
                     {cell("b", ab.time, minutesToHm(tb.driveMin))}
                     <span>Charge</span>
-                    {cell("a", ab.cost, `${formatKrValue(Math.max(0, ta.kr - ta.tollKr), 0)} kr`)}
-                    {cell("b", ab.cost, `${formatKrValue(Math.max(0, tb.kr - tb.tollKr), 0)} kr`)}
+                    {cell("a", ab.cost, `${formatKrValue(chargeKrOf(ta), 0)} kr`)}
+                    {cell("b", ab.cost, `${formatKrValue(chargeKrOf(tb), 0)} kr`)}
                     <span>Toll</span>
                     <span className="tabular-nums">{formatKrValue(ta.tollKr, 0)} kr</span>
                     <span className="tabular-nums">{formatKrValue(tb.tollKr, 0)} kr</span>
+                    {ta.ferryKr >= 1 || tb.ferryKr >= 1 ? (
+                      <>
+                        <span>Ferry</span>
+                        <span className="tabular-nums">{formatKrValue(ta.ferryKr, 0)} kr</span>
+                        <span className="tabular-nums">{formatKrValue(tb.ferryKr, 0)} kr</span>
+                      </>
+                    ) : null}
                     <span>Total</span>
                     {cell("a", ab.cost, `${formatKrValue(ta.kr, 0)} kr`)}
                     {cell("b", ab.cost, `${formatKrValue(tb.kr, 0)} kr`)}

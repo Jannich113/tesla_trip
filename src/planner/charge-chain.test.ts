@@ -148,7 +148,7 @@ describe("chargeChain charge level (#69)", () => {
 });
 
 describe("chargeChain ferry rows (#71)", () => {
-  const ferry = { name: "Rødby – Puttgarden", operators: ["Scandlines"], crossingMin: 45, checkInMin: 15, priceKr: { from: 500, to: 900 }, bookingUrl: "https://www.scandlines.dk", known: true };
+  const ferry = { name: "Rødby – Puttgarden", operators: ["Scandlines"], crossingMin: 45, checkInMin: 15, priceKr: { from: 500, to: 900 }, bookingUrl: "https://www.scandlines.dk", known: true, fareKr: 700 };
   const stop = (id: string, name: string): PlanStop => ({ id, name, lat: 55, lng: 10 });
   const leg = (from: PlanStop, to: PlanStop, extra: Partial<PricedLeg>): PricedLeg =>
     ({ from, to, userIndex: 0, accepted: false, needed: false, suggested: false, advice: null, charge: null, ...extra }) as PricedLeg;

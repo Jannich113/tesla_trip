@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { FERRY_LINES, ferriesFromManeuvers, ferryInfo, ferryPortNames, matchFerryLine, splitAtFerry } from "./ferries.ts";
+import { FERRY_LINES, ferriesFromManeuvers, ferryInfo, guessFareKr, ferryPortNames, matchFerryLine, splitAtFerry } from "./ferries.ts";
 
 // Copenhagen → Hamburg as Valhalla returns it (2026-10-30), trimmed to the ferry part.
 const shape: [number, number][] = Array.from({ length: 1700 }, (_, i) => [55.6 - i * 0.0007, 12.5 - i * 0.0007]);
@@ -44,6 +44,16 @@ test("known crossings get operator, check-in, a price estimate and a booking lin
   assert.ok(info.checkInMin > 0);
   assert.ok(info.priceKr && info.priceKr.from < info.priceKr.to);
   assert.match(info.bookingUrl ?? "", /^https:\/\//);
+  // The fare counted in the trip price is the middle of the range.
+  assert.equal(info.fareKr, 700);
+});
+
+test("an unknown crossing still costs something: a guess from its length", () => {
+  const short = ferryInfo({ name: "Short", from: [40.6, 14.3], to: [40.55, 14.24], miles: 3, seconds: 20 * 60 });
+  const long = ferryInfo({ name: "Long", from: [40.6, 14.3], to: [39.0, 15.0], miles: 100, seconds: 8 * 3600 });
+  assert.ok(short.fareKr >= 300, `${short.fareKr}`);
+  assert.ok(long.fareKr > short.fareKr * 2, `${long.fareKr} vs ${short.fareKr}`);
+  assert.equal(guessFareKr(60), 650);
 });
 
 test("unknown crossings keep the router's time, a default check-in and no price", () => {

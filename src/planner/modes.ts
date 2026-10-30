@@ -161,10 +161,15 @@ export function detourPays(opts: {
   return net >= minSave && net >= opts.extraKr * weight;
 }
 
-export function detourSavings(base: { kr: number; tollKr: number; driveMin: number; mi: number }, alt: { kr: number; tollKr: number; driveMin: number; mi: number }) {
+type CostTotals = { kr: number; tollKr: number; ferryKr?: number; driveMin: number; mi: number };
+
+/** What a trip pays for charging: its price without tolls and ferry fares. */
+export const chargeKrOf = (t: CostTotals) => Math.max(0, t.kr - t.tollKr - (t.ferryKr ?? 0));
+
+export function detourSavings(base: CostTotals, alt: CostTotals) {
   const extraMin = Math.max(0, alt.driveMin - base.driveMin);
   const extraMi = Math.max(0, alt.mi - base.mi);
-  const chargeSaved = Math.max(0, base.kr - base.tollKr) - Math.max(0, alt.kr - alt.tollKr);
+  const chargeSaved = chargeKrOf(base) - chargeKrOf(alt);
   const tollSaved = base.tollKr - alt.tollKr;
   const net = base.kr - alt.kr;
   const extraKr = extraMin * 1.2;

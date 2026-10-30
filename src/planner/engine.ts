@@ -102,6 +102,7 @@ export {
   NO_CHEAP_AVOID,
   type CheapAvoid,
   routeAb,
+  chargeKrOf,
   timePenalized,
   stallKw,
   cheapDetourKm,
@@ -212,6 +213,8 @@ export type PricedLeg = {
   via: boolean;
   tollKr: number;
   tollLabel: string;
+  /** Ferry fare, counted in `kr` (ferry legs only). */
+  ferryKr?: number;
   /** Set when this leg is a ferry crossing (#71). */
   ferry?: FerryInfo;
 };
@@ -378,6 +381,7 @@ export function applyLiveRoutes(
   _avoid: boolean | CheapAvoid = false,
 ): PricedLeg[] {
   return legs.map((leg) => {
+    if (leg.ferry) return leg;
     const live = lookup(leg.from, leg.to, leg.mode);
     if (!live || live.source === "air" || live.path.length < 3) return leg;
     const kwh = driveKwh(live.miles, live.seconds, speedEff);
@@ -1006,7 +1010,8 @@ export function pricePlan(opts: {
         startSoc: soc,
         charge: null,
         backup: null,
-        kr: 0,
+        kr: f.fareKr,
+        ferryKr: f.fareKr,
         accepted: false,
         autoStartSoc: soc,
         extraKr: 0,
@@ -1342,6 +1347,7 @@ export function planTotals(legs: PricedLeg[]) {
       acc.kwh += leg.kwh;
       acc.kr += leg.kr;
       acc.tollKr += leg.tollKr;
+      acc.ferryKr += leg.ferryKr ?? 0;
       acc.driveMin += leg.route.seconds / 60;
       acc.chargeMin += leg.chargeMin;
       acc.waitMin += leg.waitMin;
@@ -1355,6 +1361,7 @@ export function planTotals(legs: PricedLeg[]) {
       kwh: 0,
       kr: 0,
       tollKr: 0,
+      ferryKr: 0,
       min: 0,
       driveMin: 0,
       chargeMin: 0,

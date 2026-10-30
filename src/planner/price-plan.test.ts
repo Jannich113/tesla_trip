@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ChargeLocation } from "@/lib/charge-locations";
 import {
+  applyLiveRoutes,
   chargeMinutes,
+  planTotals,
   corridorKey,
   lookupCachedRoute,
   pricePlan,
@@ -349,6 +351,24 @@ describe("ferry crossings (#71)", () => {
     assert.equal(minutes, f.ferry!.checkInMin + f.ferry!.crossingMin);
     const drivenKm = legs.filter((l) => !l.ferry).reduce((n, l) => n + l.route.miles * 1.609, 0);
     assert.ok(Math.abs(drivenKm - 600) < 1, `driven ${drivenKm.toFixed(1)} km`);
+  });
+
+  it("counts the ferry fare in the trip price", () => {
+    const f = ferryLegs[0];
+    assert.ok(f.ferry!.fareKr > 0);
+    assert.equal(f.kr, f.ferry!.fareKr);
+    assert.equal(f.ferryKr, f.ferry!.fareKr);
+    const t = planTotals(legs);
+    assert.equal(t.ferryKr, f.ferry!.fareKr);
+    const charged = legs.filter((l) => l.accepted && l.charge).reduce((n, l) => n + l.charge!.kr, 0);
+    assert.ok(Math.abs(t.kr - t.tollKr - t.ferryKr - charged) < 0.01, `trip ${t.kr} kr = toll ${t.tollKr} + ferry ${t.ferryKr} + charges ${charged}`);
+  });
+
+  it("keeps the ferry leg when live routes are applied", () => {
+    const live = applyLiveRoutes(legs, () => ({ ...route, ferries: [] }), defaultSpeedEff(250));
+    const f = live.find((l) => l.ferry)!;
+    assert.equal(f.kr, ferryLegs[0].kr);
+    assert.equal(f.route, ferryLegs[0].route);
   });
 
   it("still arrives with charge to spare on both sides of the water", () => {

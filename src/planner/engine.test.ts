@@ -25,6 +25,7 @@ import {
   CHEAP_STALL_KM,
   detourPays,
   detourSavings,
+  chargeKrOf,
   pathMode,
   avoidForMode,
   NO_CHEAP_AVOID,
@@ -94,6 +95,15 @@ describe("leg modes", () => {
     assert.equal(save.net, 160);
     assert.equal(save.extraMin, 80);
     assert.equal(save.significant, false);
+  });
+
+  it("a ferry fare is not counted as charging cost", () => {
+    const ferry = { kr: 1200, tollKr: 0, ferryKr: 700, driveMin: 260, mi: 190 };
+    const around = { kr: 650, tollKr: 0, ferryKr: 0, driveMin: 320, mi: 260 };
+    const save = detourSavings(ferry, around);
+    assert.equal(chargeKrOf(ferry), 500);
+    assert.equal(save.chargeSaved, -150);
+    assert.equal(save.net, 550);
   });
 
   it("A/B picks significant savings, else the faster road", () => {

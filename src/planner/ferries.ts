@@ -144,21 +144,32 @@ export type FerryInfo = {
   priceKr: { from: number; to: number } | null;
   bookingUrl: string | null;
   known: boolean;
+  /** Fare counted in the trip price: the middle of the catalog range, or a guess from the crossing time. */
+  fareKr: number;
 };
 
 const DEFAULT_CHECK_IN_MIN = 30;
 
+const roundTo50 = (kr: number) => Math.round(kr / 50) * 50;
+
+/** Guess for a crossing not in the catalog: a base fare plus a little per minute on board. */
+export function guessFareKr(crossingMin: number) {
+  return roundTo50(300 + crossingMin * 6);
+}
+
 export function ferryInfo(crossing: FerryCrossing): FerryInfo {
   const l = matchFerryLine(crossing);
   if (!l) {
+    const crossingMin = Math.max(1, Math.round(crossing.seconds / 60));
     return {
       name: crossing.name,
       operators: [],
-      crossingMin: Math.max(1, Math.round(crossing.seconds / 60)),
+      crossingMin,
       checkInMin: DEFAULT_CHECK_IN_MIN,
       priceKr: null,
       bookingUrl: null,
       known: false,
+      fareKr: guessFareKr(crossingMin),
     };
   }
   return {
@@ -169,6 +180,7 @@ export function ferryInfo(crossing: FerryCrossing): FerryInfo {
     priceKr: l.priceKr,
     bookingUrl: l.bookingUrl,
     known: true,
+    fareKr: roundTo50((l.priceKr.from + l.priceKr.to) / 2),
   };
 }
 
