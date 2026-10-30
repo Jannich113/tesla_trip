@@ -250,37 +250,47 @@ function WhenFields({
   );
 }
 
-/** Avoid toggles under the picked route: the road ones shape Cheapest only; ferries every mode. */
-function AvoidToggles({ className, cheapest }: { className?: string; cheapest: boolean }) {
+/** Avoid chips above the route cards: ferries reroute every mode; the road ones shape Cheapest only. */
+function AvoidToggles({ className }: { className?: string }) {
   const motorways = usePlanStore((s) => s.cheapAvoidMotorways);
   const tolls = usePlanStore((s) => s.cheapAvoidTolls);
   const roadFees = usePlanStore((s) => s.cheapAvoidRoadFees);
   const setCheapAvoid = usePlanStore((s) => s.setCheapAvoid);
   const avoidFerries = usePlanStore((s) => s.avoidFerries);
   const setAvoidFerries = usePlanStore((s) => s.setAvoidFerries);
-  const rows = [
-    ...(cheapest
-      ? [
-          { on: motorways, label: "Avoid motorways", set: (v: boolean) => setCheapAvoid({ motorways: v }) },
-          { on: tolls, label: "Avoid toll gates", set: (v: boolean) => setCheapAvoid({ tolls: v }) },
-          { on: roadFees, label: "Avoid road fees", set: (v: boolean) => setCheapAvoid({ roadFees: v }) },
-        ]
-      : []),
-    { on: avoidFerries, label: "Avoid ferries (all routes)", set: setAvoidFerries },
+  const chips = [
+    { on: avoidFerries, label: "Ferries", cheapOnly: false, set: setAvoidFerries },
+    { on: motorways, label: "Motorways", cheapOnly: true, set: (v: boolean) => setCheapAvoid({ motorways: v }) },
+    { on: tolls, label: "Toll gates", cheapOnly: true, set: (v: boolean) => setCheapAvoid({ tolls: v }) },
+    { on: roadFees, label: "Road fees", cheapOnly: true, set: (v: boolean) => setCheapAvoid({ roadFees: v }) },
   ];
   return (
-    <div className={cn("space-y-2", className)}>
-      {rows.map((row) => (
-        <label key={row.label} className="flex items-center gap-2 text-xs text-muted">
-          <input
-            type="checkbox"
-            checked={row.on}
-            onChange={(e) => row.set(e.target.checked)}
-            className="size-4 accent-foreground"
-          />
-          {row.label}
-        </label>
-      ))}
+    <div className={className}>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="mr-0.5 text-xs text-muted">Avoid</span>
+        {chips.map((chip) => (
+          <button
+            key={chip.label}
+            type="button"
+            aria-pressed={chip.on}
+            onClick={() => chip.set(!chip.on)}
+            className={cn(
+              "inline-flex h-8 items-center gap-1 rounded-full border px-3 text-xs transition-colors",
+              chip.on
+                ? "border-foreground/60 bg-foreground/10 text-foreground"
+                : "border-border bg-surface-2 text-muted hover:text-foreground",
+            )}
+          >
+            {chip.on ? <X className="size-3" aria-hidden /> : null}
+            {chip.label}
+            {chip.cheapOnly ? <span className="size-1.5 rounded-full bg-amber-400" aria-hidden /> : null}
+          </button>
+        ))}
+      </div>
+      <p className="mt-1.5 flex items-center gap-1 text-[10px] text-subtle">
+        <span className="size-1.5 rounded-full bg-amber-400" aria-hidden />
+        Cheapest only · ferries apply to every route
+      </p>
     </div>
   );
 }
@@ -577,7 +587,6 @@ const OptionList = memo(function OptionList({
               ))}
             </ol>
           ) : null}
-          <AvoidToggles className="mt-3" cheapest={picked.mode === "cheapest"} />
         </div>
       ) : null}
     </div>
@@ -2217,6 +2226,7 @@ export function PlanScreen() {
         {stops.length >= 2 ? (
           <>
             <p className="mt-5 text-[11px] font-medium uppercase tracking-wide text-muted">Routes</p>
+            <AvoidToggles className="mt-2 mb-3" />
             <OptionList
               rows={optionRows}
               mixed={mixed}
