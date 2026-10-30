@@ -191,8 +191,18 @@ function readGoogle(url: URL) {
   return resolveSlots(slots, embedded);
 }
 
+/** Unified Maps URLs (iOS 18.4+): /directions?source=…&waypoint=…&waypoint=…&destination=…. */
+function appleUnifiedChain(url: URL): Slot[] | null {
+  const destination = url.searchParams.get("destination");
+  if (!destination || !(url.pathname.startsWith("/directions") || url.searchParams.has("source"))) return null;
+  const source = url.searchParams.get("source");
+  return [source, ...url.searchParams.getAll("waypoint"), destination]
+    .filter((part): part is string => Boolean(part?.trim()))
+    .map(slotFromText);
+}
+
 function readApple(url: URL) {
-  return resolveSlots(queryChain(url), []);
+  return resolveSlots(appleUnifiedChain(url) ?? queryChain(url), []);
 }
 
 /** Origin, intermediate stops, and destination from a pasted share URL. */
@@ -244,12 +254,17 @@ export function googleDirectionsUrl(stops: { lat: number; lng: number }[]) {
   return url.toString();
 }
 
-/** Apple Maps directions URL on maps.apple.com. No API call. */
+/**
+ * Apple Maps directions URL on maps.apple.com. No API call. Uses Apple's unified Maps URLs
+ * (iOS 18.4 / macOS 15.4 and later): the older saddr/daddr form cannot carry stops between
+ * start and end, so Apple Maps dropped the charging stops.
+ */
 export function appleDirectionsUrl(stops: { lat: number; lng: number }[]) {
   assertRoute(stops);
-  const url = new URL("https://maps.apple.com/");
-  url.searchParams.set("saddr", coordParam(stops[0]));
-  url.searchParams.set("daddr", stops.slice(1).map(coordParam).join(" to:"));
-  url.searchParams.set("dirflg", "d");
+  const url = new URL("https://maps.apple.com/directions");
+  url.searchParams.set("source", coordParam(stops[0]));
+  url.searchParams.set("destination", coordParam(stops[stops.length - 1]));
+  for (const stop of stops.slice(1, -1)) url.searchParams.append("waypoint", coordParam(stop));
+  url.searchParams.set("mode", "driving");
   return url.toString();
 }

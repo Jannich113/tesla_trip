@@ -99,12 +99,29 @@ describe("maps share urls", () => {
     const url = appleDirectionsUrl([cph, ode, aar]);
     const parsed = new URL(url);
     assert.equal(parsed.hostname, "maps.apple.com");
-    assert.equal(parsed.searchParams.get("saddr"), "55.6761,12.5683");
-    assert.equal(parsed.searchParams.get("daddr"), "55.4038,10.4024 to:56.1629,10.2039");
-    assert.equal(parsed.searchParams.get("dirflg"), "d");
+    assert.equal(parsed.pathname, "/directions");
+    assert.equal(parsed.searchParams.get("source"), "55.6761,12.5683");
+    assert.equal(parsed.searchParams.get("destination"), "56.1629,10.2039");
+    assert.deepEqual(parsed.searchParams.getAll("waypoint"), ["55.4038,10.4024"]);
+    assert.equal(parsed.searchParams.get("mode"), "driving");
     const back = parseMapShareUrl(url);
     assert.equal(back.source, "apple");
     assert.deepEqual(coords(back.stops), coords([cph, ode, aar]));
+  });
+
+  it("keeps every stop in an Apple link, so charging stops reach Apple Maps", () => {
+    const stops = [cph, ode, { lat: 55.49, lng: 9.47 }, { lat: 55.07, lng: 9.33 }, aar];
+    const parsed = new URL(appleDirectionsUrl(stops));
+    assert.equal(parsed.searchParams.getAll("waypoint").length, 3);
+    assert.deepEqual(coords(parseMapShareUrl(parsed.toString()).stops), coords(stops));
+  });
+
+  it("reads a unified Apple Maps directions link with several waypoints", () => {
+    const trip = parseMapShareUrl(
+      "https://maps.apple.com/directions?source=55.6761,12.5683&destination=56.1629,10.2039&waypoint=55.4038,10.4024&waypoint=55.49,9.47&mode=driving",
+    );
+    assert.equal(trip.source, "apple");
+    assert.deepEqual(coords(trip.stops), coords([cph, ode, { lat: 55.49, lng: 9.47 }, aar]));
   });
 
   it("rejects a Google short link instead of fetching it", () => {
