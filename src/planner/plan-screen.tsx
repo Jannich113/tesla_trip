@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useDeferredValue, useRef, lazy, Suspense, memo, startTransition } from "react";
 import type { KeyboardEvent } from "react";
-import { ChevronDown, ChevronUp, MapPin, MoreHorizontal, Navigation, Plus, SlidersHorizontal, Trash2, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Map as MapIcon, MapPin, MoreHorizontal, Navigation, Plus, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import type { MapMarker, MapRoute } from "@/components/bay-map";
 import { ConfirmStrip } from "@/components/confirm-strip";
@@ -10,6 +10,7 @@ import { chargeChain, type ChainEntry, type ChargeStatus } from "./charge-chain"
 import { fastestOfModes } from "./pick-route";
 import { drivingFactor, scaleSpeedEff, sessionDcKw, useCarSettings, variantFor } from "./car-settings";
 import { CarPanel } from "./car-panel";
+import { Sheet } from "./sheet";
 import { NetworksPanel } from "./networks-panel";
 
 /**
@@ -722,19 +723,10 @@ export function PlanScreen() {
   const [importError, setImportError] = useState("");
   const [pane, setPane] = useState<"plan" | "advanced" | "members">("plan");
   const [fineTune, setFineTune] = useState(false);
-  useEffect(() => {
-    if (!fineTune) return;
-    const onKey = (e: globalThis.KeyboardEvent) => {
-      if (e.key === "Escape") setFineTune(false);
-    };
-    const overflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    window.addEventListener("keydown", onKey);
-    return () => {
-      document.body.style.overflow = overflow;
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [fineTune]);
+  const closeFineTune = useCallback(() => setFineTune(false), []);
+  // Import from, or open in, Google / Apple Maps.
+  const [mapsOpen, setMapsOpen] = useState(false);
+  const closeMaps = useCallback(() => setMapsOpen(false), []);
   const [pickerStop, setPickerStop] = useState<string | null>(null);
   const [elpris, setElpris] = useState<ElprisData | null>(null);
 
@@ -1497,6 +1489,7 @@ export function PlanScreen() {
     toast(`Saved ${plan.name}`);
   }
 
+  /** True when the link was read and its stops replaced the plan's. */
   function importFromMaps() {
     let trip: ReturnType<typeof parseMapShareUrl>;
     try {
@@ -1505,7 +1498,7 @@ export function PlanScreen() {
       const message = err instanceof Error ? err.message : "Could not read that share link";
       setImportError(message);
       toast.error(message);
-      return;
+      return false;
     }
     setImportError("");
     reset();
@@ -1516,6 +1509,7 @@ export function PlanScreen() {
     if (title) setName(title);
     setImportUrl("");
     toast(`Imported ${trip.stops.length} stops`);
+    return true;
   }
 
   async function exportToTesla(planStops: { name: string; lat: number; lng: number }[], title: string) {
@@ -2361,13 +2355,107 @@ export function PlanScreen() {
       {pane === "plan" ? (
       <div className="space-y-5">
 
+      <Sheet open={mapsOpen} onClose={closeMaps} title="Google and Apple Maps" subtitle="Import a route, or open this trip">
+        <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Import a route</p>
+          <p className="mt-1 text-xs text-muted">
+            In Google or Apple Maps, plan the route and tap Share, then paste the link here. It replaces the stops in this plan.
+          </p>
+          <div className="mt-3">
+            <form
+              className="flex gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (importFromMaps()) closeMaps();
+              }}
+            >
+              <input
+                value={importUrl}
+                onChange={(e) => {
+                  setImportUrl(e.target.value);
+                  if (importError) setImportError("");
+                }}
+                placeholder="Paste a Google or Apple Maps link"
+                aria-label="Google or Apple Maps share link"
+                aria-invalid={importError ? true : undefined}
+                className="h-11 min-w-0 flex-1 rounded-xl bg-surface-2 px-3 text-sm outline-none"
+              />
+              <button
+                type="submit"
+                className="h-11 shrink-0 rounded-full bg-surface-2 px-4 text-sm font-medium text-muted"
+              >
+                Import
+              </button>
+            </form>
+            {importError ? (
+              <p role="alert" className="mt-2 text-xs text-amber-200">
+                {importError}
+              </p>
+            ) : (
+              <p className="mt-2 text-[11px] text-subtle">Stops only. Eco, Fastest, and Cheapest still run here.</p>
+            )}
+          </div>
+        </section>
+        <section className="mt-3 rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Open this trip in</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {googleHref ? (
+              <a
+                href={googleHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex h-9 items-center rounded-full bg-surface-2 px-3 text-[11px] font-medium text-muted"
+              >
+                Google Maps
+              </a>
+            ) : (
+              <button
+                type="button"
+                onClick={() => toast.error("Add a destination first")}
+                className="flex h-9 items-center rounded-full bg-surface-2 px-3 text-[11px] font-medium text-muted"
+              >
+                Google Maps
+              </button>
+            )}
+            {appleHref ? (
+              <a
+                href={appleHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex h-9 items-center rounded-full bg-surface-2 px-3 text-[11px] font-medium text-muted"
+              >
+                Apple Maps
+              </a>
+            ) : (
+              <button
+                type="button"
+                onClick={() => toast.error("Add a destination first")}
+                className="flex h-9 items-center rounded-full bg-surface-2 px-3 text-[11px] font-medium text-muted"
+              >
+                Apple Maps
+              </button>
+            )}
+          </div>
+        </section>
+      </Sheet>
+
       <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder={stops.length >= 2 ? tripTitle(stops) : "Name this plan"}
-          className="w-full bg-transparent text-sm font-medium text-foreground outline-none placeholder:text-subtle"
-        />
+        <div className="flex items-center gap-2">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={stops.length >= 2 ? tripTitle(stops) : "Name this plan"}
+            className="min-w-0 flex-1 bg-transparent text-sm font-medium text-foreground outline-none placeholder:text-subtle"
+          />
+          <button
+            type="button"
+            onClick={() => setMapsOpen(true)}
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-background px-3 text-xs font-medium text-foreground shadow-[var(--shadow-border)]"
+          >
+            <MapIcon className="size-3.5" aria-hidden />
+            Maps link
+          </button>
+        </div>
         <p className="mt-2 text-xs text-muted">
           {formatNumber(packKwh, 0)} kWh usable · {formatNumber(soc, 0)}% at start
         </p>
@@ -2578,44 +2666,19 @@ export function PlanScreen() {
               onToggleOptional={toggleOptionalCharge}
               onFineTune={() => setFineTune(true)}
             />
-            {fineTune ? (
-              <div
-                className="fixed inset-0 z-[1100] flex items-end lg:items-stretch"
-                role="dialog"
-                aria-modal="true"
-                aria-label="Fine-tune stops"
-              >
-                <button
-                  type="button"
-                  aria-label="Close fine-tune"
-                  className="absolute inset-0 bg-black/55"
-                  onClick={() => setFineTune(false)}
-                />
-                <div className="relative flex max-h-[90dvh] w-full flex-col rounded-t-2xl bg-background shadow-2xl lg:max-h-none lg:w-[400px] lg:rounded-none lg:rounded-r-2xl">
-                  <div className="flex items-center gap-3 border-b border-border px-4 py-3">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium">Fine-tune stops</p>
-                      <p className="truncate text-xs text-muted">
-                        {(() => {
-                          const row = optionRows.find((r) => r.mode === (activeModes[0] ?? "fastest"));
-                          const t = row?.totals;
-                          if (!t) return modeLabel(activeModes[0] ?? "fastest");
-                          return `${mixed ? "Mixed" : modeLabel(activeModes[0] ?? "fastest")} · ${minutesToHm(t.min)} · ${formatKrValue(t.kr, 0)} kr · ${t.charges} ${t.charges === 1 ? "charge" : "charges"}`;
-                        })()}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setFineTune(false)}
-                      className="ml-auto inline-flex h-8 shrink-0 items-center rounded-full bg-foreground px-3 text-xs font-medium text-background"
-                    >
-                      Done
-                    </button>
-                  </div>
-                  <div className="overflow-y-auto overscroll-contain px-3 pb-6 pt-3">{stopsPlanner}</div>
-                </div>
-              </div>
-            ) : null}
+            <Sheet
+              open={fineTune}
+              onClose={closeFineTune}
+              title="Fine-tune stops"
+              subtitle={(() => {
+                const row = optionRows.find((r) => r.mode === (activeModes[0] ?? "fastest"));
+                const t = row?.totals;
+                if (!t) return modeLabel(activeModes[0] ?? "fastest");
+                return `${mixed ? "Mixed" : modeLabel(activeModes[0] ?? "fastest")} · ${minutesToHm(t.min)} · ${formatKrValue(t.kr, 0)} kr · ${t.charges} ${t.charges === 1 ? "charge" : "charges"}`;
+              })()}
+            >
+              {stopsPlanner}
+            </Sheet>
             <PreferNetwork abo={networkAbo} preferred={preferredNetwork} onPick={setPreferredNetwork} />
             <p className="mt-3 text-[10px] leading-relaxed text-subtle">
               Chargers from Open Charge Map, OpenStreetMap and supercharge.info (community data, not
@@ -2711,76 +2774,6 @@ export function PlanScreen() {
         >
           Clear plan
         </button>
-        <form
-          className="flex gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            importFromMaps();
-          }}
-        >
-          <input
-            value={importUrl}
-            onChange={(e) => {
-              setImportUrl(e.target.value);
-              if (importError) setImportError("");
-            }}
-            placeholder="Paste a Google or Apple Maps link"
-            aria-label="Google or Apple Maps share link"
-            aria-invalid={importError ? true : undefined}
-            className="h-11 min-w-0 flex-1 rounded-xl bg-surface-2 px-3 text-sm outline-none"
-          />
-          <button
-            type="submit"
-            className="h-11 shrink-0 rounded-full bg-surface-2 px-4 text-sm font-medium text-muted"
-          >
-            Import
-          </button>
-        </form>
-        {importError ? (
-          <p role="alert" className="mt-2 text-xs text-amber-200">
-            {importError}
-          </p>
-        ) : (
-          <p className="mt-2 text-[11px] text-subtle">Stops only. Eco, Fastest, and Cheapest still run here.</p>
-        )}
-        <div className="mt-2 flex flex-wrap gap-2">
-          {googleHref ? (
-            <a
-              href={googleHref}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex h-9 items-center rounded-full bg-surface-2 px-3 text-[11px] font-medium text-muted"
-            >
-              Google Maps
-            </a>
-          ) : (
-            <button
-              type="button"
-              onClick={() => toast.error("Add a destination first")}
-              className="flex h-9 items-center rounded-full bg-surface-2 px-3 text-[11px] font-medium text-muted"
-            >
-              Google Maps
-            </button>
-          )}
-          {appleHref ? (
-            <a
-              href={appleHref}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex h-9 items-center rounded-full bg-surface-2 px-3 text-[11px] font-medium text-muted"
-            >
-              Apple Maps
-            </a>
-          ) : (
-            <button
-              type="button"
-              onClick={() => toast.error("Add a destination first")}
-              className="flex h-9 items-center rounded-full bg-surface-2 px-3 text-[11px] font-medium text-muted"
-            >
-              Apple Maps
-            </button>
-          )}
-        </div>
         </div>
         ) : null}
       </section>
