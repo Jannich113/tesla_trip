@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { useTripStore } from "@/store/trip-store";
-import { primeRouteCache, canonRouteKey, routeTooCoarse, type LegMode, type LegWhen, type PlanStop, type RoutedLeg } from "./engine";
+import { primeRouteCache, canonRouteKey, routeOutdated, type LegMode, type LegWhen, type PlanStop, type RoutedLeg } from "./engine";
 import { DEFAULT_DETOUR_KM, DEFAULT_WAIT_MIN, kwhPerMiFrom100km, normalizeMode, type SpeedEff } from "./modes";
 import { routePointBudget, simplifyPath } from "./polyline";
 import { cacheInvalidate } from "./cache";
@@ -59,7 +59,7 @@ function slimRoutes(routes: Record<string, RoutedLeg> | undefined) {
   for (const [key, route] of Object.entries(routes)) {
     if (!route?.path?.length || route.source === "air" || route.path.length < 3) continue;
     // Stored by an older version with too few points: drop it so the route is fetched again.
-    if (routeTooCoarse(route)) continue;
+    if (routeOutdated(route)) continue;
     const canon = canonRouteKey(key);
     const mode = canon.split("|")[2] ?? "";
     if (mode !== "eco" && mode !== "fastest" && mode !== "cheapest") continue;

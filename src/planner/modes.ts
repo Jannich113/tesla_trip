@@ -501,15 +501,24 @@ export function hoursFrom<T extends { hour: string; ymd?: string }>(hours: T[], 
   return next >= 0 ? hours.slice(next) : hours;
 }
 
-/** Eco tries to skip motorways and tolls. Fastest takes the highway. Cheapest follows the avoid toggles. */
+/**
+ * Eco tries to skip motorways and tolls. Fastest takes the highway. Cheapest follows the avoid
+ * toggles. Ferries (#71): Fastest and Eco are neutral (Valhalla's default 0.5), so a crossing
+ * is used when it is quicker; Cheapest avoids them, since a fare costs more than the
+ * electricity to drive around.
+ */
+export const FERRY_NEUTRAL = 0.5;
+export const FERRY_AVOID = 0.1;
+
 export function costingFor(mode: LegMode, avoid: boolean | CheapAvoid = false): AutoCosting {
   const a = asCheapAvoid(avoid);
+  const useFerry = mode === "cheapest" ? FERRY_AVOID : FERRY_NEUTRAL;
   if (mode === "eco" || (mode === "cheapest" && a.motorways)) {
     return {
       shortest: false,
       use_highways: 0.35,
       use_tolls: mode === "eco" || a.tolls ? 0 : 1,
-      use_ferry: 0.2,
+      use_ferry: useFerry,
       use_tracks: 0,
       use_living_streets: 0,
       top_speed: 100,
@@ -519,7 +528,7 @@ export function costingFor(mode: LegMode, avoid: boolean | CheapAvoid = false): 
     shortest: false,
     use_highways: 1,
     use_tolls: mode === "cheapest" && a.tolls ? 0 : 1,
-    use_ferry: 0.1,
+    use_ferry: useFerry,
     use_tracks: 0,
     use_living_streets: 0,
     top_speed: 130,

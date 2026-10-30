@@ -146,3 +146,58 @@ describe("chargeChain charge level (#69)", () => {
     for (const e of normal) if (e.type === "charge") assert.equal(e.toSoc, null);
   });
 });
+
+describe("chargeChain ferry rows (#71)", () => {
+  const ferry = { name: "Rødby – Puttgarden", operators: ["Scandlines"], crossingMin: 45, checkInMin: 15, priceKr: { from: 500, to: 900 }, bookingUrl: "https://www.scandlines.dk", known: true };
+  const stop = (id: string, name: string): PlanStop => ({ id, name, lat: 55, lng: 10 });
+  const leg = (from: PlanStop, to: PlanStop, extra: Partial<PricedLeg>): PricedLeg =>
+    ({ from, to, userIndex: 0, accepted: false, needed: false, suggested: false, advice: null, charge: null, ...extra }) as PricedLeg;
+
+  it("shows the crossing between the two ports", () => {
+    const a = stop("ferry-1-a", "Rødby");
+    const b = stop("ferry-1-b", "Puttgarden");
+    const chain = chargeChain(
+      [leg(stop("s", "København"), a, {}), leg(a, b, { ferry }), leg(b, stop("e", "Hamburg"), {})],
+      () => null,
+    );
+    assert.deepEqual(
+      chain.map((e) => `${e.type}:${e.name}`),
+      ["stop:København", "stop:Rødby", "ferry:Rødby – Puttgarden", "stop:Puttgarden", "stop:Hamburg"],
+    );
+    const row = chain.find((e) => e.type === "ferry");
+    assert.equal(row?.type === "ferry" && row.ferry.bookingUrl, "https://www.scandlines.dk");
+  });
+});
+
+describe("chargeChain optional offers", () => {
+  const stop = (id: string, name: string): PlanStop => ({ id, name, lat: 55, lng: 10 });
+  const charge = (name: string): PricedCharge =>
+    ({ locationId: name, name, kind: "supercharger", kwh: 20, kr: 60, rateKr: 3, label: "", inBand: true, distM: 0, windowLabel: "", cheapWindow: false, waitMin: 0 });
+  const leg = (from: PlanStop, to: PlanStop, extra: Partial<PricedLeg>): PricedLeg =>
+    ({ from, to, userIndex: 0, accepted: false, needed: false, suggested: false, advice: null, charge: null, ...extra }) as PricedLeg;
+
+  it("hides an offer at the charger where the next leg charges anyway (seen at Lübeck)", () => {
+    const lubeck = stop("via-sc-lubeck", "Lübeck");
+    const chain = chargeChain(
+      [
+        leg(stop("a", "Puttgarden"), lubeck, { suggested: true, advice: "suggested", charge: charge("Lübeck") }),
+        leg(lubeck, stop("b", "Hamburg"), { accepted: true, needed: true, advice: "required", charge: charge("Lübeck") }),
+      ],
+      () => "Tesla Supercharger",
+    );
+    const charges = chain.filter((e) => e.type === "charge");
+    assert.equal(charges.length, 1);
+    assert.equal(charges[0].type === "charge" && charges[0].status, "required");
+  });
+
+  it("keeps an offer at a different charger", () => {
+    const chain = chargeChain(
+      [
+        leg(stop("a", "A"), stop("via-x", "X"), { suggested: true, advice: "suggested", charge: charge("Kolding") }),
+        leg(stop("via-x", "X"), stop("b", "B"), { accepted: true, needed: true, advice: "required", charge: charge("Lübeck") }),
+      ],
+      () => null,
+    );
+    assert.equal(chain.filter((e) => e.type === "charge").length, 2);
+  });
+});

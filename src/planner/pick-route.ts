@@ -102,3 +102,12 @@ export function pickCheapAvoidRoute<T extends DriveCandidate>(
   }
   return best;
 }
+
+/**
+ * Cheapest's reference route: the fastest one, unless it takes a ferry and another candidate
+ * does not. A fare (hundreds of kr) costs far more than the electricity to drive around (#71).
+ */
+export function fastWithoutFerry<T extends DriveCandidate & { ferries?: unknown[] }>(fast: T | null, cands: T[]): T | null {
+  if (!fast?.ferries?.length) return fast;
+  return cands.some((c) => c.path.length >= 3 && !c.ferries?.length) ? null : fast;
+}

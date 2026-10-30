@@ -347,6 +347,42 @@ function ChainRow({
   if (entry.type === "pass") {
     return <span className="text-subtle">Passes {entry.name} (no charge)</span>;
   }
+  if (entry.type === "ferry") {
+    const f = entry.ferry;
+    const booking =
+      f.bookingUrl ?? `https://www.google.com/search?q=${encodeURIComponent(`${f.name} ferry booking`)}`;
+    return (
+      <div>
+        <span className="flex flex-wrap items-center gap-1.5">
+          <span className="rounded-full bg-sky-400/15 px-1.5 py-0.5 text-[10px] font-medium text-sky-300">Ferry</span>
+          <span className="text-foreground">{entry.name}</span>
+        </span>
+        <span className="mt-0.5 block text-[11px] text-muted">
+          {[
+            f.operators.join(" / ") || null,
+            `${minutesToHm(f.crossingMin)} crossing`,
+            `check in ${f.checkInMin} min before`,
+            "battery not used",
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </span>
+        <span className="mt-0.5 block text-[11px] text-subtle">
+          {f.priceKr
+            ? `≈ ${formatKrValue(f.priceKr.from, 0)}–${formatKrValue(f.priceKr.to, 0)} kr one way with car (rough estimate; varies by departure)`
+            : "Price unknown: check with the ferry operator"}
+        </span>
+        <a
+          href={booking}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-1 inline-flex h-7 items-center rounded-full bg-background px-2.5 text-[11px] font-medium text-foreground"
+        >
+          {f.bookingUrl ? `Book with ${f.operators[0] ?? "the operator"}` : "Find the ferry operator"}
+        </a>
+      </div>
+    );
+  }
   const badge = entry.placeholder
     ? { label: "Estimate", className: "bg-red-400/15 text-red-300" }
     : CHARGE_BADGE[entry.status];
@@ -483,6 +519,18 @@ const OptionList = memo(function OptionList({
             avg {formatNumber(picked.kmh, 0)} km/t
             {pickedSlow ? " · 2× slower" : ""}
             {pt.tollKr >= 1 ? ` · toll ${formatKrValue(pt.tollKr, 0)} kr` : " · no toll"}
+            {(() => {
+              // Ferry fares are estimates, so they stay out of the trip price and show here (#71).
+              const ferries = picked.legs.filter((l) => l.ferry);
+              if (!ferries.length) return "";
+              const priced = ferries.filter((l) => l.ferry?.priceKr);
+              const from = priced.reduce((n, l) => n + (l.ferry?.priceKr?.from ?? 0), 0);
+              const to = priced.reduce((n, l) => n + (l.ferry?.priceKr?.to ?? 0), 0);
+              const label = ferries.length === 1 ? "ferry" : `${ferries.length} ferries`;
+              return priced.length
+                ? ` · ${label} ≈ ${formatKrValue(from, 0)}–${formatKrValue(to, 0)} kr extra`
+                : ` · ${label}, price unknown`;
+            })()}
             {pickedSave && pickedSave.significant
               ? ` · saves ${formatKrValue(pickedSave.net, 0)} kr${pickedSave.extraMin >= 1 ? ` for +${minutesToHm(pickedSave.extraMin)}` : ""}`
               : pickedSave && pickedSave.net <= -1

@@ -2,7 +2,8 @@ import { costingFor, type CheapAvoid, type LegMode } from "./modes";
 import { estimateTolls } from "./tolls";
 import { decodePolyline, simplifyPath } from "./polyline";
 import { haversineM } from "./insert";
-import { pickCheapAvoidRoute, pickEcoRoute, pickFastestRoute } from "./pick-route";
+import { fastWithoutFerry, pickCheapAvoidRoute, pickEcoRoute, pickFastestRoute } from "./pick-route";
+import { ferriesFromManeuvers, type FerryCrossing } from "./ferries";
 import { noStore, publicCache } from "@/lib/http-cache";
 
 type Stop = { lat: number; lng: number };
@@ -15,6 +16,8 @@ export type DriveRouteJson = {
   hasToll?: boolean;
   tollKr?: number;
   tollLabel?: string;
+  /** Ferry crossings on the route (Valhalla only; OSRM never takes ferries). */
+  ferries?: FerryCrossing[];
 };
 
 function withTolls(route: DriveRouteJson, mode: LegMode, hasToll = false): DriveRouteJson {
@@ -25,7 +28,7 @@ function withTolls(route: DriveRouteJson, mode: LegMode, hasToll = false): Drive
 function pickValhallaTrip(
   trips: Array<{
     summary?: { length?: number; time?: number; has_toll?: boolean };
-    legs?: Array<{ shape?: { coordinates?: [number, number][] } | string }>;
+    legs?: Array<{ shape?: { coordinates?: [number, number][] } | string; maneuvers?: Parameters<typeof ferriesFromManeuvers>[0] }>;
   }>,
 ) {
   if (!trips.length) return null;
@@ -86,12 +89,12 @@ async function valhalla(from: Stop, to: Stop, mode: LegMode, avoid?: CheapAvoid)
     const body = (await res.json()) as {
       trip?: {
         summary?: { length?: number; time?: number; has_toll?: boolean };
-        legs?: Array<{ shape?: { coordinates?: [number, number][] } | string }>;
+        legs?: Array<{ shape?: { coordinates?: [number, number][] } | string; maneuvers?: Parameters<typeof ferriesFromManeuvers>[0] }>;
       };
       alternates?: Array<{
         trip?: {
           summary?: { length?: number; time?: number; has_toll?: boolean };
-          legs?: Array<{ shape?: { coordinates?: [number, number][] } | string }>;
+          legs?: Array<{ shape?: { coordinates?: [number, number][] } | string; maneuvers?: Parameters<typeof ferriesFromManeuvers>[0] }>;
         };
       }>;
     };
@@ -100,14 +103,20 @@ async function valhalla(from: Stop, to: Stop, mode: LegMode, avoid?: CheapAvoid)
     );
     const trip = pickValhallaTrip(trips);
     const summary = trip?.summary;
-    const path = pathFromShape(trip?.legs?.[0]?.shape);
+    const leg = trip?.legs?.[0];
+    const path = pathFromShape(leg?.shape);
     if (!summary || path.length < 3) return null;
+    // Ferry positions index the full shape, so read them before it is simplified (#71).
+    const fullShape = typeof leg?.shape === "string" ? decodePolyline(leg.shape, 6) : [];
+    const ferries = ferriesFromManeuvers(leg?.maneuvers ?? [], fullShape);
     return withTolls(
       {
         miles: Number(summary.length) || 0,
         seconds: Number(summary.time) || 0,
         path: simplifyPath(path, 160),
         source: "valhalla",
+        // Always set, even empty: a stored Valhalla route without it predates ferry reading.
+        ferries,
       },
       mode,
       Boolean(summary.has_toll),
@@ -205,6 +214,7 @@ function stitch(parts: DriveRouteJson[], mode: LegMode): DriveRouteJson | null {
       seconds: ok.reduce((n, p) => n + p.seconds, 0),
       path: simplifyPath(path, 220),
       source: ok.some((p) => p.source === "osrm") ? "osrm" : "valhalla",
+      ...(ok.some((p) => p.source === "valhalla") ? { ferries: ok.flatMap((p) => p.ferries ?? []) } : {}),
     },
     mode,
     ok.some((p) => p.hasToll),
@@ -214,8 +224,13 @@ function stitch(parts: DriveRouteJson[], mode: LegMode): DriveRouteJson | null {
 async function fastestPool(from: Stop, to: Stop): Promise<DriveRouteJson[]> {
   const km = haversineM(from, to) / 1000;
   if (km < 320) {
-    const os = await osrm(from, to).catch(() => null);
-    return os && okRoute(os, from, to) ? [os] : [];
+    // Valhalla too, even on short trips: OSRM never takes ferries, so Copenhagen–Hamburg
+    // (Rødby–Puttgarden) or Aarhus–Copenhagen (Molslinjen) would always drive around (#71).
+    const [os, val] = await Promise.all([
+      osrm(from, to).catch(() => null),
+      valhalla(from, to, "fastest").catch(() => null),
+    ]);
+    return [os, val].filter((r): r is DriveRouteJson => Boolean(r && okRoute(r, from, to)));
   }
   const [alts, plain, val] = await Promise.all([
     osrmRoutes(from, to, "&alternatives=true").catch(() => []),
@@ -247,7 +262,7 @@ async function hop(from: Stop, to: Stop, mode: LegMode): Promise<DriveRouteJson 
     ]);
     const fast = pickFastestRoute(fastPool);
     const cands = [v, skip].filter((r): r is DriveRouteJson => Boolean(r && okRoute(r, from, to)));
-    return pickCheapAvoidRoute(fast, cands, { tolls: true, roadFees: true }) ?? fast;
+    return pickCheapAvoidRoute(fastWithoutFerry(fast, cands), cands, { tolls: true, roadFees: true }) ?? fast;
   }
   const pool = await fastestPool(from, to);
   return pickFastestRoute(pool);
@@ -284,7 +299,7 @@ export async function routeDrive(from: Stop, to: Stop, mode: LegMode): Promise<D
       ]);
       const fastOk = fastLong ? withTolls(fastLong, "fastest", Boolean(fastLong.hasToll)) : null;
       const skip = skipLong ? withTolls(skipLong, "cheapest", Boolean(skipLong.hasToll)) : null;
-      const picked = pickCheapAvoidRoute(fastOk, skip ? [skip] : [], { tolls: true, roadFees: true });
+      const picked = pickCheapAvoidRoute(fastWithoutFerry(fastOk, skip ? [skip] : []), skip ? [skip] : [], { tolls: true, roadFees: true });
       if (picked) return withTolls(picked, "cheapest", Boolean(picked.hasToll));
       if (fastOk) return fastOk;
     }
@@ -297,7 +312,7 @@ export async function routeDrive(from: Stop, to: Stop, mode: LegMode): Promise<D
     const cands = [skipVal, skipOsrm]
       .filter((r): r is DriveRouteJson => Boolean(r && okRoute(r, from, to)))
       .map((r) => withTolls(r, "cheapest", Boolean(r.hasToll)));
-    const picked = pickCheapAvoidRoute(fastOk, cands, { tolls: true, roadFees: true });
+    const picked = pickCheapAvoidRoute(fastWithoutFerry(fastOk, cands), cands, { tolls: true, roadFees: true });
     if (picked) return withTolls(picked, "cheapest", Boolean(picked.hasToll));
     if (fastOk) return fastOk;
     const hopped = await hop(from, to, "cheapest");

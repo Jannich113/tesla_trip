@@ -7,6 +7,7 @@ import {
   lookupCachedRoute,
   pricePlan,
   primeRouteCache,
+  routeOutdated,
   routeTooCoarse,
   UNKNOWN_CHARGER_KR_PER_KWH,
   type PlanStop,
@@ -262,6 +263,7 @@ describe("stored routes", () => {
     miles: 2560 / 1.609,
     seconds: 28 * 3600,
     source: "valhalla",
+    ferries: [],
     path: Array.from({ length: points }, (_, i) => [from.lat + ((to.lat - from.lat) * i) / (points - 1), from.lng + ((to.lng - from.lng) * i) / (points - 1)]),
   });
 
@@ -292,5 +294,85 @@ describe("routeTooCoarse", () => {
     assert.equal(routeTooCoarse(route(2560, 220)), false);
     assert.equal(routeTooCoarse(route(2560, 257)), false);
     assert.equal(routeTooCoarse(route(300, 40)), false);
+  });
+});
+
+describe("ferry crossings (#71)", () => {
+  // 620 km north from 55°N with a 20 km crossing at km 300–320 (Rødby–Puttgarden-like).
+  const KM = 111.2;
+  const at = (km: number): [number, number] => [55 + km / KM, 10];
+  const path: [number, number][] = Array.from({ length: 125 }, (_, i) => at(i * 5));
+  const crossing = { name: "Rødby (DK) - Puttgarden (D)", from: at(300), to: at(320), miles: 20 / 1.609, seconds: 2700 };
+  const route: RoutedLeg = { miles: 620 / 1.609, seconds: (600 / 100) * 3600 + 2700, path, source: "valhalla", ferries: [crossing] };
+  const chargers = [...chargersEvery(40, 620).filter((c) => (c.lat - 55) * KM < 300 || (c.lat - 55) * KM > 320), charger("in-the-sea", 310, "supercharger", 0.5)];
+  const legs = pricePlan({
+    stops: [START, endOf(620)],
+    modes: ["fastest"],
+    detours: [12],
+    routes: [route],
+    soc: 80,
+    usableKwh: 75,
+    locations: chargers,
+    hours: [],
+    acKw: 11,
+    acKr: 2,
+    speedEff: defaultSpeedEff(250),
+    departHhmm: "",
+  });
+  const ferryLegs = legs.filter((l) => l.ferry);
+
+  it("plans the crossing as its own leg", () => {
+    assert.equal(ferryLegs.length, 1);
+    // The test road is not at the real ports, so the router's names and time are used.
+    assert.equal(ferryLegs[0].ferry?.known, false);
+    assert.equal(ferryLegs[0].ferry?.crossingMin, 45);
+    assert.equal(ferryLegs[0].from.name, "Rødby (DK)");
+    assert.equal(ferryLegs[0].to.name, "Puttgarden (D)");
+  });
+
+  it("uses no battery on the ferry", () => {
+    const f = ferryLegs[0];
+    assert.equal(f.kwh, 0);
+    assert.equal(f.arriveSoc, f.startSoc);
+  });
+
+  it("never charges on the ferry or at a charger in the water", () => {
+    assert.equal(ferryLegs[0].charge, null);
+    const used = legs.filter((l) => l.accepted && l.charge).map((l) => l.charge!.locationId);
+    assert.ok(!used.includes("in-the-sea"), `charged at ${used.join(", ")}`);
+  });
+
+  it("counts check-in and crossing time, and only the driven distance as energy", () => {
+    const f = ferryLegs[0];
+    assert.equal(f.waitMin, f.ferry!.checkInMin);
+    const minutes = (Date.parse(f.arriveAt) - Date.parse(f.departAt)) / 60_000;
+    assert.equal(minutes, f.ferry!.checkInMin + f.ferry!.crossingMin);
+    const drivenKm = legs.filter((l) => !l.ferry).reduce((n, l) => n + l.route.miles * 1.609, 0);
+    assert.ok(Math.abs(drivenKm - 600) < 1, `driven ${drivenKm.toFixed(1)} km`);
+  });
+
+  it("still arrives with charge to spare on both sides of the water", () => {
+    for (const leg of legs) assert.ok(leg.arriveSoc >= 8, `${leg.from.name}→${leg.to.name} arrives at ${leg.arriveSoc.toFixed(0)}%`);
+  });
+});
+
+describe("routeOutdated (#71)", () => {
+  const base = (source: RoutedLeg["source"]): RoutedLeg => ({
+    miles: 200,
+    seconds: 12_000,
+    source,
+    path: Array.from({ length: 60 }, (_, i) => [55 + i * 0.05, 10] as [number, number]),
+  });
+
+  it("refetches a Valhalla route stored before ferries were read", () => {
+    assert.equal(routeOutdated(base("valhalla")), true);
+  });
+
+  it("keeps Valhalla routes that carry their ferry list, even an empty one", () => {
+    assert.equal(routeOutdated({ ...base("valhalla"), ferries: [] }), false);
+  });
+
+  it("keeps OSRM routes (OSRM never takes ferries)", () => {
+    assert.equal(routeOutdated(base("osrm")), false);
   });
 });

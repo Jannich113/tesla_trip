@@ -28,3 +28,19 @@ test("Fastest ignores straight-line placeholders and broken routes", () => {
   const fastest = route(13_000);
   assert.equal(fastestOfModes(fastest, [route(9_000, "air"), route(8_000, "osrm", 2), { ...route(7_000), seconds: 0 }]), fastest);
 });
+
+test("Cheapest drives around instead of paying for a ferry when it can (#71)", async () => {
+  const { fastWithoutFerry, pickCheapAvoidRoute } = await import("./pick-route.ts");
+  const ferry = { ...route(15_800, "valhalla"), ferries: [{}] }; // Copenhagen–Hamburg via Rødby: 263 min
+  const around = { ...route(18_300), ferries: [] as unknown[] }; // via Jutland: 305 min
+  const ref = fastWithoutFerry(ferry, [around]);
+  assert.equal(ref, null);
+  assert.equal(pickCheapAvoidRoute(ref, [around], { tolls: true, roadFees: true }), around);
+});
+
+test("Cheapest keeps the ferry when every option takes one", async () => {
+  const { fastWithoutFerry } = await import("./pick-route.ts");
+  const ferry = { ...route(15_800, "valhalla"), ferries: [{}] };
+  assert.equal(fastWithoutFerry(ferry, [{ ...route(16_000), ferries: [{}] }]), ferry);
+  assert.equal(fastWithoutFerry(ferry, []), ferry);
+});

@@ -48,6 +48,7 @@ import {
   bridgeTargetSoc,
 } from "./insert";
 import { estimateTolls } from "./tolls";
+import { ferryInfo, ferryPortNames, splitAtFerry, type FerryCrossing, type FerryInfo } from "./ferries";
 import { withRetry, fetchWithTimeout } from "./retry";
 
 export { planTripMin } from "./modes";
@@ -136,6 +137,8 @@ export type RoutedLeg = {
   hasToll?: boolean;
   tollKr?: number;
   tollLabel?: string;
+  /** Ferry crossings on the route (Valhalla only), in travel order (#71). */
+  ferries?: FerryCrossing[];
 };
 
 export type PricedCharge = {
@@ -209,6 +212,8 @@ export type PricedLeg = {
   via: boolean;
   tollKr: number;
   tollLabel: string;
+  /** Set when this leg is a ferry crossing (#71). */
+  ferry?: FerryInfo;
 };
 
 export const DKK_PER_USD = 6.85;
@@ -271,11 +276,19 @@ export function routeTooCoarse(route: RoutedLeg): boolean {
   return (route.miles * 1.609) / (route.path.length - 1) > MAX_STORED_POINT_GAP_KM;
 }
 
+/**
+ * True for a stored route to fetch again: too coarse, or a Valhalla route stored before
+ * ferry crossings were read (#71), which would treat the crossing as driving.
+ */
+export function routeOutdated(route: RoutedLeg): boolean {
+  return routeTooCoarse(route) || (route.source === "valhalla" && !Array.isArray(route.ferries));
+}
+
 export function primeRouteCache(entries: Record<string, RoutedLeg>) {
   for (const [key, route] of Object.entries(entries)) {
     if (route?.source === "air") continue;
     if (!(route?.path?.length >= 2) || !Number.isFinite(route.miles)) continue;
-    if (routeTooCoarse(route)) continue;
+    if (routeOutdated(route)) continue;
     routeCache.set(key, route);
     const canon = canonRouteKey(key);
     if (canon !== key) routeCache.set(canon, route);
@@ -929,6 +942,8 @@ export function pricePlan(opts: {
     depth: number;
     /** Starts at a charger inserted because the car must charge there. */
     chargeAtFrom?: boolean;
+    /** This job is a ferry crossing (#71): no battery use, check-in + crossing time. */
+    ferry?: FerryInfo;
   };
   const jobs: Job[] = routes.map((route, i) => ({
     from: stops[i],
@@ -947,6 +962,65 @@ export function pricePlan(opts: {
     const job = jobs.shift()!;
     const { mode, route, userIndex, via } = job;
     const focus = job.focus;
+    // Ferry crossings (#71): drive to the port, cross without using the battery, drive on.
+    if (!job.ferry && route.ferries?.length) {
+      const crossing = route.ferries[0];
+      const parts = splitAtFerry(route, crossing);
+      if (parts) {
+        const [aName, bName] = ferryPortNames(crossing);
+        const key = `${crossing.from[0].toFixed(3)},${crossing.from[1].toFixed(3)}`;
+        const portA: PlanStop = { id: `ferry-${key}-a`, name: aName, lat: crossing.from[0], lng: crossing.from[1] };
+        const portB: PlanStop = { id: `ferry-${key}-b`, name: bName, lat: crossing.to[0], lng: crossing.to[1] };
+        const rest = route.ferries.slice(1);
+        const base = { mode, focus, detourKm: job.detourKm, userIndex, depth: job.depth };
+        const boardFrom = parts.before ? portA : job.from;
+        const landAt = parts.after ? portB : job.to;
+        if (parts.after) {
+          jobs.unshift({ ...base, from: portB, to: job.to, route: { ...parts.after, ...(rest.length ? { ferries: rest } : {}) }, via: job.via });
+        }
+        jobs.unshift({ ...base, from: boardFrom, to: landAt, route: parts.crossing, via: Boolean(parts.after) || job.via, ferry: ferryInfo(crossing) });
+        if (parts.before) {
+          jobs.unshift({ ...base, from: job.from, to: portA, route: parts.before, via: true, chargeAtFrom: job.chargeAtFrom });
+        }
+        continue;
+      }
+    }
+    if (job.ferry) {
+      const f = job.ferry;
+      const arriveAt = addMinutesDateTime(readyAt, f.checkInMin + f.crossingMin);
+      out.push({
+        from: job.from,
+        to: job.to,
+        mode,
+        detourKm: job.detourKm,
+        route: { ...route, seconds: f.crossingMin * 60 },
+        kwh: 0,
+        arriveSoc: soc,
+        needed: false,
+        suggested: false,
+        advice: null,
+        departAt: readyAt,
+        arriveAt,
+        chargeMin: 0,
+        waitMin: f.checkInMin,
+        startSoc: soc,
+        charge: null,
+        backup: null,
+        kr: 0,
+        accepted: false,
+        autoStartSoc: soc,
+        extraKr: 0,
+        chargeOptions: [],
+        userIndex,
+        via,
+        tollKr: 0,
+        tollLabel: "",
+        ferry: f,
+      });
+      readyAt = arriveAt;
+      plannedStart = arriveAt;
+      continue;
+    }
     const kwh = driveKwh(route.miles, route.seconds, speedEff);
     // At a stop where the car charges, judge the range after that charge; otherwise the
     // pre-charge SOC splits the leg again and the car drives past the charger. The charge

@@ -1,4 +1,5 @@
 import type { PricedCharge, PricedLeg } from "./engine.ts";
+import type { FerryInfo } from "./ferries.ts";
 
 /** Why a charge is in the plan. */
 export type ChargeStatus =
@@ -30,6 +31,8 @@ export type ChainEntry =
       lat: number | null;
       lng: number | null;
     }
+  /** A ferry crossing (#71): no driving, check-in plus crossing time. */
+  | { type: "ferry"; name: string; ferry: FerryInfo }
   /** The route goes through a charger without charging. Should not happen; shown so it is visible if it does. */
   | { type: "pass"; name: string };
 
@@ -52,9 +55,18 @@ function statusOf(leg: PricedLeg): ChargeStatus | null {
 export function chargeChain(legs: PricedLeg[], networkOf: (charge: PricedCharge) => string | null): ChainEntry[] {
   if (!legs.length) return [];
   const out: ChainEntry[] = [{ type: "stop", name: legs[0].from.name }];
-  for (const leg of legs) {
+  for (const [i, leg] of legs.entries()) {
+    if (leg.ferry) {
+      out.push({ type: "ferry", name: `${leg.from.name} – ${leg.to.name}`, ferry: leg.ferry });
+      out.push({ type: "stop", name: leg.to.name });
+      continue;
+    }
     const status = statusOf(leg);
-    if (status && leg.charge) {
+    // An offered charge at the very charger where the next leg charges anyway is noise.
+    const next = legs[i + 1];
+    const repeatsNext =
+      status === "optional" && next?.accepted && next.charge?.locationId === leg.charge?.locationId;
+    if (status && leg.charge && !repeatsNext) {
       const c = leg.charge;
       const atVia = isVia(leg.from.id);
       const entry: ChainEntry = {
