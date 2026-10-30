@@ -2161,6 +2161,10 @@ export function PlanScreen() {
               onToggleOptional={toggleOptionalCharge}
             />
             <PreferNetwork abo={networkAbo} preferred={preferredNetwork} onPick={setPreferredNetwork} />
+            <p className="mt-3 text-[10px] leading-relaxed text-subtle">
+              Chargers from Open Charge Map, OpenStreetMap and supercharge.info (community data, not
+              from Tesla or the operators).
+            </p>
           </>
         ) : null}
 

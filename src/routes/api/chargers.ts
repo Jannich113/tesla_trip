@@ -14,6 +14,12 @@ import {
   splitPathByKm,
 } from "@/planner/polyline";
 import { overpassCorridorQuery, sectionNeedsOsm } from "@/planner/osm-query";
+import {
+  inPathBox,
+  SUPERCHARGE_INFO_URL,
+  superchargerFromSite,
+  type SuperchargeInfoSite,
+} from "@/planner/supercharge-info";
 import { TtlCache } from "@/lib/ttl-cache";
 
 const DKK_PER_USD = 6.85;
@@ -88,7 +94,7 @@ const OVERPASS = [
 /** One Overpass mirror. null = no answer (try the next mirror), [] = no chargers there. */
 async function fetchOneOverpass(url: string, query: string): Promise<RouteCharger[] | null> {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 20_000);
+  const timer = setTimeout(() => ctrl.abort(), 12_000);
   try {
     const res = await fetch(url, {
       method: "POST",
@@ -114,6 +120,13 @@ async function fetchOneOverpass(url: string, query: string): Promise<RouteCharge
 /** OpenStreetMap answers per road section, 12 h (Overpass is shared and rate-limited too). */
 const osmCache = new TtlCache<RouteCharger[]>(12 * 60 * 60 * 1000, 400);
 
+/**
+ * After every mirror failed, OpenStreetMap is skipped for a while: the public servers can be
+ * down for hours, and waiting on them would slow every lookup in sparse countries.
+ */
+const OSM_BACKOFF_MS = 15 * 60 * 1000;
+let osmDownUntil = 0;
+
 /** OpenStreetMap chargers along one road section (#72), first mirror that answers. */
 async function fetchOsmSection(section: [number, number][], radiusM: number, stats: OcmStats): Promise<RouteCharger[]> {
   const query = overpassCorridorQuery(section, radiusM);
@@ -121,6 +134,10 @@ async function fetchOsmSection(section: [number, number][], radiusM: number, sta
   if (hit) {
     stats.osmCached++;
     return hit;
+  }
+  if (Date.now() < osmDownUntil) {
+    stats.osmSkipped++;
+    return [];
   }
   for (const url of OVERPASS) {
     stats.osmRequests++;
@@ -131,6 +148,7 @@ async function fetchOsmSection(section: [number, number][], radiusM: number, sta
     }
   }
   stats.osmFailed++;
+  osmDownUntil = Date.now() + OSM_BACKOFF_MS;
   return [];
 }
 
@@ -184,6 +202,7 @@ type OcmStats = {
   osmRequests: number;
   osmCached: number;
   osmFailed: number;
+  osmSkipped: number;
 };
 
 const newStats = (): OcmStats => ({
@@ -194,6 +213,7 @@ const newStats = (): OcmStats => ({
   osmRequests: 0,
   osmCached: 0,
   osmFailed: 0,
+  osmSkipped: 0,
 });
 
 /**
@@ -300,6 +320,42 @@ async function fetchSections(
   return { ocm: [...ocm.values()], osm: [...osm.values()] };
 }
 
+/** All open Tesla Superchargers from supercharge.info, refreshed once a day (#72). */
+const SC_TTL_MS = 24 * 60 * 60 * 1000;
+let scRows: RouteCharger[] = [];
+let scAt = 0;
+let scLoading: Promise<void> | null = null;
+
+async function superchargers(): Promise<RouteCharger[]> {
+  if (scRows.length && Date.now() - scAt < SC_TTL_MS) return scRows;
+  scLoading ??= (async () => {
+    try {
+      const res = await fetch(SUPERCHARGE_INFO_URL, {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!res.ok) return;
+      const sites = (await res.json()) as SuperchargeInfoSite[];
+      const rows: RouteCharger[] = [];
+      for (const site of Array.isArray(sites) ? sites : []) {
+        const row = superchargerFromSite(site);
+        if (row) rows.push(row);
+      }
+      // Keep the last good list if a refresh comes back empty or broken.
+      if (rows.length) {
+        scRows = rows;
+        scAt = Date.now();
+      }
+    } catch {
+      /* keep the last good list */
+    } finally {
+      scLoading = null;
+    }
+  })();
+  await scLoading;
+  return scRows;
+}
+
 function mergeChargers(seed: RouteCharger[], live: RouteCharger[]) {
   const out = new Map<string, RouteCharger>();
   for (const c of seed) out.set(c.id, c);
@@ -321,14 +377,17 @@ async function searchCorridor(path: [number, number][], asked: number, searched:
   );
   const radiusM = wideKm * 1000;
   const seed = seedsAlongPath(path, radiusM);
-  const { ocm, osm } = await fetchSections(path, wideKm, searched, stats);
+  const [{ ocm, osm }, allSc] = await Promise.all([fetchSections(path, wideKm, searched, stats), superchargers()]);
+  const sc = chargersOnPath(inPathBox(allSc, path, wideKm), path, wideKm);
   return {
-    chargers: mergeChargers(seed, [...ocm, ...osm]),
-    source: [ocm.length && "ocm", osm.length && "osm", seed.length && "seed"].filter(Boolean).join("+") || "none",
+    // Superchargers first: they win over an OCM entry for the same site (better names).
+    chargers: mergeChargers([...sc, ...seed], [...ocm, ...osm]),
+    source: [ocm.length && "ocm", osm.length && "osm", sc.length && "sci", seed.length && "seed"].filter(Boolean).join("+") || "none",
     seed: seed.length,
-    live: ocm.length + osm.length,
+    live: ocm.length + osm.length + sc.length,
     ocm: ocm.length,
     osm: osm.length,
+    superchargeInfo: sc.length,
     samples: 0,
     bufferKm: { tight: tightKm, wide: wideKm, pathKm: buf.pathKm },
   };
@@ -357,6 +416,7 @@ export const Route = createFileRoute("/api/chargers")({
           let chargers: RouteCharger[] = [];
           let seed = 0;
           let ocm = 0;
+          let superchargeInfo = 0;
           let live = 0;
           let samples = 0;
           let source = "none";
@@ -365,6 +425,7 @@ export const Route = createFileRoute("/api/chargers")({
             chargers = mergeChargers(chargers, chunk.chargers);
             seed += chunk.seed;
             ocm += chunk.ocm;
+            superchargeInfo += chunk.superchargeInfo;
             live += chunk.live;
             samples += chunk.samples;
             if (chunk.source !== "none") source = chunk.source;
@@ -378,10 +439,14 @@ export const Route = createFileRoute("/api/chargers")({
             samples,
             polyline: true,
             // Some sections got no answer (OCM throttled or failed): the list is incomplete.
-            partial: stats.failed > 0 || stats.osmFailed > 0,
+            // OpenChargeMap gaps only: OpenStreetMap is a best-effort extra, and retrying the
+            // whole lookup while its servers are down would only slow the app.
+            partial: stats.failed > 0,
+            osmSkipped: stats.osmSkipped,
             ocmRequests: stats.requests,
             ocmCached: stats.cached,
             ocmThrottled: stats.throttled,
+            superchargeInfo,
             osmRequests: stats.osmRequests,
             osmCached: stats.osmCached,
             corridors: rawPaths.length,
