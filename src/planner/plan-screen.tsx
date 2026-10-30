@@ -8,6 +8,8 @@ import { parseCoordinates, reverseAddress, searchAddress, suggestAddress, type A
 import { buildPlanLocations, collectSearchRoutes, locationsForRoutes } from "./plan-locations";
 import { chargeChain, type ChainEntry, type ChargeStatus } from "./charge-chain";
 import { fastestOfModes } from "./pick-route";
+import { drivingFactor, scaleSpeedEff, sessionDcKw, useCarSettings, variantFor } from "./car-settings";
+import { CarPanel } from "./car-panel";
 
 /**
  * Address suggestions under a stop field: the picked row is highlighted, and a spelling fix
@@ -118,7 +120,6 @@ import {
   dkNowDateTime,
   detourSavings,
   epaWhPerMi,
-  defaultSpeedEff,
   fetchRoute,
   corridorKey,
   lookupCachedRoute,
@@ -139,8 +140,6 @@ import {
   planTotals,
   pricePlan,
   remainingHours,
-  routeAb,
-  chargeKrOf,
   timePenalized,
   SPEED_KMH,
   splitDateTime,
@@ -149,9 +148,8 @@ import { applyDraftShell, paintDraftRoutes, usePlanStore, type OptionSnap } from
 import { withRetry } from "./retry";
 import { formatKrPerKwh, formatKrValue, type ElprisData } from "@/lib/elpris";
 import { applyTillægToHours, providerById } from "@/lib/el-providers";
-import { PLACES } from "@/lib/places";
 import { cn } from "@/lib/utils";
-import { formatDistance, formatEfficiency, formatNumber, type Units } from "@/lib/vehicle";
+import { formatDistance, formatNumber, type Units } from "@/lib/vehicle";
 import { HOME_USD_PER_KWH } from "@/lib/history";
 import { type ChargeLocation } from "@/lib/charge-locations";
 import { useChargeStore } from "@/store/charge-store";
@@ -169,7 +167,6 @@ import { cacheGet, cacheOpenDisk } from "./cache";
 import { useLiveElpris } from "./use-live-elpris";
 import { EU_BLOCS, EU_NETWORKS, EU_REGIONS, type EuRegion, networkIdFor, networkLabel, regionalExtra, regionalOwn, regionalRoam, roamExtra, roamRate } from "./networks";
 import { useVehicleProfile } from "@/hooks/use-vehicle-profile";
-import { TESLA_MODELS, type TeslaModelId } from "@/lib/tesla-models";
 import { useVehicleStore } from "@/store/vehicle-store";
 
 function offsetPath(path: [number, number][], meters: number): [number, number][] {
@@ -629,10 +626,12 @@ export function PlanScreen() {
   const units = useVehicleStore((s) => s.units);
   const setUnits = useVehicleStore((s) => s.setUnits);
   const setModelId = useVehicleStore((s) => s.setModelId);
-  const vehicleSoc = useVehicleStore((s) => Math.round(s.soc));
-  const [socOverride, setSocOverride] = useState<number | null>(null);
-  const soc = socOverride ?? vehicleSoc;
   const { profile } = useVehicleProfile();
+  const car = useCarSettings();
+  const soc = car.startSoc;
+  const variant = variantFor(profile.id, car.variantId);
+  const carAcKw = car.acKw ?? variant.acKw;
+  const carPeakDcKw = car.peakDcKw ?? variant.peakDcKw;
   const locationsStored = useChargeStore((s) => s.locations);
   const area = useElprisStore((s) => s.area);
   const providerId = useElprisStore((s) => s.providerId);
@@ -718,8 +717,6 @@ export function PlanScreen() {
   const [openStops, setOpenStops] = useState<Record<string, boolean>>({});
   const [showAllRoutes, setShowAllRoutes] = useState(false);
   const [picking, setPicking] = useState(false);
-  const [abA, setAbA] = useState<LegMode>("fastest");
-  const [abB, setAbB] = useState<LegMode>("cheapest");
   const [naming, setNaming] = useState(false);
   const [clearConfirm, setClearConfirm] = useState(false);
   const [saveLabel, setSaveLabel] = useState("");
@@ -902,13 +899,23 @@ export function PlanScreen() {
     setBackupLoc({});
   }, [stops, detours]);
 
-  const carWhPerMi = epaWhPerMi(profile.usableKwh, profile.epaRangeMi);
-  const packKwh = usableKwhOverride && usableKwhOverride > 0 ? usableKwhOverride : profile.usableKwh;
-  const generalWh = whPerMiOverride && whPerMiOverride > 0 ? whPerMiOverride : carWhPerMi;
-  const speedEff = normalizeSpeedEff(
+  const packKwh = usableKwhOverride && usableKwhOverride > 0 ? usableKwhOverride : variant.usableKwh;
+  /** The car's own kWh/100 km per speed (EPA-based or the user's table). */
+  const baseSpeedEff = normalizeSpeedEff(
     speedEffOverride,
-    whPerMiOverride && whPerMiOverride > 0 ? whPerMiOverride : epaWhPerMi(packKwh, profile.epaRangeMi),
+    whPerMiOverride && whPerMiOverride > 0 ? whPerMiOverride : epaWhPerMi(packKwh, variant.epaRangeMi),
   );
+  const driveFactor = drivingFactor(car.style, car.conditions);
+  const baseEffKey = SPEED_KMH.map((k) => baseSpeedEff[k]).join(",");
+  /** What the planner uses: the car's figures under this trip's driving style and conditions. */
+  const speedEff = useMemo(
+    () => scaleSpeedEff(baseSpeedEff, driveFactor),
+    // baseSpeedEff is rebuilt every render; its values are in baseEffKey.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [baseEffKey, driveFactor],
+  );
+  const dcKw = sessionDcKw(carPeakDcKw);
+  const limits = car.limits;
   useEffect(() => {
     if (preferredNetwork && !networkAbo[preferredNetwork]) setPreferredNetwork(null);
   }, [preferredNetwork, networkAbo, setPreferredNetwork]);
@@ -1050,7 +1057,9 @@ export function PlanScreen() {
     usableKwh: packKwh,
     locations,
     hours,
-    acKw: profile.acKw,
+    acKw: carAcKw,
+    limits,
+    dcKw,
     acKr,
     speedEff,
     departHhmm,
@@ -1099,7 +1108,7 @@ export function PlanScreen() {
       }
       // Eco/Fastest price from stable corridors only — Cheapest avoid must not change their stall pool.
       const locPool = mode === "cheapest" ? locations : stableLocations;
-      const cacheKey = `${mode}|${corridorStamp}|${soc}|${locPool.length}|${hours.length}|${avoid.motorways}|${avoid.tolls}|${avoid.roadFees}|${planArgs.detours.join(",")}|${planArgs.preferredNetwork ?? ""}|stalls3`;
+      const cacheKey = `${mode}|${corridorStamp}|${soc}|${locPool.length}|${hours.length}|${avoid.motorways}|${avoid.tolls}|${avoid.roadFees}|${planArgs.detours.join(",")}|${planArgs.preferredNetwork ?? ""}|${packKwh}|${dcKw}|${carAcKw}|${limits.floorSoc},${limits.targetSoc},${limits.destSoc}|${SPEED_KMH.map((k) => speedEff[k]).join(",")}|stalls3`;
       const cached = pricedMemo.current.get(cacheKey);
       if (cached) return { mode, avoid, priced: cached };
       const priced = pricePlan({
@@ -1125,7 +1134,7 @@ export function PlanScreen() {
     });
     // planArgs and routesFor are new every render; their inputs are already listed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [live, corridorStamp, stops, detours, waits, soc, packKwh, profile.acKw, locations, stableLocations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc, prefer, networkAbo, preferredNetwork, cheapAvoid]);
+  }, [live, corridorStamp, stops, detours, waits, soc, packKwh, carAcKw, dcKw, limits, locations, stableLocations, hours, acKr, speedEff, departHhmm, legWhen, acceptCharge, chargeToSoc, backupLoc, prefer, networkAbo, preferredNetwork, cheapAvoid]);
 
   const optionRows = useMemo(() => {
     const rows = pricedRows.map(({ mode, priced, avoid }) => {
@@ -1203,7 +1212,7 @@ export function PlanScreen() {
     });
     // planArgs is a fresh object every render; adding it would reprice mixed legs every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [live, mixed, optionRows, activeModes, stops, selectedRoutes]);
+  }, [live, mixed, optionRows, activeModes, stops, selectedRoutes, packKwh, dcKw, limits, speedEff]);
 
   const viewLegs = useMemo(() => {
     return legs.map((leg, i) => {
@@ -2145,7 +2154,7 @@ export function PlanScreen() {
                           radiusLabel={modeLabel(pickMode)}
                           locations={chargerPool}
                           memberships={networkAbo}
-                          acKw={profile.acKw}
+                          acKw={carAcKw}
                           activeId={
                             chargedLeg?.charge?.locationId ??
                             (stop.id.startsWith("via-") ? stop.id.slice("via-".length) : undefined)
@@ -2193,60 +2202,6 @@ export function PlanScreen() {
         })}
       </ol>
 
-      <div className="mt-3">
-        <label className="text-xs text-muted">
-          Add stop
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Address or place"
-            className="mt-1 h-11 w-full rounded-md bg-surface-2 px-3 text-sm outline-none"
-          />
-        </label>
-        {hits.length ? (
-          <ul className="mt-2 divide-y divide-border rounded-xl bg-surface-2">
-            {hits.map((hit) => (
-              <li key={`${hit.lat},${hit.lng}`}>
-                <button
-                  type="button"
-                  onClick={() => addStop(hit)}
-                  className="flex w-full items-center gap-3 px-3 py-3 text-left"
-                >
-                  <Plus className="size-4 shrink-0 text-muted" />
-                  <span className="truncate text-sm">{hit.label}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <ul className="mt-2 flex flex-wrap gap-2">
-            {Object.entries(PLACES)
-              .filter(([name]) => {
-                if (name.includes("Supercharger") || name.includes("Wall")) return false;
-                if (name === "Home" && stops.some((s) => s.id === "home" || s.name === "Home")) return false;
-                return true;
-              })
-              .slice(0, 8)
-              .map(([name, g]) => (
-                <li key={name}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (name === "Home") {
-                        addStopToStore({ id: "home", name: "Home", lat: g.lat, lng: g.lng });
-                        return;
-                      }
-                      addStop({ label: name, lat: g.lat, lng: g.lng });
-                    }}
-                    className="h-9 rounded-full bg-surface-2 px-3 text-xs font-medium text-muted"
-                  >
-                    {g.short}
-                  </button>
-                </li>
-              ))}
-          </ul>
-        )}
-      </div>
     </section>
   );
 
@@ -2384,198 +2339,26 @@ export function PlanScreen() {
       ) : (
       <>
       {pane === "advanced" ? (
-        <div className="space-y-4">
-          <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Car</p>
-            <label className="relative mt-3 block">
-              <span className="sr-only">Tesla model</span>
-              <select
-                value={profile.id}
-                onChange={(e) => setModelId(e.target.value as TeslaModelId)}
-                className="h-11 w-full appearance-none rounded-xl bg-surface-2 py-2 pl-3 pr-9 text-sm font-medium text-foreground outline-none"
-              >
-                {TESLA_MODELS.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown
-                className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted"
-                aria-hidden
-              />
-            </label>
-            <div className="mt-2 flex items-center justify-between gap-3 rounded-xl bg-surface-2 px-3 py-2">
-              <span className="text-xs text-muted">Units</span>
-              <div className="flex rounded-full bg-background p-1">
-                {(["km", "mi"] as const).map((u) => (
-                  <button
-                    key={u}
-                    type="button"
-                    onClick={() => setUnits(u)}
-                    aria-pressed={units === u}
-                    className={cn(
-                      "h-9 min-w-12 rounded-full px-3 text-sm font-medium",
-                      "transition-[background-color,color,scale] duration-150 ease-[var(--ease-out)] active:scale-[0.96]",
-                      units === u ? "bg-foreground text-background" : "text-muted",
-                    )}
-                  >
-                    {u}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </section>
-          <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Start battery</p>
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <label className="text-[11px] text-muted">
-                Battery
-                <span className="mt-1 flex h-11 items-center gap-1 rounded-xl bg-surface-2 px-3">
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    min={20}
-                    max={200}
-                    step={0.5}
-                    value={packKwh}
-                    onChange={(e) => {
-                      const n = Number(e.target.value);
-                      if (!Number.isFinite(n)) return;
-                      setUsableKwh(Math.max(20, Math.min(200, Math.round(n * 10) / 10)));
-                    }}
-                    className="h-full w-full bg-transparent text-sm tabular-nums text-foreground outline-none"
-                  />
-                  <span className="shrink-0 text-xs text-subtle">kWh</span>
-                </span>
-              </label>
-              <label className="text-[11px] text-muted">
-                Efficiency
-                <span className="mt-1 flex h-11 items-center gap-1 rounded-xl bg-surface-2 px-3">
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    min={0.1}
-                    max={1.2}
-                    step={0.01}
-                    value={Number((generalWh / 1000).toFixed(3))}
-                    onChange={(e) => {
-                      const n = Number(e.target.value);
-                      if (!Number.isFinite(n) || n <= 0) return;
-                      setSpeedEff(defaultSpeedEff(Math.min(1.2, n) * 1000));
-                    }}
-                    className="h-full w-full bg-transparent text-sm tabular-nums text-foreground outline-none"
-                  />
-                  <span className="shrink-0 text-xs text-subtle">kWh/mi</span>
-                </span>
-              </label>
-            </div>
-            {(usableKwhOverride != null || speedEffOverride) ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setUsableKwh(null);
-                  setSpeedEff(null);
-                }}
-                className="mt-2 text-[11px] text-muted underline"
-              >
-                Reset pack and efficiency
-              </button>
-            ) : null}
-            <label className="mt-2 flex items-center justify-between gap-3 rounded-xl bg-surface-2 px-3 py-2">
-              <span className="text-xs text-muted">State of charge</span>
-              <span className="flex items-center gap-1 text-sm">
-                <input
-                  type="number"
-                  min={5}
-                  max={100}
-                  value={soc}
-                  onChange={(e) => {
-                    const n = Number(e.target.value);
-                    if (!Number.isFinite(n)) return;
-                    setSocOverride(Math.max(5, Math.min(100, Math.round(n))));
-                  }}
-                  className="h-10 w-14 rounded-md bg-background text-center text-sm tabular-nums outline-none"
-                />
-                %
-              </span>
-            </label>
-            {socOverride != null ? (
-              <button
-                type="button"
-                onClick={() => setSocOverride(null)}
-                className="mt-2 text-[11px] text-muted underline"
-              >
-                Use vehicle {vehicleSoc}%
-              </button>
-            ) : (
-              <p className="mt-2 text-[11px] text-subtle">From the car. Override only for this plan.</p>
-            )}
-            <p className="mt-4 text-[11px] font-medium uppercase tracking-wide text-muted">Charge search</p>
-            <div className="mt-1 flex gap-1">
-              {DETOUR_KM.map((km) => {
-                const chosen = detours.length ? detours[0] : DEFAULT_DETOUR_KM;
-                const on = chosen === km && (detours.length === 0 || detours.every((d) => d === km));
-                return (
-                  <button
-                    key={km}
-                    type="button"
-                    onPointerDown={(e) => {
-                      if (e.button !== 0) return;
-                      setAllDetours(km);
-                    }}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      setAllDetours(km);
-                    }}
-                    className={cn(
-                      "h-11 flex-1 rounded-full text-[11px] font-medium",
-                      on ? "bg-foreground text-background" : "bg-surface-2 text-muted",
-                    )}
-                  >
-                    {formatDetour(km, units)}
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-          <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-muted">kWh / 100 km at speed</p>
-            <div className="mt-3 grid grid-cols-4 gap-2">
-              {SPEED_KMH.map((kmh) => (
-                <label key={kmh} className="text-center text-[11px] text-muted">
-                  {kmh}
-                  <span className="text-subtle"> km/t</span>
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    min={8}
-                    max={30}
-                    step={0.1}
-                    value={speedEff[kmh].toFixed(1)}
-                    onChange={(e) => {
-                      const n = Number(e.target.value);
-                      if (!Number.isFinite(n) || n <= 0) return;
-                      setSpeedEff({ ...speedEff, [kmh]: n });
-                    }}
-                    className="mt-1 h-11 w-full rounded-xl bg-surface-2 px-2 text-center text-sm tabular-nums text-foreground outline-none"
-                  />
-                </label>
-              ))}
-            </div>
-            <p className="mt-2 text-[11px] text-subtle">
-              kWh/mi = (kWh/100 km) × 0.0161 · EPA {formatEfficiency(carWhPerMi, units)}
-              {speedEffOverride ? (
-                <>
-                  {" · "}
-                  <button type="button" className="text-muted underline" onClick={() => setSpeedEff(null)}>
-                    Reset
-                  </button>
-                </>
-              ) : null}
-            </p>
-          </section>
-        </div>
+        <CarPanel
+          modelId={profile.id}
+          modelName={profile.model}
+          modelYear={profile.year}
+          onModel={setModelId}
+          variant={variant}
+          packKwh={packKwh}
+          packOverridden={usableKwhOverride != null}
+          onPackKwh={setUsableKwh}
+          peakDcKw={carPeakDcKw}
+          acKw={carAcKw}
+          baseSpeedEff={baseSpeedEff}
+          speedEff={speedEff}
+          effOverridden={Boolean(speedEffOverride)}
+          onSpeedEff={setSpeedEff}
+          detours={detours}
+          onDetour={setAllDetours}
+          units={units}
+          onUnits={setUnits}
+        />
       ) : null}
 
       {pane === "plan" ? (
@@ -2589,7 +2372,7 @@ export function PlanScreen() {
           className="w-full bg-transparent text-sm font-medium text-foreground outline-none placeholder:text-subtle"
         />
         <p className="mt-2 text-xs text-muted">
-          {profile.usableKwh} kWh usable · {formatNumber(soc, 0)}% now
+          {formatNumber(packKwh, 0)} kWh usable · {formatNumber(soc, 0)}% at start
         </p>
 
         <ol className="relative mt-4">
@@ -3057,115 +2840,6 @@ export function PlanScreen() {
           </ul>
         </section>
       ) : null}
-      </div>
-      ) : pane === "advanced" ? (
-      <div className="space-y-5">
-      <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
-        <p className="text-sm font-medium">Compare modes</p>
-        {(() => {
-          const rowA = optionRows.find((r) => r.mode === abA);
-          const rowB = optionRows.find((r) => r.mode === abB);
-          const ta = rowA?.totals;
-          const tb = rowB?.totals;
-          const ab = ta && tb && abA !== abB ? routeAb(ta, tb) : null;
-          const cell = (side: "a" | "b", win: "a" | "b" | "tie", text: string) => (
-            <span className={cn("tabular-nums", win === side && "font-medium text-foreground")}>{text}</span>
-          );
-          return (
-            <div className="mt-3 rounded-xl bg-surface-2 px-3 py-3">
-              <p className="text-[11px] font-medium uppercase tracking-wide text-muted">A/B</p>
-              <div className="mt-2 flex items-center gap-2">
-                <select
-                  value={abA}
-                  onChange={(e) => setAbA(e.target.value as LegMode)}
-                  className="h-9 flex-1 rounded-xl bg-background px-2 text-sm text-foreground outline-none"
-                >
-                  {LEG_MODES.map((m) => (
-                    <option key={`a-${m}`} value={m}>
-                      A · {modeLabel(m)}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  value={abB}
-                  onChange={(e) => setAbB(e.target.value as LegMode)}
-                  className="h-9 flex-1 rounded-xl bg-background px-2 text-sm text-foreground outline-none"
-                >
-                  {LEG_MODES.map((m) => (
-                    <option key={`b-${m}`} value={m}>
-                      B · {modeLabel(m)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              {ab && ta && tb ? (
-                <>
-                  <div className="mt-3 grid grid-cols-[4.5rem_1fr_1fr] gap-y-1 text-xs text-muted">
-                    <span />
-                    <span className="text-foreground">{modeLabel(abA)}</span>
-                    <span className="text-foreground">{modeLabel(abB)}</span>
-                    <span>Drive</span>
-                    {cell("a", ab.time, minutesToHm(ta.driveMin))}
-                    {cell("b", ab.time, minutesToHm(tb.driveMin))}
-                    <span>Charge</span>
-                    {cell("a", ab.cost, `${formatKrValue(chargeKrOf(ta), 0)} kr`)}
-                    {cell("b", ab.cost, `${formatKrValue(chargeKrOf(tb), 0)} kr`)}
-                    <span>Toll</span>
-                    <span className="tabular-nums">{formatKrValue(ta.tollKr, 0)} kr</span>
-                    <span className="tabular-nums">{formatKrValue(tb.tollKr, 0)} kr</span>
-                    {ta.ferryKr >= 1 || tb.ferryKr >= 1 ? (
-                      <>
-                        <span>Ferry</span>
-                        <span className="tabular-nums">{formatKrValue(ta.ferryKr, 0)} kr</span>
-                        <span className="tabular-nums">{formatKrValue(tb.ferryKr, 0)} kr</span>
-                      </>
-                    ) : null}
-                    <span>Total</span>
-                    {cell("a", ab.cost, `${formatKrValue(ta.kr, 0)} kr`)}
-                    {cell("b", ab.cost, `${formatKrValue(tb.kr, 0)} kr`)}
-                  </div>
-                  <p className="mt-2 text-xs text-muted">
-                    {ab.overall === "tie"
-                      ? "Tie — pick either."
-                      : `${ab.overall === "a" ? modeLabel(abA) : modeLabel(abB)} wins${
-                          ab.bSlow
-                            ? " · B is 2× slower"
-                            : ab.aSlow
-                              ? " · A is 2× slower"
-                              : ab.save.significant && ab.overall === "b"
-                                ? ` · saves ${formatKrValue(ab.save.net, 0)} kr`
-                                : ab.overall === "a"
-                                  ? " · faster"
-                                  : ""
-                        }.`}
-                  </p>
-                  <div className="mt-2 flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setAllModes(abA)}
-                      className="h-9 flex-1 rounded-xl bg-background text-xs font-medium text-foreground"
-                    >
-                      Use A
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setAllModes(abB)}
-                      className="h-9 flex-1 rounded-xl bg-background text-xs font-medium text-foreground"
-                    >
-                      Use B
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <p className="mt-2 text-xs text-subtle">Pick two different modes after routing.</p>
-              )}
-            </div>
-          );
-        })()}
-
-      </section>
-
-      {stopsPlanner}
       </div>
       ) : null}
       </>

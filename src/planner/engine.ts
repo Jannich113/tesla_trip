@@ -933,9 +933,23 @@ export function pricePlan(opts: {
   preferIds?: Array<string | null | undefined>;
   avoid?: CheapAvoid;
   variable?: VariableFeed | null;
+  /** Battery limits from the Car tab; the defaults are the planner's built-in ones. */
+  limits?: { floorSoc?: number; targetSoc?: number; destSoc?: number };
+  /** Average DC power the car takes over a session (caps the stall's power). */
+  dcKw?: number;
 }): PricedLeg[] {
   const { stops, modes, detours, routes, usableKwh, locations, hours, acKw, acKr, speedEff } = opts;
   const live = hours[0]?.krPerKwh ?? acKr;
+  const floorSoc = opts.limits?.floorSoc ?? FLOOR_SOC;
+  const targetSoc = opts.limits?.targetSoc ?? TARGET_SOC;
+  const destSoc = Math.max(floorSoc, opts.limits?.destSoc ?? floorSoc);
+  // A higher floor needs the "charge now" line above it too.
+  const requireSoc = Math.max(REQUIRE_SOC, floorSoc + 10);
+  const lastStopId = stops[stops.length - 1]?.id;
+  const sessionKw = (kind: PricedCharge["kind"]) => {
+    const kw = stallKw(kind, acKw);
+    return kind !== "home" && opts.dcKw ? Math.min(kw, opts.dcKw) : kw;
+  };
   const now = dkNowDateTime();
   let soc = opts.soc;
   let plannedStart = asDateTime(opts.departHhmm || now);
@@ -1037,7 +1051,9 @@ export function pricePlan(opts: {
     // At a stop where the car charges, judge the range after that charge; otherwise the
     // pre-charge SOC splits the leg again and the car drives past the charger. The charge
     // goes above 80% only when the next known charger needs it (#69).
-    const charging = soc < REQUIRE_SOC || Boolean(job.chargeAtFrom);
+    // The last stop is where the destination limit applies.
+    const legFloor = job.to.id === lastStopId ? destSoc : floorSoc;
+    const charging = soc < requireSoc || Boolean(job.chargeAtFrom);
     const chargeTo = charging
       ? bridgeTargetSoc({
           path: route.path,
@@ -1046,13 +1062,13 @@ export function pricePlan(opts: {
           locations,
           bandM: Math.max(chargeSearchKm(mode, job.detourKm, focus) * 1000, 28_000),
           excludeIds: usedVias,
-          normalSoc: TARGET_SOC,
-          floorSoc: FLOOR_SOC,
+          normalSoc: targetSoc,
+          floorSoc,
         })
-      : TARGET_SOC;
+      : targetSoc;
     const packSoc = charging ? Math.max(soc, chargeTo) : soc;
-    const floorKwh = Math.max(4, ((packSoc - FLOOR_SOC) / 100) * usableKwh);
-    const bandKwh = Math.max(0, ((packSoc - REQUIRE_SOC) / 100) * usableKwh);
+    const floorKwh = Math.max(4, ((packSoc - legFloor) / 100) * usableKwh);
+    const bandKwh = Math.max(0, ((packSoc - requireSoc) / 100) * usableKwh);
     if (kwh > floorKwh * 0.98 && job.depth < MAX_SPLIT_DEPTH) {
       const viaOpts = {
         path: route.path,
@@ -1118,11 +1134,11 @@ export function pricePlan(opts: {
       plannedStart = addMinutesDateTime(whenAt, -route.seconds / 60);
     }
     const socAfter = soc - (kwh / usableKwh) * 100;
-    const minArrive = FLOOR_SOC;
+    const minArrive = legFloor;
     const required =
       Boolean(job.chargeAtFrom) ||
-      socAfter < FLOOR_SOC ||
-      (soc < REQUIRE_SOC && (jobs.length > 0 || kwh > floorKwh * 0.5));
+      socAfter < legFloor ||
+      (soc < requireSoc && (jobs.length > 0 || kwh > floorKwh * 0.5));
     const searchHours = hoursFrom(hours, readyAt);
     const cheap = cheapestHour(searchHours);
     const goodPrice = Boolean(cheap && cheap.krPerKwh <= live * CHEAP_VS_LIVE);
@@ -1130,25 +1146,25 @@ export function pricePlan(opts: {
     const suggested = !required && goodPrice && inSuggestBand;
     const needForHop = minArrive + (kwh / usableKwh) * 100;
     // Normally 80%; a required charge before a long gap goes as high as the gap needs.
-    const chargeCap = required ? Math.max(TARGET_SOC, chargeTo) : TARGET_SOC;
+    const chargeCap = required ? Math.max(targetSoc, chargeTo) : targetSoc;
     const autoTarget = Math.min(
       chargeCap,
       Math.max(
-        Math.min(TARGET_SOC, soc + MIN_ADD_SOC),
+        Math.min(targetSoc, soc + MIN_ADD_SOC),
         required ? Math.max(chargeCap, Math.min(chargeCap, needForHop)) : 0,
       ),
     );
-    const minTarget = Math.min(TARGET_SOC, soc + MIN_ADD_SOC);
+    const minTarget = Math.min(targetSoc, soc + MIN_ADD_SOC);
     const atViaFrom = job.from.id.startsWith("via-");
     const rawTarget = atViaFrom || !via ? opts.chargeToSoc?.[userIndex] : null;
     const userTarget =
       rawTarget != null && Number.isFinite(rawTarget)
-        ? Math.min(TARGET_SOC, Math.max(minTarget, rawTarget))
+        ? Math.min(Math.max(targetSoc, 80), Math.max(minTarget, rawTarget))
         : null;
     const target = userTarget ?? autoTarget;
     const wantCharge = required || suggested || userTarget != null;
     const kwhNeed = Math.max((target - soc) / 100, 0) * usableKwh;
-    const chargeMinEst = (Math.max(kwhNeed, 5) / 150) * 60;
+    const chargeMinEst = (Math.max(kwhNeed, 5) / sessionKw("supercharger")) * 60;
     const restDriveMin = route.seconds / 60 + jobs.reduce((n, j) => n + j.route.seconds / 60, 0);
     const slack = minutesBetweenDateTime(readyAt, plannedStart);
     const maxNoDelay = Math.max(0, slack - chargeMinEst);
@@ -1287,7 +1303,7 @@ export function pricePlan(opts: {
       }
     }
     const chargeMin =
-      billed && charge ? chargeMinutes(charge.kwh, soc, usableKwh, stallKw(charge.kind, acKw)) : 0;
+      billed && charge ? chargeMinutes(charge.kwh, soc, usableKwh, sessionKw(charge.kind)) : 0;
     const rawWait = billed && charge && charge.cheapWindow ? charge.waitMin : 0;
     const windowStart = addMinutesDateTime(readyAt, rawWait);
     const waitMin =
@@ -1299,7 +1315,7 @@ export function pricePlan(opts: {
     const arriveAt = addMinutesDateTime(departAt, route.seconds / 60);
     const packKwh = billed ? kwhNeed : 0;
     const startSoc =
-      billed && charge ? Math.min(Math.max(TARGET_SOC, autoTarget), soc + (packKwh / usableKwh) * 100) : soc;
+      billed && charge ? Math.min(Math.max(targetSoc, autoTarget), soc + (packKwh / usableKwh) * 100) : soc;
     const arriveSoc = Math.max(minArrive, startSoc - (kwh / usableKwh) * 100);
     const extraKr =
       billed && charge && userTarget != null

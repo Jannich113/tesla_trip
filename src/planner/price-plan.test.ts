@@ -396,3 +396,54 @@ describe("routeOutdated (#71)", () => {
     assert.equal(routeOutdated(base("osrm")), false);
   });
 });
+
+describe("battery limits and charging speed from the Car tab", () => {
+  const base = {
+    stops: [START, endOf(600)],
+    modes: ["fastest" as const],
+    detours: [12],
+    routes: [road(600)],
+    soc: 80,
+    usableKwh: 75,
+    locations: chargersEvery(40, 600),
+    hours: [],
+    acKw: 11,
+    acKr: 2,
+    speedEff: defaultSpeedEff(250),
+    departHhmm: "",
+  };
+  const last = (legs: PricedLeg[]) => legs[legs.length - 1];
+
+  it("arrives at the last stop with at least the destination limit", () => {
+    const short = { ...base, stops: [START, endOf(300)], routes: [road(300)], locations: chargersEvery(40, 300) };
+    const loose = pricePlan({ ...short, limits: { floorSoc: 8, destSoc: 8 } });
+    const strict = pricePlan({ ...short, limits: { floorSoc: 8, destSoc: 40 } });
+    assert.ok(last(loose).arriveSoc < 40, `loose arrives at ${last(loose).arriveSoc.toFixed(1)}%`);
+    assert.ok(last(strict).arriveSoc >= 40 - 0.5, `strict arrives at ${last(strict).arriveSoc.toFixed(1)}%`);
+  });
+
+  it("never arrives at a charger below a higher floor", () => {
+    const legs = pricePlan({ ...base, limits: { floorSoc: 20, destSoc: 20 } });
+    for (const leg of legs) assert.ok(leg.arriveSoc >= 20 - 0.5, `${leg.to.name} at ${leg.arriveSoc.toFixed(1)}%`);
+  });
+
+  it("charges to the target the user set", () => {
+    const legs = pricePlan({ ...base, soc: 60, routes: [road(900)], stops: [START, endOf(900)], locations: chargersEvery(40, 900), limits: { targetSoc: 90 } });
+    const charged = legs.filter((l) => l.accepted && l.charge);
+    assert.ok(charged.length > 0);
+    assert.ok(charged.some((l) => l.startSoc > 81), `charged to ${charged.map((l) => l.startSoc.toFixed(0)).join(", ")}%`);
+  });
+
+  it("a slower-charging car spends longer at the same chargers", () => {
+    const fast = pricePlan({ ...base, dcKw: 150 });
+    const slow = pricePlan({ ...base, dcKw: 60 });
+    const minutes = (legs: PricedLeg[]) => legs.reduce((n, l) => n + l.chargeMin, 0);
+    assert.ok(minutes(fast) > 0);
+    assert.ok(minutes(slow) > minutes(fast) * 2, `${minutes(slow).toFixed(0)} vs ${minutes(fast).toFixed(0)} min`);
+  });
+
+  it("without settings the planner keeps its built-in limits", () => {
+    const legs = pricePlan(base);
+    assert.deepEqual(legs.map((l) => l.to.id), pricePlan({ ...base, limits: {} }).map((l) => l.to.id));
+  });
+});
