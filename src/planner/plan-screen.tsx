@@ -11,6 +11,7 @@ import { fastestOfModes } from "./pick-route";
 import { drivingFactor, scaleSpeedEff, sessionDcKw, useCarSettings, variantFor } from "./car-settings";
 import { CarPanel } from "./car-panel";
 import { Sheet } from "./sheet";
+import { forGoogle, GOOGLE_MAX_WAYPOINTS, shareStops } from "./share-stops";
 import { NetworksPanel } from "./networks-panel";
 
 /**
@@ -1509,7 +1510,34 @@ export function PlanScreen() {
     if (title) setName(title);
     setImportUrl("");
     toast(`Imported ${trip.stops.length} stops`);
+    void nameImportedStops(title);
     return true;
+  }
+
+  /**
+   * Links often carry only coordinates. Look each one up (one at a time: the address service
+   * allows one request a second) and name the stop after the place; the plan name follows
+   * unless the user has changed it meanwhile.
+   */
+  async function nameImportedStops(importedTitle: string) {
+    const bare = usePlanStore.getState().stops.filter((st) => parseCoordinates(st.name));
+    if (!bare.length) return;
+    const pending = toast.loading(`Finding place names for ${bare.length} ${bare.length === 1 ? "stop" : "stops"}…`);
+    try {
+      for (const [i, st] of bare.entries()) {
+        if (i > 0) await new Promise((r) => window.setTimeout(r, 1100));
+        const hit = await reverseAddress(st.lat, st.lng);
+        if (parseCoordinates(hit.label)) continue;
+        // The stop may have been removed or moved while we waited.
+        const now = usePlanStore.getState().stops.find((x) => x.id === st.id);
+        if (!now || now.lat !== st.lat || now.lng !== st.lng) continue;
+        replaceStop(st.id, { name: stopName(hit), lat: st.lat, lng: st.lng });
+      }
+      const state = usePlanStore.getState();
+      if (!state.name || state.name === importedTitle) setName(tripTitle(state.stops));
+    } finally {
+      toast.dismiss(pending);
+    }
   }
 
   async function exportToTesla(planStops: { name: string; lat: number; lng: number }[], title: string) {
@@ -1709,12 +1737,17 @@ export function PlanScreen() {
     return () => window.clearTimeout(t);
   }, [routing, mapRoutes, mapMarkers]);
 
-  const sharePts = routePoints();
+  // Google and Apple Maps get the plan's stops plus its charging stops, in driving order.
+  const sharePts = viewLegs.length
+    ? shareStops(viewLegs, (id) => locations.find((l) => l.id === id))
+    : stops.map((st) => ({ name: st.name, lat: st.lat, lng: st.lng, charge: false }));
+  const shareCharges = sharePts.filter((p) => p.charge).length;
+  const googleShare = forGoogle(sharePts);
   let googleHref = "";
   let appleHref = "";
   if (sharePts.length >= 2) {
     try {
-      googleHref = googleDirectionsUrl(sharePts);
+      googleHref = googleDirectionsUrl(googleShare.stops);
       appleHref = appleDirectionsUrl(sharePts);
     } catch {
       googleHref = "";
@@ -2392,12 +2425,22 @@ export function PlanScreen() {
                 {importError}
               </p>
             ) : (
-              <p className="mt-2 text-[11px] text-subtle">Stops only. Eco, Fastest, and Cheapest still run here.</p>
+              <p className="mt-2 text-[11px] text-subtle">The planner names the places and adds the charging stops.</p>
             )}
           </div>
         </section>
         <section className="mt-3 rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
           <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Open this trip in</p>
+          <p className="mt-1 text-xs text-muted">
+            {sharePts.length < 2
+              ? "Add a destination first."
+              : shareCharges
+                ? `Your stops plus ${shareCharges} charging ${shareCharges === 1 ? "stop" : "stops"}, in driving order.`
+                : "Your stops; this plan has no charging stops."}
+            {googleShare.dropped
+              ? ` Google Maps takes ${GOOGLE_MAX_WAYPOINTS} stops along the way, so it leaves out the last ${googleShare.dropped}; Apple Maps gets them all.`
+              : ""}
+          </p>
           <div className="mt-2 flex flex-wrap gap-2">
             {googleHref ? (
               <a
