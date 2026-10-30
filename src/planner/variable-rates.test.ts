@@ -94,7 +94,7 @@ describe("variable stall rates", () => {
     const site = leiderdorp();
     assert.equal(matchVariableSite([site], 37.3318, -121.8906, "tesla"), null);
     assert.equal(matchVariableSite([site], site.lat, site.lng, "ionity"), null);
-    assert.equal(rateForNetwork("tesla", false), 4.103);
+    assert.equal(rateForNetwork("tesla", false), Math.round(0.6 * 7.46 * 1000) / 1000);
   });
 
   it("prefers the shorter overlapping band and ignores the fallback element", () => {

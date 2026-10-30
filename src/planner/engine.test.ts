@@ -385,7 +385,7 @@ describe("leg modes", () => {
 
   it("native tariffs convert through FX", () => {
     assert.equal(toDkk(1, "EUR", CATALOG_FX), 7.46);
-    assert.equal(toDkk(1, "NOK", CATALOG_FX), 0.64);
+    assert.equal(toDkk(1, "NOK", CATALOG_FX), 0.72);
     assert.equal(NETWORK_NATIVE.ionity.ccy, "EUR");
     assert.equal(NETWORK_NATIVE.recharge.ccy, "NOK");
   });
@@ -1067,5 +1067,49 @@ describe("leg modes", () => {
       preferredNetwork: "brand-dear",
     });
     assert.equal(stillHunts?.id, "cheap-stall", "large premium still loses to cheaper stall");
+  });
+});
+
+describe("network price catalog", () => {
+  it("has one source for the numbers: the native tariffs at catalog FX", async () => {
+    const { NETWORK_NATIVE, CATALOG_FX, toDkk } = await import("./charge-fx.ts");
+    for (const n of EU_NETWORKS) {
+      const t = NETWORK_NATIVE[n.id];
+      if (!t) continue;
+      assert.equal(n.spotKr, toDkk(t.spot, t.ccy, CATALOG_FX), `${n.id} spot`);
+      assert.equal(n.aboKr, toDkk(t.abo, t.ccy, CATALOG_FX), `${n.id} abo`);
+      assert.equal(n.aboMonthlyKr, toDkk(t.monthly, t.ccy, CATALOG_FX), `${n.id} monthly`);
+    }
+  });
+
+  it("uses the checked Danish prices for Tesla and IONITY", () => {
+    const tesla = EU_NETWORKS.find((n) => n.id === "tesla")!;
+    const ionity = EU_NETWORKS.find((n) => n.id === "ionity")!;
+    assert.equal(regionalOwn(tesla, "DK", false), 3.6);
+    assert.equal(regionalOwn(tesla, "DK", true), 2.6);
+    assert.equal(regionalOwn(ionity, "DK", false), 3.86);
+    assert.equal(regionalOwn(ionity, "DK", true), 2.29);
+  });
+
+  it("a membership is never dearer per kWh than ad hoc", () => {
+    for (const n of EU_NETWORKS) assert.ok(n.aboKr <= n.spotKr + 1e-9, `${n.id}: ${n.aboKr} > ${n.spotKr}`);
+  });
+});
+
+describe("membership break-even", () => {
+  it("is the monthly fee over the saving per kWh, rounded up", async () => {
+    const { breakEvenKwh } = await import("./networks.ts");
+    assert.equal(breakEvenKwh(90, 3.86, 2.29), 58);
+    assert.equal(breakEvenKwh(0, 3.86, 2.29), null);
+    assert.equal(breakEvenKwh(49, 3, 3), null);
+  });
+});
+
+describe("prices published in DKK", () => {
+  it("are flagged so exchange-rate moves leave them alone", async () => {
+    const { regionalInDkk } = await import("./networks.ts");
+    const tesla = EU_NETWORKS.find((n) => n.id === "tesla")!;
+    assert.equal(regionalInDkk(tesla, "DK"), true);
+    assert.equal(regionalInDkk(tesla, "DE"), false);
   });
 });

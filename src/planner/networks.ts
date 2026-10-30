@@ -1,6 +1,8 @@
 /** EU public charging networks. Rates in DKK/kWh. Spot = ad-hoc, abo = membership. */
-const EUR = 7.46;
-const NOK = 0.64;
+import { CATALOG_FX, NETWORK_NATIVE, toDkk } from "./charge-fx";
+
+const EUR = CATALOG_FX.EUR;
+const NOK = CATALOG_FX.NOK;
 
 function dkkFromEur(eur: number) {
   return Math.round(eur * EUR * 1000) / 1000;
@@ -25,9 +27,11 @@ export type ChargeNetwork = {
   roamAboKr?: number | null;
   roamNote: string;
   note: string;
+  /** When and where the prices were last checked; absent = an estimate nobody checked. */
+  checked?: { on: string; source: string; scope: string };
 };
 
-export const EU_NETWORKS: ChargeNetwork[] = [
+const CATALOG: ChargeNetwork[] = [
   {
     id: "tesla",
     name: "Tesla Supercharger",
@@ -38,7 +42,8 @@ export const EU_NETWORKS: ChargeNetwork[] = [
     aboName: "Tesla vehicle",
     roamKr: null,
     roamNote: "Own Superchargers only. No Hubject/OCPI roam.",
-    note: "Owner rate vs other brands. No monthly fee — flag if this car is Tesla.",
+    note: "Owner rate vs other brands. Others can buy a membership for the owner rate (85 kr/month in Denmark).",
+    checked: { on: "2026-05-29", source: "https://mobilsiden.dk/?p=265272", scope: "Denmark (flat 2.60 / 3.60 kr)" },
   },
   {
     id: "ionity",
@@ -49,8 +54,9 @@ export const EU_NETWORKS: ChargeNetwork[] = [
     aboMonthlyKr: dkkFromEur(11.99),
     aboName: "IONITY Power",
     roamKr: null,
-    roamNote: "Passport is IONITY stalls only. Roaming in is via other eMSPs — usually +0.15–0.25 €/kWh.",
-    note: "Ad-hoc is among the dearest HPC in Europe. Power drops the kWh a lot.",
+    roamNote: "Power and Motion are IONITY stalls only. Roaming in is via other eMSPs — usually +0.15–0.25 €/kWh.",
+    note: "Direct is the ad-hoc price; Power cuts it by about 40% for a monthly fee.",
+    checked: { on: "2026-07-22", source: "https://ionity.eu/en/access-and-payment", scope: "Denmark, Germany" },
   },
   {
     id: "fastned",
@@ -101,7 +107,8 @@ export const EU_NETWORKS: ChargeNetwork[] = [
     roamKr: dkkFromEur(0.73),
     roamAboKr: dkkFromEur(0.73),
     roamNote: "Own HyperNetz drops with M/L. Roaming stays ~0.73 € even on abo.",
-    note: "Big DE network. Tariff M is the usual abo vs ad-hoc app.",
+    note: "Tariff S (no fee) vs M (5.99 €/month). L is 0.39 € for 11.99 €/month.",
+    checked: { on: "2026-10-30", source: "https://www.enbw.com/elektromobilitaet/produkte/ladetarife", scope: "Germany (tariffs S and M)" },
   },
   {
     id: "clever",
@@ -115,7 +122,8 @@ export const EU_NETWORKS: ChargeNetwork[] = [
     roamKr: 5.49,
     roamAboKr: 3.75,
     roamNote: "One includes DK partners at 0. IONITY abroad 3.75 kr/kWh on One, 5.49 on other plans.",
-    note: "One is unlimited kWh (incl. many partners). Trip kWh cost is 0; monthly fee is separate.",
+    note: "One is unlimited kWh (incl. many partners). Trip kWh cost is 0; monthly fee is separate. Clever Go prices vary by charger and hour; 4.99 kr is a typical fast-charging price.",
+    checked: { on: "2026-08-18", source: "https://mobilsiden.dk/?p=287350", scope: "Clever One fee only" },
   },
   {
     id: "eon",
@@ -127,8 +135,9 @@ export const EU_NETWORKS: ChargeNetwork[] = [
     aboName: "E.ON abo",
     roamKr: dkkFromEur(0.79),
     roamAboKr: dkkFromEur(0.71),
-    roamNote: "Own DK/DE is cheaper. Roam-out More ~0.71 €, Light ~0.79 €.",
-    note: "Danish public AC/DC. Abo knocks a bit off the kWh.",
+    roamNote: "Own DK/DE is cheaper. Roam-out costs more.",
+    note: "Danish public AC/DC. 4.25 kr is the ad-hoc DC price; the Plus abo price is from 2024.",
+    checked: { on: "2026-10-30", source: "https://www.edri.com/en-dk/tariffs", scope: "Denmark ad hoc" },
   },
   {
     id: "spirii",
@@ -258,6 +267,23 @@ export const EU_NETWORKS: ChargeNetwork[] = [
   },
 ];
 
+/**
+ * One source for the numbers: the native-currency tariffs in charge-fx.ts at the catalog
+ * exchange rates (the API reconverts them at live rates). The catalog above adds names and notes.
+ */
+export const EU_NETWORKS: ChargeNetwork[] = CATALOG.map((n) => {
+  const t = NETWORK_NATIVE[n.id];
+  if (!t) return n;
+  return {
+    ...n,
+    spotKr: toDkk(t.spot, t.ccy, CATALOG_FX),
+    aboKr: toDkk(t.abo, t.ccy, CATALOG_FX),
+    aboMonthlyKr: toDkk(t.monthly, t.ccy, CATALOG_FX),
+    roamKr: t.roam == null ? null : toDkk(t.roam, t.ccy, CATALOG_FX),
+    roamAboKr: t.roamAbo == null ? (n.roamAboKr ?? null) : toDkk(t.roamAbo, t.ccy, CATALOG_FX),
+  };
+});
+
 export function networkById(id: string) {
   return EU_NETWORKS.find((n) => n.id === id) ?? null;
 }
@@ -371,10 +397,16 @@ export const EU_REGIONS: { id: EuRegion; label: EuRegion; bloc: EuBloc }[] = EU_
   b.ids.map((id) => ({ id, label: id, bloc: b.id })),
 );
 
-type MarketCell = { own: number | null; roam: number | null };
+/** own = ad-hoc at the network's stalls; ownAbo = with its membership when known; roam = at other CPOs. */
+type MarketCell = { own: number | null; roam: number | null; ownAbo?: number; dkk?: true };
 
-function cell(own: number | null, roam: number | null): MarketCell {
-  return { own, roam };
+function cell(own: number | null, roam: number | null, ownAbo?: number): MarketCell {
+  return ownAbo == null ? { own, roam } : { own, roam, ownAbo };
+}
+
+/** A price the operator publishes in DKK: exchange-rate moves must not shift it. */
+function dkkCell(own: number | null, roam: number | null, ownAbo?: number): MarketCell {
+  return { ...cell(own, roam, ownAbo), dkk: true };
 }
 
 function spread(
@@ -406,7 +438,9 @@ export const REGION_MARKETS: Record<string, Partial<Record<EuRegion, MarketCell>
       near: cell(dkkFromEur(0.55), null),
     },
     {
-      DK: cell(dkkFromEur(0.48), null),
+      // Flat rate since May 2026: 3.60 kr, 2.60 kr for owners and members.
+      DK: dkkCell(3.6, null, 2.6),
+      DE: cell(dkkFromEur(0.6), null, dkkFromEur(0.46)),
       UK: cell(dkkFromEur(0.62), null),
       NO: cell(dkkFromNok(4.9), null),
       IS: cell(dkkFromEur(0.45), null),
@@ -432,7 +466,9 @@ export const REGION_MARKETS: Record<string, Partial<Record<EuRegion, MarketCell>
       baltics: cell(null, null),
     },
     {
-      DK: cell(dkkFromEur(0.79), null),
+      // ionity.eu, 22 Jul 2026: Direct and Power (monthly plan).
+      DK: dkkCell(3.86, null, 2.29),
+      DE: cell(dkkFromEur(0.72), null, dkkFromEur(0.42)),
       SE: cell(dkkFromEur(0.5), null),
       FI: cell(dkkFromEur(0.42), null),
       FR: cell(dkkFromEur(0.59), null),
@@ -522,7 +558,7 @@ export const REGION_MARKETS: Record<string, Partial<Record<EuRegion, MarketCell>
   ),
   enbw: spread(
     {
-      dach: cell(dkkFromEur(0.59), dkkFromEur(0.73)),
+      dach: cell(dkkFromEur(0.56), dkkFromEur(0.73), dkkFromEur(0.46)),
       nordic: cell(null, dkkFromEur(0.73)),
       baltics: cell(null, dkkFromEur(0.73)),
       benelux: cell(null, dkkFromEur(0.73)),
@@ -566,7 +602,7 @@ export const REGION_MARKETS: Record<string, Partial<Record<EuRegion, MarketCell>
   ),
   eon: spread(
     {
-      nordic: cell(3.95, 5.2),
+      nordic: cell(4.25, 5.2),
       dach: cell(dkkFromEur(0.61), dkkFromEur(0.79)),
       benelux: cell(null, dkkFromEur(0.79)),
       west: cell(null, dkkFromEur(0.79)),
@@ -756,10 +792,16 @@ export function regionalCell(n: ChargeNetwork, region: EuRegion): MarketCell | n
   return REGION_MARKETS[n.id]?.[region] ?? null;
 }
 
+/** True when this country's prices are fixed in DKK and must not follow the exchange rate. */
+export function regionalInDkk(n: ChargeNetwork, region: EuRegion) {
+  return Boolean(regionalCell(n, region)?.dkk);
+}
+
 export function regionalOwn(n: ChargeNetwork, region: EuRegion, hasAbo: boolean) {
   const c = regionalCell(n, region);
   if (!c || c.own == null) return null;
   if (hasAbo && n.unlimited) return 0;
+  if (hasAbo && c.ownAbo != null) return c.ownAbo;
   if (hasAbo) {
     if (n.spotKr <= 0) return n.aboKr;
     return Math.round(c.own * (n.aboKr / n.spotKr) * 1000) / 1000;
@@ -786,4 +828,11 @@ export function regionalExtra(n: ChargeNetwork, region: EuRegion, hasAbo: boolea
   const own = regionalOwn(n, region, hasAbo);
   if (own == null) return roam;
   return roam - own;
+}
+
+/** kWh a month above which the membership is cheaper than paying ad hoc. */
+export function breakEvenKwh(monthlyKr: number, adHocKr: number, memberKr: number) {
+  const saving = adHocKr - memberKr;
+  if (monthlyKr <= 0 || saving <= 0.05) return null;
+  return Math.ceil(monthlyKr / saving);
 }
