@@ -12,7 +12,6 @@ import { drivingFactor, scaleSpeedEff, sessionDcKw, useCarSettings, variantFor }
 import { CarPanel } from "./car-panel";
 import { Sheet } from "./sheet";
 import { forGoogle, GOOGLE_MAX_WAYPOINTS, shareStops } from "./share-stops";
-import { canShare, teslaShareTarget } from "./tesla-share";
 import { NetworksPanel } from "./networks-panel";
 
 /**
@@ -149,7 +148,6 @@ import {
   splitDateTime,
 } from "./engine";
 import { applyDraftShell, paintDraftRoutes, usePlanStore, type OptionSnap } from "./store";
-import { withRetry } from "./retry";
 import { formatKrPerKwh, formatKrValue, type ElprisData } from "@/lib/elpris";
 import { applyTillægToHours, providerById } from "@/lib/el-providers";
 import { cn } from "@/lib/utils";
@@ -729,9 +727,6 @@ export function PlanScreen() {
   // Import from, or open in, Google / Apple Maps.
   const [mapsOpen, setMapsOpen] = useState(false);
   const closeMaps = useCallback(() => setMapsOpen(false), []);
-  // Send one place at a time to the Tesla app.
-  const [teslaOpen, setTeslaOpen] = useState(false);
-  const closeTesla = useCallback(() => setTeslaOpen(false), []);
   const [pickerStop, setPickerStop] = useState<string | null>(null);
   const [elpris, setElpris] = useState<ElprisData | null>(null);
 
@@ -1537,34 +1532,6 @@ export function PlanScreen() {
     }
   }
 
-  /**
-   * Hand one place to the phone's share menu, where the Tesla app sends it to the car. Without
-   * a share menu (most computers) the link is copied instead.
-   */
-  async function shareToTesla(stop: { name: string; lat: number; lng: number }) {
-    let target: ReturnType<typeof teslaShareTarget>;
-    try {
-      target = teslaShareTarget(stop);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not share this stop");
-      return;
-    }
-    if (canShare()) {
-      try {
-        await navigator.share(target);
-        return;
-      } catch (err) {
-        if (isShareCancel(err)) return;
-        toast.error(shareErrorMessage(err));
-      }
-    }
-    try {
-      await withRetry(() => navigator.clipboard.writeText(`${target.text}\n${target.url}`), { delaysMs: [0, 120] });
-      toast(`Copied ${target.title}. Open this page on your phone to send it to the Tesla app.`);
-    } catch {
-      toast.error(`Could not copy. Link: ${target.url}`);
-    }
-  }
 
   const mapRoutes: MapRoute[] = useMemo(() => {
     const out: MapRoute[] = [];
@@ -2341,69 +2308,6 @@ export function PlanScreen() {
       {pane === "plan" ? (
       <div className="space-y-5">
 
-      <Sheet open={teslaOpen} onClose={closeTesla} title="Send to Tesla" subtitle="One place at a time, through the Tesla app">
-        {sharePts.length < 2 ? (
-          <p className="px-1 text-sm text-muted">Add a destination first.</p>
-        ) : (
-          <>
-            <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
-              <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Destination</p>
-              <button
-                type="button"
-                onClick={() => void shareToTesla(sharePts[sharePts.length - 1])}
-                className="mt-2 flex h-12 w-full items-center gap-2 rounded-full bg-foreground px-4 text-left text-sm font-medium text-background"
-              >
-                <Navigation className="size-4 shrink-0" aria-hidden />
-                <span className="truncate">{sharePts[sharePts.length - 1].name}</span>
-              </button>
-              <p className="mt-2 text-[11px] text-subtle">
-                The car plans its own Supercharger stops on the way, which can differ from this plan.
-              </p>
-            </section>
-            {sharePts.length > 2 ? (
-              <section className="mt-3 rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
-                <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Or drive stop by stop</p>
-                <p className="mt-1 text-xs text-muted">
-                  To follow this plan's chargers, send the next stop, and the one after when you get there.
-                </p>
-                <ol className="mt-2 divide-y divide-border">
-                  {sharePts.slice(1, -1).map((p, i) => (
-                    <li key={`${p.lat},${p.lng},${i}`}>
-                      <button
-                        type="button"
-                        onClick={() => void shareToTesla(p)}
-                        className="flex w-full items-center gap-3 py-2.5 text-left"
-                      >
-                        <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-surface-2 text-[11px] tabular-nums text-muted">
-                          {i + 1}
-                        </span>
-                        <span className="min-w-0 flex-1 truncate text-sm">{p.name}</span>
-                        {p.charge ? (
-                          <span className="shrink-0 rounded-full bg-emerald-400/15 px-1.5 py-0.5 text-[10px] text-emerald-300">Charge</span>
-                        ) : null}
-                        <Navigation className="size-3.5 shrink-0 text-muted" aria-hidden />
-                      </button>
-                    </li>
-                  ))}
-                </ol>
-              </section>
-            ) : null}
-            <section className="mt-3 rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
-              <p className="text-[11px] font-medium uppercase tracking-wide text-muted">How it works</p>
-              <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs text-muted">
-                <li>Open this page on your phone, with the Tesla app installed and signed in.</li>
-                <li>Tap a place above, then pick Tesla in the share menu.</li>
-                <li>The Tesla app sends it to the car as the destination.</li>
-              </ol>
-              {!canShare() ? (
-                <p className="mt-2 text-[11px] text-amber-200">
-                  This browser has no share menu, so tapping a place copies it instead.
-                </p>
-              ) : null}
-            </section>
-          </>
-        )}
-      </Sheet>
       <Sheet open={mapsOpen} onClose={closeMaps} title="Google and Apple Maps" subtitle="Import a route, or open this trip">
         <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
           <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Import a route</p>
@@ -2800,14 +2704,31 @@ export function PlanScreen() {
               >
                 Save
               </button>
-              <button
-                type="button"
-                onClick={() => setTeslaOpen(true)}
-                className="flex h-11 flex-[1.4] items-center justify-center gap-1.5 rounded-full bg-foreground text-sm font-medium text-background"
-              >
-                <Navigation className="size-4" />
-                Send to Tesla
-              </button>
+              {googleHref ? (
+                <a
+                  href={googleHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => {
+                    if (googleShare.dropped) {
+                      toast(`Google Maps takes ${GOOGLE_MAX_WAYPOINTS} stops on the way: the last ${googleShare.dropped} charging ${googleShare.dropped === 1 ? "stop is" : "stops are"} left out.`);
+                    }
+                  }}
+                  className="flex h-11 flex-[1.4] items-center justify-center gap-1.5 rounded-full bg-foreground text-sm font-medium text-background"
+                >
+                  <Navigation className="size-4" />
+                  Google Maps
+                </a>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => toast("Add a destination first")}
+                  className="flex h-11 flex-[1.4] items-center justify-center gap-1.5 rounded-full bg-foreground text-sm font-medium text-background"
+                >
+                  <Navigation className="size-4" />
+                  Google Maps
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setMoreOpen((open) => !open)}
@@ -2840,7 +2761,7 @@ export function PlanScreen() {
       {saved.length ? (
         <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
           <p className="text-sm font-medium">Saved</p>
-          <p className="mt-0.5 text-xs text-subtle">Tap to load · Tesla sends the route to nav</p>
+          <p className="mt-0.5 text-xs text-subtle">Tap to load</p>
           <ul className="mt-2">
             {saved.map((plan) => (
               <li key={plan.id} className="flex items-center gap-2 border-b border-border py-3 last:border-0">
@@ -2866,18 +2787,6 @@ export function PlanScreen() {
                   <p className="truncate text-[11px] text-subtle">
                     {plan.stops.map((s) => s.name).join(" → ")}
                   </p>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const dest = plan.stops[plan.stops.length - 1];
-                    if (dest) void shareToTesla(dest);
-                  }}
-                  className="flex h-9 items-center gap-1 rounded-full bg-surface-2 px-3 text-[11px] font-medium text-muted"
-                  aria-label={`Send the destination of ${plan.name} to Tesla`}
-                >
-                  <Navigation className="size-3.5" />
-                  Tesla
                 </button>
                 <button
                   type="button"
@@ -3097,13 +3006,3 @@ function formatPlanDate(value: string) {
   return `${d}/${m}/${y} ${hhmm}`;
 }
 
-function isShareCancel(err: unknown) {
-  if (!(err instanceof Error)) return false;
-  const name = "name" in err ? String((err as { name?: string }).name) : "";
-  return name === "AbortError" || /cancel/i.test(err.message);
-}
-
-function shareErrorMessage(err: unknown) {
-  if (err instanceof Error && err.message) return err.message;
-  return "Could not share to Tesla nav";
-}
