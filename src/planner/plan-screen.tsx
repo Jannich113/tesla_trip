@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useDeferredValue, useRef, lazy, Suspense, memo, startTransition } from "react";
 import type { KeyboardEvent } from "react";
-import { ChevronDown, ChevronUp, MapPin, MoreHorizontal, Navigation, Plus, Trash2, X } from "lucide-react";
+import { ChevronDown, ChevronUp, MapPin, MoreHorizontal, Navigation, Plus, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import type { MapMarker, MapRoute } from "@/components/bay-map";
 import { ConfirmStrip } from "@/components/confirm-strip";
@@ -473,6 +473,7 @@ const OptionList = memo(function OptionList({
   onPick,
   networkOf,
   onToggleOptional,
+  onFineTune,
 }: {
   rows: OptionRowView[];
   mixed: boolean;
@@ -483,6 +484,8 @@ const OptionList = memo(function OptionList({
   onPick: (mode: LegMode) => void;
   networkOf: (charge: PricedCharge) => string | null;
   onToggleOptional: (userIndex: number) => void;
+  /** Opens the stop-by-stop charge planner over the route list. */
+  onFineTune?: () => void;
 }) {
   const fastest = rows.find((r) => r.mode === "fastest")?.totals;
   const picked = mixed ? null : rows.find((r) => r.mode === active) ?? null;
@@ -587,6 +590,18 @@ const OptionList = memo(function OptionList({
                 </li>
               ))}
             </ol>
+          ) : null}
+          {onFineTune ? (
+            <div className="mt-2 flex justify-end">
+              <button
+                type="button"
+                onClick={onFineTune}
+                className="inline-flex h-8 items-center gap-1.5 rounded-full bg-background px-3 text-xs font-medium text-foreground shadow-[var(--shadow-border)]"
+              >
+                <SlidersHorizontal className="size-3.5" aria-hidden />
+                Fine-tune stops
+              </button>
+            </div>
           ) : null}
         </div>
       ) : null}
@@ -711,6 +726,20 @@ export function PlanScreen() {
   const [importUrl, setImportUrl] = useState("");
   const [importError, setImportError] = useState("");
   const [pane, setPane] = useState<"plan" | "advanced" | "members">("plan");
+  const [fineTune, setFineTune] = useState(false);
+  useEffect(() => {
+    if (!fineTune) return;
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape") setFineTune(false);
+    };
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = overflow;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [fineTune]);
   const [pickerStop, setPickerStop] = useState<string | null>(null);
   const [elpris, setElpris] = useState<ElprisData | null>(null);
 
@@ -1692,6 +1721,535 @@ export function PlanScreen() {
     }
   }
 
+  // The stop-by-stop charge planner: in the Car pane and in the Fine-tune overlay on the Trip pane.
+  const stopsPlanner = (
+    <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
+      <div className="flex items-center gap-2">
+        <p className="text-sm font-medium">Stops</p>
+        <div className="ml-auto flex gap-1">
+          {LEG_MODES.map((mode) => {
+            const on = !mixed && activeModes[0] === mode;
+            return (
+              <button
+                key={mode}
+                type="button"
+                onPointerDown={(e) => {
+                  if (e.button !== 0) return;
+                  e.preventDefault();
+                  setAllModes(mode);
+                }}
+                onClick={(e) => {
+                  e.preventDefault();
+                  setAllModes(mode);
+                }}
+                className={cn(
+                  "h-7 rounded-full px-2.5 text-[11px] font-medium",
+                  on ? "text-background" : "bg-surface-2 text-muted",
+                )}
+                style={on ? { background: modeColor(mode) } : undefined}
+              >
+                {modeLabel(mode)}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <ol className="mt-2">
+        {timeline.map(({ stop, inbound, outbound, via, index: i }) => {
+          const userI = outbound?.userIndex ?? inbound?.userIndex ?? Math.max(0, i - 1);
+          const leg = inbound;
+          const chargedLeg = outbound ?? inbound;
+          const open = Boolean(openStops[stop.id]);
+          const selectedHere =
+            selected === stop.id ||
+            selected === `leg-${userI}` ||
+            Boolean(selected?.startsWith(`chg-${userI}-`));
+          const leftPct = inbound ? inbound.arriveSoc : soc;
+          const chargeTo =
+            chargeToSoc[userI] ??
+            (chargedLeg?.charge
+              ? chargedLeg.accepted
+                ? chargedLeg.startSoc
+                : chargedLeg.autoStartSoc
+              : inbound || outbound
+                ? leftPct
+                : null);
+          const extraKr = chargedLeg?.accepted ? chargedLeg.extraKr : 0;
+          const chargeRequired = Boolean(chargedLeg?.needed);
+          const inStore = stops.some((s) => s.id === stop.id);
+          const pickMode = (chargedLeg?.mode ?? modes[userI] ?? "fastest") as LegMode;
+          return (
+            <li
+              key={stop.id}
+              className={cn(
+                "border-b border-border py-3 last:border-0",
+                selectedHere && "rounded-xl bg-surface-2/80 px-2",
+              )}
+            >
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                  onPointerDown={(e) => {
+                    if (e.button !== 0) return;
+                    setSelected(inbound ? `leg-${userI}` : stop.id);
+                    if (inbound || outbound) setOpenStops((cur) => ({ ...cur, [stop.id]: !cur[stop.id] }));
+                  }}
+                  onClick={(e) => {
+                    e.preventDefault();
+                  }}
+                >
+                  <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-surface-2 text-xs tabular-nums text-muted">
+                    {i + 1}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm">
+                      {via ? <span className="mr-1 text-[11px] font-medium uppercase tracking-wide text-amber-300">via</span> : null}
+                      {stop.name}
+                    </p>
+                    <p className="text-xs text-muted">
+                      <span className="tabular-nums">
+                        {formatNumber(leftPct, 0)}%{i === 0 ? " now" : " left"}
+                      </span>
+                      {chargedLeg?.charge ? (
+                        <span
+                          className={cn(
+                            "tabular-nums",
+                            chargeRequired ? "font-medium text-amber-300" : "font-medium text-emerald-400",
+                          )}
+                        >
+                          {chargeRequired ? " · required" : chargedLeg.accepted ? " · accepted" : " · recommended"}
+                          {!chargeRequired && extraKr >= 0.5
+                            ? ` · +${formatKrValue(extraKr, 0)} kr extra`
+                            : ""}
+                        </span>
+                      ) : null}
+                    </p>
+                    {inbound && !open ? (
+                      chargedLeg?.charge ? (
+                        <p className="truncate text-[11px]" style={{ color: modeColor(chargedLeg.mode) }}>
+                          {via ? "via " : ""}
+                          {chargedLeg.charge.name}
+                          {` · ${formatNumber(chargedLeg.charge.kwh, 0)} kWh · ${formatKrValue(chargedLeg.charge.kr, 0)} kr`}
+                        </p>
+                      ) : (
+                        <p className="truncate text-[11px] text-subtle">no charge</p>
+                      )
+                    ) : null}
+                  </div>
+                  {inbound || outbound ? (
+                    <ChevronDown className={cn("size-4 shrink-0 text-muted transition", open && "rotate-180")} />
+                  ) : null}
+                </button>
+                {chargeTo != null ? (
+                  <label
+                    className={cn(
+                      "flex h-8 shrink-0 items-center gap-0.5 rounded-full px-2 text-[11px] font-medium",
+                      chargeRequired ? "bg-amber-400/15 text-amber-200" : "bg-emerald-400/15 text-emerald-300",
+                    )}
+                  >
+                    to
+                    <input
+                      type="number"
+                      min={1}
+                      max={80}
+                      value={Math.round(chargeTo)}
+                      onChange={(e) => {
+                        const n = Number(e.target.value);
+                        if (!Number.isFinite(n)) return;
+                        const v = Math.max(5, Math.min(80, Math.round(n)));
+                        setChargeToSoc((cur) => ({ ...cur, [userI]: v }));
+                        setAcceptCharge((cur) => ({ ...cur, [userI]: true }));
+                      }}
+                      className="h-6 w-10 bg-transparent text-center text-xs tabular-nums text-foreground outline-none"
+                    />
+                    %
+                  </label>
+                ) : null}
+                {chargeTo != null && chargedLeg?.charge && !chargeRequired ? (
+                  <button
+                    type="button"
+                    onClick={() => setAcceptCharge((cur) => ({ ...cur, [userI]: !cur[userI] }))}
+                    className={cn(
+                      "h-8 shrink-0 rounded-full px-3 text-[11px] font-medium",
+                      chargedLeg?.accepted
+                        ? "bg-emerald-400 text-background"
+                        : "bg-emerald-400/15 text-emerald-300",
+                    )}
+                  >
+                    {chargedLeg?.accepted ? "Accepted" : "Accept"}
+                  </button>
+                ) : null}
+                {inStore ? (
+                  <button
+                    type="button"
+                    onClick={() => removeStop(stop.id)}
+                    className="flex size-9 shrink-0 items-center justify-center rounded-full text-muted"
+                    aria-label={`Remove ${stop.name}`}
+                  >
+                    <Trash2 className="size-4" />
+                  </button>
+                ) : null}
+              </div>
+              {(inbound || outbound) ? (
+                <div className="mt-2 pl-10">
+                  {inbound && !via ? (
+                  <div className="flex rounded-full bg-surface-2 p-1">
+                    {LEG_MODES.map((mode) => {
+                      const on = (modes[userI] ?? "fastest") === mode;
+                      return (
+                        <button
+                          key={mode}
+                          type="button"
+                          onClick={() => setLegMode(userI, mode)}
+                          className={cn(
+                            "h-8 flex-1 rounded-full text-[10px] font-medium",
+                            on ? "bg-foreground text-background" : "text-muted",
+                          )}
+                        >
+                          {modeLabel(mode)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  ) : null}
+                  {open ? (
+                    <div className="mt-3">
+                  <p className="text-[11px] text-subtle">
+                    {modeHint((modes[userI] ?? "fastest") as LegMode)}
+                  </p>
+                  <div className="mt-3 flex gap-1">
+                    <button
+                      type="button"
+                      onClick={() => moveStop(stop.id, -1)}
+                      disabled={stops.findIndex((s) => s.id === stop.id) <= 0}
+                      className="flex h-8 flex-1 items-center justify-center rounded-full bg-surface-2 text-muted disabled:opacity-30"
+                      aria-label={`Move ${stop.name} up`}
+                    >
+                      <ChevronUp className="size-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => moveStop(stop.id, 1)}
+                      disabled={(() => {
+                        const idx = stops.findIndex((s) => s.id === stop.id);
+                        return idx < 0 || idx >= stops.length - 1;
+                      })()}
+                      className="flex h-8 flex-1 items-center justify-center rounded-full bg-surface-2 text-muted disabled:opacity-30"
+                      aria-label={`Move ${stop.name} down`}
+                    >
+                      <ChevronDown className="size-4" />
+                    </button>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <div className="flex rounded-full bg-surface-2 p-1">
+                      {(["auto", "depart", "arrive"] as const).map((kind) => {
+                        const on = (legWhen[userI]?.kind ?? "auto") === kind;
+                        return (
+                          <button
+                            key={kind}
+                            type="button"
+                            onClick={() =>
+                              setLegWhen(userI, {
+                                kind,
+                                hhmm: kind === "auto" ? "" : asDateTime(legWhen[userI]?.at || legWhen[userI]?.hhmm || leg?.departAt || clock),
+                                at: kind === "auto" ? "" : asDateTime(legWhen[userI]?.at || legWhen[userI]?.hhmm || leg?.departAt || clock),
+                              })
+                            }
+                            className={cn(
+                              "h-8 flex-1 rounded-full text-[10px] font-medium",
+                              on ? "bg-foreground text-background" : "text-muted",
+                            )}
+                          >
+                            {kind === "auto" ? "Auto" : kind === "depart" ? "Leave" : "Arrive"}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {(legWhen[userI]?.kind ?? "auto") !== "auto" ? (
+                      <input
+                        type="datetime-local"
+                        value={asDateTime(legWhen[userI]?.at || legWhen[userI]?.hhmm || leg?.departAt || clock)}
+                        onChange={(e) =>
+                          setLegWhen(userI, {
+                            kind: legWhen[userI]?.kind === "arrive" ? "arrive" : "depart",
+                            hhmm: e.target.value,
+                            at: e.target.value,
+                          })
+                        }
+                        className="h-8 rounded-full bg-surface-2 px-3 text-xs text-foreground outline-none"
+                      />
+                    ) : (
+                      <p className="flex h-8 items-center text-[11px] tabular-nums text-subtle">
+                        {leg ? `${formatDateTime(leg.departAt)} → ${formatDateTime(leg.arriveAt)}` : "Follows previous"}
+                      </p>
+                    )}
+                  </div>
+                  <p className="mt-3 text-[11px] font-medium uppercase tracking-wide text-muted">
+                    Charge search
+                  </p>
+                  <div className="mt-1 flex gap-1">
+                    {DETOUR_KM.map((km) => {
+                      const on = (detours[userI] ?? DEFAULT_DETOUR_KM) === km;
+                      return (
+                        <button
+                          key={km}
+                          type="button"
+                          onClick={() => setLegDetour(userI, km)}
+                          className={cn(
+                            "h-8 flex-1 rounded-full text-[11px] font-medium",
+                            on ? "bg-foreground text-background" : "bg-surface-2 text-muted",
+                          )}
+                        >
+                          {formatDetour(km, units)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {(modes[userI] ?? "fastest") === "cheapest" ? (
+                    <>
+                      <p className="mt-3 text-[11px] font-medium uppercase tracking-wide text-muted">
+                        Max wait for cheap price
+                      </p>
+                      <div className="mt-1 flex gap-1">
+                        {WAIT_MIN.map((min) => {
+                          const on = (waits[userI] ?? DEFAULT_WAIT_MIN) === min;
+                          return (
+                            <button
+                              key={min}
+                              type="button"
+                              onClick={() => setLegWait(userI, min)}
+                              className={cn(
+                                "h-8 flex-1 rounded-full text-[11px] font-medium",
+                                on ? "bg-foreground text-background" : "bg-surface-2 text-muted",
+                              )}
+                            >
+                              {formatWaitCap(min)}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </>
+                  ) : null}
+                  {chargedLeg?.charge ? (
+                    <div className="mt-3 space-y-2">
+                      <ChargeChoice
+                        title={
+                          chargedLeg.advice === "required"
+                            ? "Charge required"
+                            : chargedLeg.advice === "suggested"
+                              ? "Suggested · good price"
+                              : "Charge here"
+                        }
+                        spot={chargedLeg.charge}
+                        active
+                        required={chargedLeg.needed}
+                        suggested={chargedLeg.suggested}
+                      />
+                      <label className="flex items-center justify-between gap-3 rounded-xl bg-surface-2 px-3 py-2">
+                        <span className="text-xs text-muted">Charge to</span>
+                        <span className="flex items-center gap-1 text-sm">
+                          <input
+                            type="number"
+                            min={1}
+                            max={80}
+                            value={Math.round(
+                              chargeToSoc[userI] ??
+                                (chargedLeg.accepted ? chargedLeg.startSoc : chargedLeg.autoStartSoc),
+                            )}
+                            onChange={(e) => {
+                              const n = Number(e.target.value);
+                              if (!Number.isFinite(n)) return;
+                              const v = Math.max(5, Math.min(80, Math.round(n)));
+                              setChargeToSoc((cur) => ({ ...cur, [userI]: v }));
+                              setAcceptCharge((cur) => ({ ...cur, [userI]: true }));
+                            }}
+                            className="h-8 w-14 rounded-md bg-background text-center text-sm tabular-nums outline-none"
+                          />
+                          %
+                        </span>
+                      </label>
+                      {chargedLeg.accepted && Math.abs(chargedLeg.extraKr) >= 0.5 ? (
+                        <p
+                          className={cn(
+                            "text-[11px] font-medium",
+                            chargedLeg.extraKr > 0 ? "text-amber-300" : "text-emerald-300",
+                          )}
+                        >
+                          {chargedLeg.extraKr > 0 ? "+" : ""}
+                          {formatKrValue(chargedLeg.extraKr, 0)} kr extra vs auto {formatNumber(chargedLeg.autoStartSoc, 0)}%
+                        </p>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => insertCharge(userI, chargedLeg.charge!)}
+                        className="h-9 w-full rounded-full bg-surface-2 text-xs font-medium text-muted"
+                      >
+                        Add charger as stop
+                      </button>
+                      {chargedLeg.needed ? (
+                        <p className="rounded-lg bg-amber-400/15 px-3 py-1.5 text-[11px] font-medium text-amber-200">
+                          Charge required here to finish this leg
+                        </p>
+                      ) : chargedLeg.suggested ? (
+                        <p className="rounded-lg bg-emerald-400/15 px-3 py-1.5 text-[11px] font-medium text-emerald-300">
+                          Optional · good price, battery low enough
+                        </p>
+                      ) : null}
+                      {chargedLeg.suggested && !chargedLeg.needed ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setAcceptCharge((cur) => ({ ...cur, [userI]: !cur[userI] }))
+                          }
+                          className={cn(
+                            "h-9 w-full rounded-full text-xs font-medium",
+                            chargedLeg.accepted
+                              ? "bg-emerald-400 text-background"
+                              : "bg-emerald-400/15 text-emerald-300",
+                          )}
+                        >
+                          {chargedLeg.accepted ? "Accepted · SOC includes this charge" : "Accept recommended charge"}
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <label className="mt-3 flex items-center justify-between gap-3 rounded-xl bg-surface-2 px-3 py-2">
+                      <span className="text-xs text-muted">Charge to</span>
+                      <span className="flex items-center gap-1 text-sm">
+                        <input
+                          type="number"
+                          min={1}
+                          max={80}
+                          value={Math.round(chargeToSoc[userI] ?? leftPct)}
+                          onChange={(e) => {
+                            const n = Number(e.target.value);
+                            if (!Number.isFinite(n)) return;
+                            const v = Math.max(5, Math.min(80, Math.round(n)));
+                            setChargeToSoc((cur) => ({ ...cur, [userI]: v }));
+                            setAcceptCharge((cur) => ({ ...cur, [userI]: true }));
+                          }}
+                          className="h-8 w-14 rounded-md bg-background text-center text-sm tabular-nums outline-none"
+                        />
+                        %
+                      </span>
+                    </label>
+                  )}
+                  <div className="mt-3">
+                      {(via || chargedLeg?.charge) && i > 0 ? (
+                        <ChargerPicker
+                          open={pickerStop === stop.id}
+                          onToggle={() => setPickerStop((cur) => (cur === stop.id ? null : stop.id))}
+                          origin={{ lat: stop.lat, lng: stop.lng, name: stop.name }}
+                          radiusM={chargePickRadiusM(pickMode, detours[userI] ?? DEFAULT_DETOUR_KM)}
+                          radiusLabel={modeLabel(pickMode)}
+                          locations={chargerPool}
+                          memberships={networkAbo}
+                          acKw={profile.acKw}
+                          activeId={
+                            chargedLeg?.charge?.locationId ??
+                            (stop.id.startsWith("via-") ? stop.id.slice("via-".length) : undefined)
+                          }
+                          onPick={(hit) => {
+                            if (inStore) {
+                              replaceStop(stop.id, hit);
+                            } else {
+                              const detour = detours[userI] ?? DEFAULT_DETOUR_KM;
+                              insertStopAt(userI + 1, hit);
+                              setLegMode(userI, pickMode);
+                              setLegDetour(userI, detour);
+                            }
+                            setPickerStop(null);
+                            toast(`Charging stop set to ${hit.name}`);
+                          }}
+                        />
+                      ) : null}
+                      <BackupPicks
+                        options={chargedLeg?.chargeOptions ?? []}
+                        primaryId={chargedLeg?.charge?.locationId}
+                        selectedId={prefer[userI] ?? backupLoc[userI]}
+                        onPick={(id) => {
+                          setPrefer((cur) => {
+                            const next = { ...cur };
+                            if (!id) delete next[userI];
+                            else next[userI] = id;
+                            return next;
+                          });
+                          setBackupLoc((cur) => {
+                            const next = { ...cur };
+                            if (!id) delete next[userI];
+                            else next[userI] = id;
+                            return next;
+                          });
+                        }}
+                      />
+                  </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </li>
+          );
+        })}
+      </ol>
+
+      <div className="mt-3">
+        <label className="text-xs text-muted">
+          Add stop
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Address or place"
+            className="mt-1 h-11 w-full rounded-md bg-surface-2 px-3 text-sm outline-none"
+          />
+        </label>
+        {hits.length ? (
+          <ul className="mt-2 divide-y divide-border rounded-xl bg-surface-2">
+            {hits.map((hit) => (
+              <li key={`${hit.lat},${hit.lng}`}>
+                <button
+                  type="button"
+                  onClick={() => addStop(hit)}
+                  className="flex w-full items-center gap-3 px-3 py-3 text-left"
+                >
+                  <Plus className="size-4 shrink-0 text-muted" />
+                  <span className="truncate text-sm">{hit.label}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <ul className="mt-2 flex flex-wrap gap-2">
+            {Object.entries(PLACES)
+              .filter(([name]) => {
+                if (name.includes("Supercharger") || name.includes("Wall")) return false;
+                if (name === "Home" && stops.some((s) => s.id === "home" || s.name === "Home")) return false;
+                return true;
+              })
+              .slice(0, 8)
+              .map(([name, g]) => (
+                <li key={name}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (name === "Home") {
+                        addStopToStore({ id: "home", name: "Home", lat: g.lat, lng: g.lng });
+                        return;
+                      }
+                      addStop({ label: name, lat: g.lat, lng: g.lng });
+                    }}
+                    className="h-9 rounded-full bg-surface-2 px-3 text-xs font-medium text-muted"
+                  >
+                    {g.short}
+                  </button>
+                </li>
+              ))}
+          </ul>
+        )}
+      </div>
+    </section>
+  );
+
   return (
     // Phones: map on top, everything else below. Laptops: fixed sidebar, map fills the rest.
     <div className="[touch-action:manipulation] lg:grid lg:h-full lg:grid-cols-[400px_minmax(0,1fr)]">
@@ -2238,7 +2796,46 @@ export function PlanScreen() {
               onPick={setAllModes}
               networkOf={networkOf}
               onToggleOptional={toggleOptionalCharge}
+              onFineTune={() => setFineTune(true)}
             />
+            {fineTune ? (
+              <div
+                className="fixed inset-0 z-[1100] flex items-end lg:items-stretch"
+                role="dialog"
+                aria-modal="true"
+                aria-label="Fine-tune stops"
+              >
+                <button
+                  type="button"
+                  aria-label="Close fine-tune"
+                  className="absolute inset-0 bg-black/55"
+                  onClick={() => setFineTune(false)}
+                />
+                <div className="relative flex max-h-[90dvh] w-full flex-col rounded-t-2xl bg-background shadow-2xl lg:max-h-none lg:w-[400px] lg:rounded-none lg:rounded-r-2xl">
+                  <div className="flex items-center gap-3 border-b border-border px-4 py-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium">Fine-tune stops</p>
+                      <p className="truncate text-xs text-muted">
+                        {(() => {
+                          const row = optionRows.find((r) => r.mode === (activeModes[0] ?? "fastest"));
+                          const t = row?.totals;
+                          if (!t) return modeLabel(activeModes[0] ?? "fastest");
+                          return `${mixed ? "Mixed" : modeLabel(activeModes[0] ?? "fastest")} · ${minutesToHm(t.min)} · ${formatKrValue(t.kr, 0)} kr · ${t.charges} ${t.charges === 1 ? "charge" : "charges"}`;
+                        })()}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setFineTune(false)}
+                      className="ml-auto inline-flex h-8 shrink-0 items-center rounded-full bg-foreground px-3 text-xs font-medium text-background"
+                    >
+                      Done
+                    </button>
+                  </div>
+                  <div className="overflow-y-auto overscroll-contain px-3 pb-6 pt-3">{stopsPlanner}</div>
+                </div>
+              </div>
+            ) : null}
             <PreferNetwork abo={networkAbo} preferred={preferredNetwork} onPick={setPreferredNetwork} />
             <p className="mt-3 text-[10px] leading-relaxed text-subtle">
               Chargers from Open Charge Map, OpenStreetMap and supercharge.info (community data, not
@@ -2568,531 +3165,7 @@ export function PlanScreen() {
 
       </section>
 
-      <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
-        <div className="flex items-center gap-2">
-          <p className="text-sm font-medium">Stops</p>
-          <div className="ml-auto flex gap-1">
-            {LEG_MODES.map((mode) => {
-              const on = !mixed && activeModes[0] === mode;
-              return (
-                <button
-                  key={mode}
-                  type="button"
-                  onPointerDown={(e) => {
-                    if (e.button !== 0) return;
-                    e.preventDefault();
-                    setAllModes(mode);
-                  }}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    setAllModes(mode);
-                  }}
-                  className={cn(
-                    "h-7 rounded-full px-2.5 text-[11px] font-medium",
-                    on ? "text-background" : "bg-surface-2 text-muted",
-                  )}
-                  style={on ? { background: modeColor(mode) } : undefined}
-                >
-                  {modeLabel(mode)}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-        <ol className="mt-2">
-          {timeline.map(({ stop, inbound, outbound, via, index: i }) => {
-            const userI = outbound?.userIndex ?? inbound?.userIndex ?? Math.max(0, i - 1);
-            const leg = inbound;
-            const chargedLeg = outbound ?? inbound;
-            const open = Boolean(openStops[stop.id]);
-            const selectedHere =
-              selected === stop.id ||
-              selected === `leg-${userI}` ||
-              Boolean(selected?.startsWith(`chg-${userI}-`));
-            const leftPct = inbound ? inbound.arriveSoc : soc;
-            const chargeTo =
-              chargeToSoc[userI] ??
-              (chargedLeg?.charge
-                ? chargedLeg.accepted
-                  ? chargedLeg.startSoc
-                  : chargedLeg.autoStartSoc
-                : inbound || outbound
-                  ? leftPct
-                  : null);
-            const extraKr = chargedLeg?.accepted ? chargedLeg.extraKr : 0;
-            const chargeRequired = Boolean(chargedLeg?.needed);
-            const inStore = stops.some((s) => s.id === stop.id);
-            const pickMode = (chargedLeg?.mode ?? modes[userI] ?? "fastest") as LegMode;
-            return (
-              <li
-                key={stop.id}
-                className={cn(
-                  "border-b border-border py-3 last:border-0",
-                  selectedHere && "rounded-xl bg-surface-2/80 px-2",
-                )}
-              >
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    className="flex min-w-0 flex-1 items-center gap-3 text-left"
-                    onPointerDown={(e) => {
-                      if (e.button !== 0) return;
-                      setSelected(inbound ? `leg-${userI}` : stop.id);
-                      if (inbound || outbound) setOpenStops((cur) => ({ ...cur, [stop.id]: !cur[stop.id] }));
-                    }}
-                    onClick={(e) => {
-                      e.preventDefault();
-                    }}
-                  >
-                    <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-surface-2 text-xs tabular-nums text-muted">
-                      {i + 1}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm">
-                        {via ? <span className="mr-1 text-[11px] font-medium uppercase tracking-wide text-amber-300">via</span> : null}
-                        {stop.name}
-                      </p>
-                      <p className="text-xs text-muted">
-                        <span className="tabular-nums">
-                          {formatNumber(leftPct, 0)}%{i === 0 ? " now" : " left"}
-                        </span>
-                        {chargedLeg?.charge ? (
-                          <span
-                            className={cn(
-                              "tabular-nums",
-                              chargeRequired ? "font-medium text-amber-300" : "font-medium text-emerald-400",
-                            )}
-                          >
-                            {chargeRequired ? " · required" : chargedLeg.accepted ? " · accepted" : " · recommended"}
-                            {!chargeRequired && extraKr >= 0.5
-                              ? ` · +${formatKrValue(extraKr, 0)} kr extra`
-                              : ""}
-                          </span>
-                        ) : null}
-                      </p>
-                      {inbound && !open ? (
-                        chargedLeg?.charge ? (
-                          <p className="truncate text-[11px]" style={{ color: modeColor(chargedLeg.mode) }}>
-                            {via ? "via " : ""}
-                            {chargedLeg.charge.name}
-                            {` · ${formatNumber(chargedLeg.charge.kwh, 0)} kWh · ${formatKrValue(chargedLeg.charge.kr, 0)} kr`}
-                          </p>
-                        ) : (
-                          <p className="truncate text-[11px] text-subtle">no charge</p>
-                        )
-                      ) : null}
-                    </div>
-                    {inbound || outbound ? (
-                      <ChevronDown className={cn("size-4 shrink-0 text-muted transition", open && "rotate-180")} />
-                    ) : null}
-                  </button>
-                  {chargeTo != null ? (
-                    <label
-                      className={cn(
-                        "flex h-8 shrink-0 items-center gap-0.5 rounded-full px-2 text-[11px] font-medium",
-                        chargeRequired ? "bg-amber-400/15 text-amber-200" : "bg-emerald-400/15 text-emerald-300",
-                      )}
-                    >
-                      to
-                      <input
-                        type="number"
-                        min={1}
-                        max={80}
-                        value={Math.round(chargeTo)}
-                        onChange={(e) => {
-                          const n = Number(e.target.value);
-                          if (!Number.isFinite(n)) return;
-                          const v = Math.max(5, Math.min(80, Math.round(n)));
-                          setChargeToSoc((cur) => ({ ...cur, [userI]: v }));
-                          setAcceptCharge((cur) => ({ ...cur, [userI]: true }));
-                        }}
-                        className="h-6 w-10 bg-transparent text-center text-xs tabular-nums text-foreground outline-none"
-                      />
-                      %
-                    </label>
-                  ) : null}
-                  {chargeTo != null && chargedLeg?.charge && !chargeRequired ? (
-                    <button
-                      type="button"
-                      onClick={() => setAcceptCharge((cur) => ({ ...cur, [userI]: !cur[userI] }))}
-                      className={cn(
-                        "h-8 shrink-0 rounded-full px-3 text-[11px] font-medium",
-                        chargedLeg?.accepted
-                          ? "bg-emerald-400 text-background"
-                          : "bg-emerald-400/15 text-emerald-300",
-                      )}
-                    >
-                      {chargedLeg?.accepted ? "Accepted" : "Accept"}
-                    </button>
-                  ) : null}
-                  {inStore ? (
-                    <button
-                      type="button"
-                      onClick={() => removeStop(stop.id)}
-                      className="flex size-9 shrink-0 items-center justify-center rounded-full text-muted"
-                      aria-label={`Remove ${stop.name}`}
-                    >
-                      <Trash2 className="size-4" />
-                    </button>
-                  ) : null}
-                </div>
-                {(inbound || outbound) ? (
-                  <div className="mt-2 pl-10">
-                    {inbound && !via ? (
-                    <div className="flex rounded-full bg-surface-2 p-1">
-                      {LEG_MODES.map((mode) => {
-                        const on = (modes[userI] ?? "fastest") === mode;
-                        return (
-                          <button
-                            key={mode}
-                            type="button"
-                            onClick={() => setLegMode(userI, mode)}
-                            className={cn(
-                              "h-8 flex-1 rounded-full text-[10px] font-medium",
-                              on ? "bg-foreground text-background" : "text-muted",
-                            )}
-                          >
-                            {modeLabel(mode)}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    ) : null}
-                    {open ? (
-                      <div className="mt-3">
-                    <p className="text-[11px] text-subtle">
-                      {modeHint((modes[userI] ?? "fastest") as LegMode)}
-                    </p>
-                    <div className="mt-3 flex gap-1">
-                      <button
-                        type="button"
-                        onClick={() => moveStop(stop.id, -1)}
-                        disabled={stops.findIndex((s) => s.id === stop.id) <= 0}
-                        className="flex h-8 flex-1 items-center justify-center rounded-full bg-surface-2 text-muted disabled:opacity-30"
-                        aria-label={`Move ${stop.name} up`}
-                      >
-                        <ChevronUp className="size-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => moveStop(stop.id, 1)}
-                        disabled={(() => {
-                          const idx = stops.findIndex((s) => s.id === stop.id);
-                          return idx < 0 || idx >= stops.length - 1;
-                        })()}
-                        className="flex h-8 flex-1 items-center justify-center rounded-full bg-surface-2 text-muted disabled:opacity-30"
-                        aria-label={`Move ${stop.name} down`}
-                      >
-                        <ChevronDown className="size-4" />
-                      </button>
-                    </div>
-                    <div className="mt-3 grid grid-cols-2 gap-2">
-                      <div className="flex rounded-full bg-surface-2 p-1">
-                        {(["auto", "depart", "arrive"] as const).map((kind) => {
-                          const on = (legWhen[userI]?.kind ?? "auto") === kind;
-                          return (
-                            <button
-                              key={kind}
-                              type="button"
-                              onClick={() =>
-                                setLegWhen(userI, {
-                                  kind,
-                                  hhmm: kind === "auto" ? "" : asDateTime(legWhen[userI]?.at || legWhen[userI]?.hhmm || leg?.departAt || clock),
-                                  at: kind === "auto" ? "" : asDateTime(legWhen[userI]?.at || legWhen[userI]?.hhmm || leg?.departAt || clock),
-                                })
-                              }
-                              className={cn(
-                                "h-8 flex-1 rounded-full text-[10px] font-medium",
-                                on ? "bg-foreground text-background" : "text-muted",
-                              )}
-                            >
-                              {kind === "auto" ? "Auto" : kind === "depart" ? "Leave" : "Arrive"}
-                            </button>
-                          );
-                        })}
-                      </div>
-                      {(legWhen[userI]?.kind ?? "auto") !== "auto" ? (
-                        <input
-                          type="datetime-local"
-                          value={asDateTime(legWhen[userI]?.at || legWhen[userI]?.hhmm || leg?.departAt || clock)}
-                          onChange={(e) =>
-                            setLegWhen(userI, {
-                              kind: legWhen[userI]?.kind === "arrive" ? "arrive" : "depart",
-                              hhmm: e.target.value,
-                              at: e.target.value,
-                            })
-                          }
-                          className="h-8 rounded-full bg-surface-2 px-3 text-xs text-foreground outline-none"
-                        />
-                      ) : (
-                        <p className="flex h-8 items-center text-[11px] tabular-nums text-subtle">
-                          {leg ? `${formatDateTime(leg.departAt)} → ${formatDateTime(leg.arriveAt)}` : "Follows previous"}
-                        </p>
-                      )}
-                    </div>
-                    <p className="mt-3 text-[11px] font-medium uppercase tracking-wide text-muted">
-                      Charge search
-                    </p>
-                    <div className="mt-1 flex gap-1">
-                      {DETOUR_KM.map((km) => {
-                        const on = (detours[userI] ?? DEFAULT_DETOUR_KM) === km;
-                        return (
-                          <button
-                            key={km}
-                            type="button"
-                            onClick={() => setLegDetour(userI, km)}
-                            className={cn(
-                              "h-8 flex-1 rounded-full text-[11px] font-medium",
-                              on ? "bg-foreground text-background" : "bg-surface-2 text-muted",
-                            )}
-                          >
-                            {formatDetour(km, units)}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    {(modes[userI] ?? "fastest") === "cheapest" ? (
-                      <>
-                        <p className="mt-3 text-[11px] font-medium uppercase tracking-wide text-muted">
-                          Max wait for cheap price
-                        </p>
-                        <div className="mt-1 flex gap-1">
-                          {WAIT_MIN.map((min) => {
-                            const on = (waits[userI] ?? DEFAULT_WAIT_MIN) === min;
-                            return (
-                              <button
-                                key={min}
-                                type="button"
-                                onClick={() => setLegWait(userI, min)}
-                                className={cn(
-                                  "h-8 flex-1 rounded-full text-[11px] font-medium",
-                                  on ? "bg-foreground text-background" : "bg-surface-2 text-muted",
-                                )}
-                              >
-                                {formatWaitCap(min)}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </>
-                    ) : null}
-                    {chargedLeg?.charge ? (
-                      <div className="mt-3 space-y-2">
-                        <ChargeChoice
-                          title={
-                            chargedLeg.advice === "required"
-                              ? "Charge required"
-                              : chargedLeg.advice === "suggested"
-                                ? "Suggested · good price"
-                                : "Charge here"
-                          }
-                          spot={chargedLeg.charge}
-                          active
-                          required={chargedLeg.needed}
-                          suggested={chargedLeg.suggested}
-                        />
-                        <label className="flex items-center justify-between gap-3 rounded-xl bg-surface-2 px-3 py-2">
-                          <span className="text-xs text-muted">Charge to</span>
-                          <span className="flex items-center gap-1 text-sm">
-                            <input
-                              type="number"
-                              min={1}
-                              max={80}
-                              value={Math.round(
-                                chargeToSoc[userI] ??
-                                  (chargedLeg.accepted ? chargedLeg.startSoc : chargedLeg.autoStartSoc),
-                              )}
-                              onChange={(e) => {
-                                const n = Number(e.target.value);
-                                if (!Number.isFinite(n)) return;
-                                const v = Math.max(5, Math.min(80, Math.round(n)));
-                                setChargeToSoc((cur) => ({ ...cur, [userI]: v }));
-                                setAcceptCharge((cur) => ({ ...cur, [userI]: true }));
-                              }}
-                              className="h-8 w-14 rounded-md bg-background text-center text-sm tabular-nums outline-none"
-                            />
-                            %
-                          </span>
-                        </label>
-                        {chargedLeg.accepted && Math.abs(chargedLeg.extraKr) >= 0.5 ? (
-                          <p
-                            className={cn(
-                              "text-[11px] font-medium",
-                              chargedLeg.extraKr > 0 ? "text-amber-300" : "text-emerald-300",
-                            )}
-                          >
-                            {chargedLeg.extraKr > 0 ? "+" : ""}
-                            {formatKrValue(chargedLeg.extraKr, 0)} kr extra vs auto {formatNumber(chargedLeg.autoStartSoc, 0)}%
-                          </p>
-                        ) : null}
-                        <button
-                          type="button"
-                          onClick={() => insertCharge(userI, chargedLeg.charge!)}
-                          className="h-9 w-full rounded-full bg-surface-2 text-xs font-medium text-muted"
-                        >
-                          Add charger as stop
-                        </button>
-                        {chargedLeg.needed ? (
-                          <p className="rounded-lg bg-amber-400/15 px-3 py-1.5 text-[11px] font-medium text-amber-200">
-                            Charge required here to finish this leg
-                          </p>
-                        ) : chargedLeg.suggested ? (
-                          <p className="rounded-lg bg-emerald-400/15 px-3 py-1.5 text-[11px] font-medium text-emerald-300">
-                            Optional · good price, battery low enough
-                          </p>
-                        ) : null}
-                        {chargedLeg.suggested && !chargedLeg.needed ? (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setAcceptCharge((cur) => ({ ...cur, [userI]: !cur[userI] }))
-                            }
-                            className={cn(
-                              "h-9 w-full rounded-full text-xs font-medium",
-                              chargedLeg.accepted
-                                ? "bg-emerald-400 text-background"
-                                : "bg-emerald-400/15 text-emerald-300",
-                            )}
-                          >
-                            {chargedLeg.accepted ? "Accepted · SOC includes this charge" : "Accept recommended charge"}
-                          </button>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <label className="mt-3 flex items-center justify-between gap-3 rounded-xl bg-surface-2 px-3 py-2">
-                        <span className="text-xs text-muted">Charge to</span>
-                        <span className="flex items-center gap-1 text-sm">
-                          <input
-                            type="number"
-                            min={1}
-                            max={80}
-                            value={Math.round(chargeToSoc[userI] ?? leftPct)}
-                            onChange={(e) => {
-                              const n = Number(e.target.value);
-                              if (!Number.isFinite(n)) return;
-                              const v = Math.max(5, Math.min(80, Math.round(n)));
-                              setChargeToSoc((cur) => ({ ...cur, [userI]: v }));
-                              setAcceptCharge((cur) => ({ ...cur, [userI]: true }));
-                            }}
-                            className="h-8 w-14 rounded-md bg-background text-center text-sm tabular-nums outline-none"
-                          />
-                          %
-                        </span>
-                      </label>
-                    )}
-                    <div className="mt-3">
-                        {(via || chargedLeg?.charge) && i > 0 ? (
-                          <ChargerPicker
-                            open={pickerStop === stop.id}
-                            onToggle={() => setPickerStop((cur) => (cur === stop.id ? null : stop.id))}
-                            origin={{ lat: stop.lat, lng: stop.lng, name: stop.name }}
-                            radiusM={chargePickRadiusM(pickMode, detours[userI] ?? DEFAULT_DETOUR_KM)}
-                            radiusLabel={modeLabel(pickMode)}
-                            locations={chargerPool}
-                            memberships={networkAbo}
-                            acKw={profile.acKw}
-                            activeId={
-                              chargedLeg?.charge?.locationId ??
-                              (stop.id.startsWith("via-") ? stop.id.slice("via-".length) : undefined)
-                            }
-                            onPick={(hit) => {
-                              if (inStore) {
-                                replaceStop(stop.id, hit);
-                              } else {
-                                const detour = detours[userI] ?? DEFAULT_DETOUR_KM;
-                                insertStopAt(userI + 1, hit);
-                                setLegMode(userI, pickMode);
-                                setLegDetour(userI, detour);
-                              }
-                              setPickerStop(null);
-                              toast(`Charging stop set to ${hit.name}`);
-                            }}
-                          />
-                        ) : null}
-                        <BackupPicks
-                          options={chargedLeg?.chargeOptions ?? []}
-                          primaryId={chargedLeg?.charge?.locationId}
-                          selectedId={prefer[userI] ?? backupLoc[userI]}
-                          onPick={(id) => {
-                            setPrefer((cur) => {
-                              const next = { ...cur };
-                              if (!id) delete next[userI];
-                              else next[userI] = id;
-                              return next;
-                            });
-                            setBackupLoc((cur) => {
-                              const next = { ...cur };
-                              if (!id) delete next[userI];
-                              else next[userI] = id;
-                              return next;
-                            });
-                          }}
-                        />
-                    </div>
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-              </li>
-            );
-          })}
-        </ol>
-
-        <div className="mt-3">
-          <label className="text-xs text-muted">
-            Add stop
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Address or place"
-              className="mt-1 h-11 w-full rounded-md bg-surface-2 px-3 text-sm outline-none"
-            />
-          </label>
-          {hits.length ? (
-            <ul className="mt-2 divide-y divide-border rounded-xl bg-surface-2">
-              {hits.map((hit) => (
-                <li key={`${hit.lat},${hit.lng}`}>
-                  <button
-                    type="button"
-                    onClick={() => addStop(hit)}
-                    className="flex w-full items-center gap-3 px-3 py-3 text-left"
-                  >
-                    <Plus className="size-4 shrink-0 text-muted" />
-                    <span className="truncate text-sm">{hit.label}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <ul className="mt-2 flex flex-wrap gap-2">
-              {Object.entries(PLACES)
-                .filter(([name]) => {
-                  if (name.includes("Supercharger") || name.includes("Wall")) return false;
-                  if (name === "Home" && stops.some((s) => s.id === "home" || s.name === "Home")) return false;
-                  return true;
-                })
-                .slice(0, 8)
-                .map(([name, g]) => (
-                  <li key={name}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (name === "Home") {
-                          addStopToStore({ id: "home", name: "Home", lat: g.lat, lng: g.lng });
-                          return;
-                        }
-                        addStop({ label: name, lat: g.lat, lng: g.lng });
-                      }}
-                      className="h-9 rounded-full bg-surface-2 px-3 text-xs font-medium text-muted"
-                    >
-                      {g.short}
-                    </button>
-                  </li>
-                ))}
-            </ul>
-          )}
-        </div>
-      </section>
+      {stopsPlanner}
       </div>
       ) : null}
       </>
