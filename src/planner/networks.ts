@@ -836,3 +836,26 @@ export function breakEvenKwh(monthlyKr: number, adHocKr: number, memberKr: numbe
   if (monthlyKr <= 0 || saving <= 0.05) return null;
   return Math.ceil(monthlyKr / saving);
 }
+
+const REGION_IDS = new Set<string>(EU_REGIONS.map((r) => r.id));
+
+/** A country code (ISO 3166 alpha-2; GB counts as UK) as a catalog region, or null. */
+export function regionOf(code: string | null | undefined): EuRegion | null {
+  if (!code) return null;
+  const c = code.trim().toUpperCase();
+  const id = c === "GB" ? "UK" : c;
+  return REGION_IDS.has(id) ? (id as EuRegion) : null;
+}
+
+/**
+ * The kr/kWh a charge costs at this network's charger in this country: the country's
+ * price when the catalog has one (2.60 kr at Danish Superchargers for owners), else the
+ * network's typical European price.
+ */
+export function rateAt(id: string, hasAbo: boolean, country?: string | null): number | null {
+  const n = networkById(id);
+  if (!n) return null;
+  const region = regionOf(country);
+  const local = region ? regionalOwn(n, region, hasAbo) : null;
+  return local ?? rateForNetwork(id, hasAbo);
+}

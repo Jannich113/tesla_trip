@@ -447,3 +447,17 @@ describe("battery limits and charging speed from the Car tab", () => {
     assert.deepEqual(legs.map((l) => l.to.id), pricePlan({ ...base, limits: {} }).map((l) => l.to.id));
   });
 });
+
+
+describe('a Danish Supercharger costs the Danish price', () => {
+  it('prices the charge at 2.60 kr for an owner in Denmark', () => {
+    const dk = chargersEvery(40, 600).map((c) => ({ ...c, networkId: 'tesla', country: 'DK' }));
+    const legs = pricePlan({
+      stops: [START, endOf(600)], modes: ['fastest'], detours: [12], routes: [road(600)], soc: 80, usableKwh: 75,
+      locations: dk, hours: [], acKw: 11, acKr: 2, speedEff: defaultSpeedEff(250), departHhmm: '', memberships: { tesla: true },
+    });
+    const charged = legs.filter((l) => l.accepted && l.charge);
+    assert.ok(charged.length > 0);
+    for (const l of charged) assert.equal(l.charge!.rateKr, 2.6);
+  });
+});

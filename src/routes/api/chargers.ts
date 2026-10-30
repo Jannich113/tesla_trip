@@ -3,7 +3,7 @@ import { noStore } from "@/lib/http-cache";
 import { env } from "@/lib/env.server";
 import { alongFraction, minDistToPathM } from "@/planner/insert";
 import { isDcStation, networkFromOperator, networkFromOsmTags } from "@/planner/osm-operator";
-import { rateForNetwork } from "@/planner/networks";
+import { rateAt } from "@/planner/networks";
 import { seedsAlongPath } from "@/planner/seed-chargers";
 import {
   encodePolyline,
@@ -33,6 +33,8 @@ export type RouteCharger = {
   lng: number;
   kind: "supercharger" | "custom";
   networkId: string | null;
+  /** ISO 3166 alpha-2 when the source gives it. */
+  country?: string | null;
   usdPerKwh: number;
   operator: string;
   preset: false;
@@ -68,9 +70,11 @@ function toCharger(el: OsmEl): RouteCharger | null {
   const operator = tags.operator || tags.brand || tags.name || "Charger";
   const name = tags.name || operator;
   const short = (tags.brand || tags.operator || name).split(/[,(/]/)[0].trim().slice(0, 22);
-  const rate = networkId ? rateForNetwork(networkId, false) : null;
+  const country = tags["addr:country"]?.toUpperCase() || null;
+  const rate = networkId ? rateAt(networkId, false, country) : null;
   return {
     id: `osm-${el.type}-${el.id}`,
+    country,
     name,
     short,
     lat: lat as number,
@@ -155,7 +159,7 @@ async function fetchOsmSection(section: [number, number][], radiusM: number, sta
 type OcmPoi = {
   ID?: number;
   UUID?: string;
-  AddressInfo?: { Title?: string; Latitude?: number; Longitude?: number };
+  AddressInfo?: { Title?: string; Latitude?: number; Longitude?: number; Country?: { ISOCode?: string } };
   OperatorInfo?: { Title?: string };
   StatusType?: { IsOperational?: boolean };
   UsageType?: { Title?: string };
@@ -177,9 +181,11 @@ function ocmToCharger(poi: OcmPoi): RouteCharger | null {
   const networkId = networkFromOperator(`${operator} ${name}`);
   // The query asks for DC fast chargers only (levelid=3); a missing power figure is a data
   // gap, common where OCM is thin (#72), not a slow charger. Known slow ones are dropped above.
-  const rate = networkId ? rateForNetwork(networkId, false) : null;
+  const country = addr.Country?.ISOCode?.toUpperCase() || null;
+  const rate = networkId ? rateAt(networkId, false, country) : null;
   return {
     id: `ocm-${poi.ID ?? poi.UUID ?? `${lat},${lng}`}`,
+    country,
     name,
     short: (addr.Title || name).split(/[,(/]/)[0].trim().slice(0, 28),
     lat: lat as number,

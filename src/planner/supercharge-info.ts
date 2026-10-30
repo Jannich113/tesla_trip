@@ -3,7 +3,8 @@
  * community-maintained, has no stated data license, and is credited in the planner.
  * Fetched once a day on the server; this module only maps and filters it.
  */
-import { rateForNetwork } from "./networks.ts";
+import { rateAt } from "./networks.ts";
+import { COUNTRY_PROFILES } from "./country-profiles.ts";
 
 export const SUPERCHARGE_INFO_URL = "https://supercharge.info/service/supercharge/allSites";
 export const SUPERCHARGE_INFO_CREDIT = "supercharge.info";
@@ -28,11 +29,33 @@ export type SuperchargerRow = {
   lng: number;
   kind: "supercharger";
   networkId: "tesla";
+  country: string | null;
   usdPerKwh: number;
   operator: string;
   preset: false;
   radiusM: number;
 };
+
+const COUNTRY_ALIASES: Record<string, string> = {
+  "united kingdom": "UK",
+  "great britain": "UK",
+  "czech republic": "CZ",
+  czechia: "CZ",
+  "the netherlands": "NL",
+  netherlands: "NL",
+  "bosnia and herzegovina": "BA",
+  "north macedonia": "MK",
+  macedonia: "MK",
+  turkiye: "TR",
+};
+
+/** supercharge.info gives country names ("Denmark"); the price catalog uses codes. */
+export function countryCodeFromName(name: string | null | undefined): string | null {
+  if (!name) return null;
+  const key = name.trim().toLowerCase();
+  if (COUNTRY_ALIASES[key]) return COUNTRY_ALIASES[key];
+  return COUNTRY_PROFILES.find((c) => c.name.toLowerCase() === key)?.id ?? null;
+}
 
 /** An open Supercharger as a planner charger; null for planned, closed or broken entries. */
 export function superchargerFromSite(site: SuperchargeInfoSite): SuperchargerRow | null {
@@ -41,6 +64,7 @@ export function superchargerFromSite(site: SuperchargeInfoSite): SuperchargerRow
   const lng = Number(site.gps?.longitude);
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || site.id == null) return null;
   const place = site.address?.city || site.name?.split(",")[0]?.trim() || "Supercharger";
+  const country = countryCodeFromName(site.address?.country);
   return {
     id: `sci-${site.id}`,
     name: `Tesla Supercharger ${place}`,
@@ -49,7 +73,8 @@ export function superchargerFromSite(site: SuperchargeInfoSite): SuperchargerRow
     lng,
     kind: "supercharger",
     networkId: "tesla",
-    usdPerKwh: (rateForNetwork("tesla", false) ?? 3.3) / DKK_PER_USD,
+    country,
+    usdPerKwh: (rateAt("tesla", false, country) ?? 3.3) / DKK_PER_USD,
     operator: "Tesla",
     preset: false,
     radiusM: 250,

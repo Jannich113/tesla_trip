@@ -14,6 +14,8 @@ export type ChargeLocation = {
   preset: boolean;
   radiusM: number;
   networkId?: string | null;
+  /** ISO 3166 alpha-2, when the source says; prices follow the country (see rateAt). */
+  country?: string | null;
 };
 
 export const HOME_LOCATION_ID = "loc-home";

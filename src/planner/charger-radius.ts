@@ -1,6 +1,6 @@
 import { haversineM } from "./insert.ts";
 import { chargeSearchKm, stallKw, type LegMode } from "./modes.ts";
-import { networkById, rateForNetwork } from "./networks.ts";
+import { networkById, rateAt } from "./networks.ts";
 
 export type ChargerPoint = {
   id: string;
@@ -43,7 +43,7 @@ export type ChargerMark = {
 };
 
 export function chargerMark(
-  loc: { kind?: string; networkId?: string | null; usdPerKwh?: number },
+  loc: { kind?: string; networkId?: string | null; usdPerKwh?: number; country?: string | null },
   memberships: Record<string, boolean>,
   acKw: number,
 ): ChargerMark {
@@ -52,7 +52,7 @@ export function chargerMark(
   const network = netId ? (networkById(netId)?.name ?? netId) : "DC";
   const short = network.split(/\s+/)[0] || network;
   const kw = stallKw(kind, acKw);
-  const rate = netId ? rateForNetwork(netId, Boolean(memberships[netId])) : null;
+  const rate = netId ? rateAt(netId, Boolean(memberships[netId]), loc.country) : null;
   const usd = loc.usdPerKwh ?? 0;
   // Matches planner DKK_PER_USD. Kept local so this module stays importable from node:test.
   const priceKr = rate != null ? rate : usd > 0 ? usd * 6.85 : null;

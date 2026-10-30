@@ -1,6 +1,6 @@
 import { chargeFitScore, chargeSearchKm, CHEAP_STALL_KM, defaultFocus, extraMileageKr, PREFERRED_CLOSE_M, PREFERRED_RATE_PREMIUM_KR, type LegMode, type ModeFocus } from "./modes.ts";
 import { geohashesAlongPath, inGeohashSet } from "./geohash.ts";
-import { networkIdFor, rateForNetwork } from "./networks.ts";
+import { networkIdFor, rateAt } from "./networks.ts";
 
 export type ViaLoc = {
   id: string;
@@ -11,6 +11,7 @@ export type ViaLoc = {
   name?: string;
   short?: string;
   networkId?: string | null;
+  country?: string | null;
 };
 
 export type SplitRoute = {
@@ -256,7 +257,7 @@ export function pickViaOnPath(opts: {
   const pool = locationsNearPath(locations, path, searchBand);
   const locRate = (loc: ViaLoc) => {
     const netId = networkIdFor(loc.kind, loc.networkId);
-    return (netId ? rateForNetwork(netId, Boolean(memberships[netId])) : null) ?? loc.usdPerKwh * 6.85;
+    return (netId ? rateAt(netId, Boolean(memberships[netId]), loc.country) : null) ?? loc.usdPerKwh * 6.85;
   };
   let best: ViaLoc | null = null;
   let bestScore = -Infinity;
@@ -363,7 +364,7 @@ export function pickViaAtRange(opts: Parameters<typeof pickViaOnPath>[0]): ViaLo
     Boolean(preferredNetwork) && (opts.mode === "fastest" || focus === "time");
   const locRate = (loc: ViaLoc) => {
     const netId = networkIdFor(loc.kind, loc.networkId);
-    return (netId ? rateForNetwork(netId, Boolean(memberships[netId])) : null) ?? loc.usdPerKwh * 6.85;
+    return (netId ? rateAt(netId, Boolean(memberships[netId]), loc.country) : null) ?? loc.usdPerKwh * 6.85;
   };
   const band = pris
     ? Math.max(CHEAP_STALL_KM, opts.detourKm) * 1000

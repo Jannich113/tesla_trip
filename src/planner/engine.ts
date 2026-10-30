@@ -31,7 +31,7 @@ import {
   waitMinUntil,
   waitMinUntilDated,
 } from "./modes";
-import { networkIdFor, networkLabel, rateForNetwork } from "./networks";
+import { networkIdFor, networkLabel, rateAt } from "./networks";
 import {
   PLANNER_ZONE,
   activeVariableFeed,
@@ -591,7 +591,7 @@ function toPriced(
     });
     if (quoted) {
       const hasAbo = Boolean(netId && memberships[netId]);
-      const catalog = netId ? rateForNetwork(netId, hasAbo) : null;
+      const catalog = netId ? rateAt(netId, hasAbo, loc.country) : null;
       const rateKr = hasAbo && catalog != null ? Math.min(quoted.rateKr, catalog) : quoted.rateKr;
       return {
         locationId: loc.id,
@@ -611,7 +611,7 @@ function toPriced(
   }
   if (netId) {
     const hasAbo = Boolean(memberships[netId]);
-    const rate = rateForNetwork(netId, hasAbo) ?? usdToKr(loc.usdPerKwh);
+    const rate = rateAt(netId, hasAbo, loc.country) ?? usdToKr(loc.usdPerKwh);
     return {
       locationId: loc.id,
       name: loc.short || loc.name,
@@ -733,7 +733,7 @@ export function pickCharges(opts: {
       });
       if (quoted) return quoted.rateKr;
     }
-    return (id ? rateForNetwork(id, Boolean(memberships[id])) : null) ?? usdToKr(loc.usdPerKwh);
+    return (id ? rateAt(id, Boolean(memberships[id]), loc.country) : null) ?? usdToKr(loc.usdPerKwh);
   };
 
   const exclusiveFast = Boolean(preferredNetwork) && (mode === "fastest" || focus === "time");

@@ -1113,3 +1113,27 @@ describe("prices published in DKK", () => {
     assert.equal(regionalInDkk(tesla, "DE"), false);
   });
 });
+
+describe("charge prices follow the charger's country", () => {
+  it("uses the country's price when the catalog has one", async () => {
+    const { rateAt, rateForNetwork, regionOf } = await import("./networks.ts");
+    assert.equal(rateAt("tesla", true, "DK"), 2.6);
+    assert.equal(rateAt("tesla", false, "dk"), 3.6);
+    assert.equal(rateAt("ionity", true, "DK"), 2.29);
+    // No country, or one without a catalog price: the network's European price.
+    assert.equal(rateAt("tesla", true, null), rateForNetwork("tesla", true));
+    assert.equal(rateAt("tesla", true, "US"), rateForNetwork("tesla", true));
+    assert.equal(regionOf("GB"), "UK");
+    assert.equal(regionOf("XX"), null);
+  });
+
+  it("reads supercharge.info's country names", async () => {
+    const { countryCodeFromName, superchargerFromSite } = await import("./supercharge-info.ts");
+    assert.equal(countryCodeFromName("Denmark"), "DK");
+    assert.equal(countryCodeFromName("United Kingdom"), "UK");
+    assert.equal(countryCodeFromName("Atlantis"), null);
+    const row = superchargerFromSite({ id: 1, name: "Køge", status: "OPEN", address: { city: "Køge", country: "Denmark" }, gps: { latitude: 55.46, longitude: 12.18 } });
+    assert.equal(row?.country, "DK");
+    assert.ok(Math.abs(row!.usdPerKwh * 6.85 - 3.6) < 0.01);
+  });
+});

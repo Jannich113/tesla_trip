@@ -28,6 +28,7 @@ function asLocation(c: RouteCharger | ChargeLocation): ChargeLocation {
     preset: false,
     radiusM: "radiusM" in c && c.radiusM ? c.radiusM : 250,
     networkId: "networkId" in c ? c.networkId : null,
+    country: c.country ?? null,
   };
 }
 
