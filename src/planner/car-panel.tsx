@@ -199,10 +199,12 @@ export function CarPanel({
             value={modelId}
             onChange={(e) => onModel(e.target.value as TeslaModelId)}
             aria-label="Tesla model"
-            className="absolute inset-0 cursor-pointer opacity-0"
+            // The select is invisible over the card, but its opened list is native: give it the
+            // app's dark colors, or some browsers draw it white on white.
+            className="absolute inset-0 cursor-pointer bg-background text-foreground opacity-0 [color-scheme:dark]"
           >
             {TESLA_MODELS.map((m) => (
-              <option key={m.id} value={m.id}>
+              <option key={m.id} value={m.id} className="bg-background text-foreground">
                 {m.model} {m.name !== m.model ? `(${m.name})` : ""} · {m.year}
               </option>
             ))}
