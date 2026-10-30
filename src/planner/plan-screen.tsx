@@ -12,6 +12,7 @@ import { drivingFactor, scaleSpeedEff, sessionDcKw, useCarSettings, variantFor }
 import { CarPanel } from "./car-panel";
 import { Sheet } from "./sheet";
 import { forGoogle, GOOGLE_MAX_WAYPOINTS, shareStops } from "./share-stops";
+import { canShare, teslaShareTarget } from "./tesla-share";
 import { NetworksPanel } from "./networks-panel";
 
 /**
@@ -728,6 +729,9 @@ export function PlanScreen() {
   // Import from, or open in, Google / Apple Maps.
   const [mapsOpen, setMapsOpen] = useState(false);
   const closeMaps = useCallback(() => setMapsOpen(false), []);
+  // Send one place at a time to the Tesla app.
+  const [teslaOpen, setTeslaOpen] = useState(false);
+  const closeTesla = useCallback(() => setTeslaOpen(false), []);
   const [pickerStop, setPickerStop] = useState<string | null>(null);
   const [elpris, setElpris] = useState<ElprisData | null>(null);
 
@@ -1451,13 +1455,6 @@ export function PlanScreen() {
     return [...ids];
   }, [selected, viewLegs, stops, optionRows]);
 
-  function routePoints() {
-    if (viewLegs.length) {
-      const pts = [viewLegs[0].from, ...viewLegs.map((leg) => leg.to)];
-      return pts.filter((p, i) => i === 0 || p.lat !== pts[i - 1].lat || p.lng !== pts[i - 1].lng);
-    }
-    return stops;
-  }
 
   function onSave() {
     if (stops.length < 2) {
@@ -1540,77 +1537,33 @@ export function PlanScreen() {
     }
   }
 
-  async function exportToTesla(planStops: { name: string; lat: number; lng: number }[], title: string) {
-    const pts = planStops.filter(
-      (s) =>
-        Number.isFinite(s.lat) &&
-        Number.isFinite(s.lng) &&
-        Math.abs(s.lat) <= 90 &&
-        Math.abs(s.lng) <= 180,
-    );
-    const fail = (message: string) => {
-      toast.error(message, {
-        action: {
-          label: "Retry",
-          onClick: () => {
-            void exportToTesla(planStops, title);
-          },
-        },
-      });
-    };
-
-    if (!pts.length) {
-      fail("No valid coordinates to send");
-      return;
-    }
-    let url = "";
+  /**
+   * Hand one place to the phone's share menu, where the Tesla app sends it to the car. Without
+   * a share menu (most computers) the link is copied instead.
+   */
+  async function shareToTesla(stop: { name: string; lat: number; lng: number }) {
+    let target: ReturnType<typeof teslaShareTarget>;
     try {
-      url = pts.length === 1 ? teslaDestUrl(pts[0]) : mapsDirUrl(pts);
+      target = teslaShareTarget(stop);
     } catch (err) {
-      fail(err instanceof Error ? err.message : "Could not build a Tesla nav link");
+      toast.error(err instanceof Error ? err.message : "Could not share this stop");
       return;
     }
-    if (!url) {
-      fail("Could not build a Tesla nav link");
-      return;
-    }
-
-    const fallback = async (reason?: string) => {
-      let opened = false;
+    if (canShare()) {
       try {
-        const win = window.open(url, "_blank", "noopener,noreferrer");
-        opened = Boolean(win);
-      } catch {
-        opened = false;
-      }
-      if (opened) {
-        toast("Open in Tesla app, or share the map to the car");
-        return;
-      }
-      try {
-        if (navigator.clipboard?.writeText) {
-          await withRetry(() => navigator.clipboard.writeText(url), { delaysMs: [0, 120] });
-          fail(reason ? `${reason}. Link copied.` : "Popup blocked. Tesla link copied.");
-          return;
-        }
-      } catch {
-        /* clipboard blocked too */
-      }
-      fail(reason ? `${reason}. Copy this link: ${url}` : `Could not open Tesla nav. ${url}`);
-    };
-
-    if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
-      try {
-        await navigator.share({ title: title || "Tesla trip", text: title, url });
+        await navigator.share(target);
         return;
       } catch (err) {
         if (isShareCancel(err)) return;
-        await fallback(shareErrorMessage(err));
-        return;
+        toast.error(shareErrorMessage(err));
       }
     }
-
-    await fallback();
+    try {
+      await withRetry(() => navigator.clipboard.writeText(`${target.text}\n${target.url}`), { delaysMs: [0, 120] });
+      toast(`Copied ${target.title}. Open this page on your phone to send it to the Tesla app.`);
+    } catch {
+      toast.error(`Could not copy. Link: ${target.url}`);
+    }
   }
 
   const mapRoutes: MapRoute[] = useMemo(() => {
@@ -2388,6 +2341,69 @@ export function PlanScreen() {
       {pane === "plan" ? (
       <div className="space-y-5">
 
+      <Sheet open={teslaOpen} onClose={closeTesla} title="Send to Tesla" subtitle="One place at a time, through the Tesla app">
+        {sharePts.length < 2 ? (
+          <p className="px-1 text-sm text-muted">Add a destination first.</p>
+        ) : (
+          <>
+            <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Destination</p>
+              <button
+                type="button"
+                onClick={() => void shareToTesla(sharePts[sharePts.length - 1])}
+                className="mt-2 flex h-12 w-full items-center gap-2 rounded-full bg-foreground px-4 text-left text-sm font-medium text-background"
+              >
+                <Navigation className="size-4 shrink-0" aria-hidden />
+                <span className="truncate">{sharePts[sharePts.length - 1].name}</span>
+              </button>
+              <p className="mt-2 text-[11px] text-subtle">
+                The car plans its own Supercharger stops on the way, which can differ from this plan.
+              </p>
+            </section>
+            {sharePts.length > 2 ? (
+              <section className="mt-3 rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Or drive stop by stop</p>
+                <p className="mt-1 text-xs text-muted">
+                  To follow this plan's chargers, send the next stop, and the one after when you get there.
+                </p>
+                <ol className="mt-2 divide-y divide-border">
+                  {sharePts.slice(1, -1).map((p, i) => (
+                    <li key={`${p.lat},${p.lng},${i}`}>
+                      <button
+                        type="button"
+                        onClick={() => void shareToTesla(p)}
+                        className="flex w-full items-center gap-3 py-2.5 text-left"
+                      >
+                        <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-surface-2 text-[11px] tabular-nums text-muted">
+                          {i + 1}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-sm">{p.name}</span>
+                        {p.charge ? (
+                          <span className="shrink-0 rounded-full bg-emerald-400/15 px-1.5 py-0.5 text-[10px] text-emerald-300">Charge</span>
+                        ) : null}
+                        <Navigation className="size-3.5 shrink-0 text-muted" aria-hidden />
+                      </button>
+                    </li>
+                  ))}
+                </ol>
+              </section>
+            ) : null}
+            <section className="mt-3 rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted">How it works</p>
+              <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs text-muted">
+                <li>Open this page on your phone, with the Tesla app installed and signed in.</li>
+                <li>Tap a place above, then pick Tesla in the share menu.</li>
+                <li>The Tesla app sends it to the car as the destination.</li>
+              </ol>
+              {!canShare() ? (
+                <p className="mt-2 text-[11px] text-amber-200">
+                  This browser has no share menu, so tapping a place copies it instead.
+                </p>
+              ) : null}
+            </section>
+          </>
+        )}
+      </Sheet>
       <Sheet open={mapsOpen} onClose={closeMaps} title="Google and Apple Maps" subtitle="Import a route, or open this trip">
         <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
           <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Import a route</p>
@@ -2786,7 +2802,7 @@ export function PlanScreen() {
               </button>
               <button
                 type="button"
-                onClick={() => void exportToTesla(routePoints(), name.trim() || "Tesla trip")}
+                onClick={() => setTeslaOpen(true)}
                 className="flex h-11 flex-[1.4] items-center justify-center gap-1.5 rounded-full bg-foreground text-sm font-medium text-background"
               >
                 <Navigation className="size-4" />
@@ -2853,9 +2869,12 @@ export function PlanScreen() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => void exportToTesla(plan.stops, plan.name)}
+                  onClick={() => {
+                    const dest = plan.stops[plan.stops.length - 1];
+                    if (dest) void shareToTesla(dest);
+                  }}
                   className="flex h-9 items-center gap-1 rounded-full bg-surface-2 px-3 text-[11px] font-medium text-muted"
-                  aria-label={`Send ${plan.name} to Tesla nav`}
+                  aria-label={`Send the destination of ${plan.name} to Tesla`}
                 >
                   <Navigation className="size-3.5" />
                   Tesla
@@ -3064,24 +3083,6 @@ function ChargeChoice({
   );
 }
 
-function mapsDirUrl(stops: { lat: number; lng: number }[]) {
-  if (!stops.length) throw new Error("No stops to export");
-  if (stops.length === 1) return teslaDestUrl(stops[0]);
-  const path = stops
-    .map((s) => {
-      if (!Number.isFinite(s.lat) || !Number.isFinite(s.lng)) throw new Error("A stop is missing coordinates");
-      return `${s.lat},${s.lng}`;
-    })
-    .join("/");
-  return `https://www.google.com/maps/dir/${path}`;
-}
-
-function teslaDestUrl(stop: { lat: number; lng: number }) {
-  if (!Number.isFinite(stop.lat) || !Number.isFinite(stop.lng)) {
-    throw new Error("Destination is missing coordinates");
-  }
-  return `https://www.tesla.com/navigation?lat=${stop.lat}&lng=${stop.lng}`;
-}
 
 function tripTitle(stops: { name: string }[]) {
   const start = stops[0]?.name?.trim();
