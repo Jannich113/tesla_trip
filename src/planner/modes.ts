@@ -515,9 +515,12 @@ export function hoursFrom<T extends { hour: string; ymd?: string }>(hours: T[], 
 export const FERRY_NEUTRAL = 0.5;
 export const FERRY_AVOID = 0.1;
 
-export function costingFor(mode: LegMode, avoid: boolean | CheapAvoid = false): AutoCosting {
+/** "Avoid ferries" on: Valhalla's strongest ferry penalty, every mode. */
+export const FERRY_NEVER = 0;
+
+export function costingFor(mode: LegMode, avoid: boolean | CheapAvoid = false, noFerry = false): AutoCosting {
   const a = asCheapAvoid(avoid);
-  const useFerry = mode === "cheapest" ? FERRY_AVOID : FERRY_NEUTRAL;
+  const useFerry = noFerry ? FERRY_NEVER : mode === "cheapest" ? FERRY_AVOID : FERRY_NEUTRAL;
   if (mode === "eco" || (mode === "cheapest" && a.motorways)) {
     return {
       shortest: false,

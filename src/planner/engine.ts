@@ -257,8 +257,11 @@ export function corridorKey(
   from: { lat: number; lng: number },
   to: { lat: number; lng: number },
   mode: LegMode,
+  noFerry = false,
 ) {
-  return `${from.lat.toFixed(4)},${from.lng.toFixed(4)}|${to.lat.toFixed(4)},${to.lng.toFixed(4)}|${mode}`;
+  // "Avoid ferries" routes get their own key; a plain key never prefix-matches them (#71).
+  const m = noFerry ? `${mode}~noferry` : mode;
+  return `${from.lat.toFixed(4)},${from.lng.toFixed(4)}|${to.lat.toFixed(4)},${to.lng.toFixed(4)}|${m}`;
 }
 
 export function canonRouteKey(key: string) {
@@ -306,8 +309,9 @@ export function lookupCachedRoute(
   from: { lat: number; lng: number },
   to: { lat: number; lng: number },
   mode: LegMode,
+  noFerry = false,
 ): RoutedLeg | undefined {
-  const key = corridorKey(from, to, mode);
+  const key = corridorKey(from, to, mode, noFerry);
   const hit = routeCache.get(key);
   if (hit && hit.source !== "air" && hit.path.length >= 3) return hit;
   const prefix = key + "|";
@@ -318,9 +322,9 @@ export function lookupCachedRoute(
   return undefined;
 }
 
-export async function fetchRoute(from: PlanStop, to: PlanStop, mode: LegMode): Promise<RoutedLeg> {
-  const key = corridorKey(from, to, mode);
-  const hit = lookupCachedRoute(from, to, mode);
+export async function fetchRoute(from: PlanStop, to: PlanStop, mode: LegMode, noFerry = false): Promise<RoutedLeg> {
+  const key = corridorKey(from, to, mode, noFerry);
+  const hit = lookupCachedRoute(from, to, mode, noFerry);
   if (hit) return hit;
   try {
     const body = await withRetry(
@@ -330,6 +334,7 @@ export async function fetchRoute(from: PlanStop, to: PlanStop, mode: LegMode): P
           to: `${to.lat.toFixed(4)},${to.lng.toFixed(4)}`,
           mode,
           v: "1",
+          ...(noFerry ? { noferry: "1" } : {}),
         });
         let res = await fetchWithTimeout(
           `/api/drive?${qs}`,
@@ -348,6 +353,7 @@ export async function fetchRoute(from: PlanStop, to: PlanStop, mode: LegMode): P
                 from: { lat: from.lat, lng: from.lng },
                 to: { lat: to.lat, lng: to.lng },
                 mode,
+                noFerry,
               }),
             },
             20_000,
@@ -991,7 +997,8 @@ export function pricePlan(opts: {
     }
     if (job.ferry) {
       const f = job.ferry;
-      const arriveAt = addMinutesDateTime(readyAt, f.checkInMin + f.crossingMin);
+      const portMin = f.checkInMin + f.departureWaitMin;
+      const arriveAt = addMinutesDateTime(readyAt, portMin + f.crossingMin);
       out.push({
         from: job.from,
         to: job.to,
@@ -1006,7 +1013,7 @@ export function pricePlan(opts: {
         departAt: readyAt,
         arriveAt,
         chargeMin: 0,
-        waitMin: f.checkInMin,
+        waitMin: portMin,
         startSoc: soc,
         charge: null,
         backup: null,

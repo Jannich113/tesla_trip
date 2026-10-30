@@ -1,4 +1,4 @@
-import { costingFor, type CheapAvoid, type LegMode } from "./modes";
+import { costingFor, type LegMode } from "./modes";
 import { estimateTolls } from "./tolls";
 import { decodePolyline, simplifyPath } from "./polyline";
 import { haversineM } from "./insert";
@@ -64,8 +64,8 @@ function anchored(path: [number, number][], from: Stop, to: Stop) {
   );
 }
 
-async function valhalla(from: Stop, to: Stop, mode: LegMode, avoid?: CheapAvoid): Promise<DriveRouteJson | null> {
-  const costing = costingFor(mode, avoid ?? (mode === "cheapest" ? { tolls: true, roadFees: true } : false));
+async function valhalla(from: Stop, to: Stop, mode: LegMode, noFerry = false): Promise<DriveRouteJson | null> {
+  const costing = costingFor(mode, mode === "cheapest" ? { tolls: true, roadFees: true } : false, noFerry);
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 22_000);
   try {
@@ -221,58 +221,65 @@ function stitch(parts: DriveRouteJson[], mode: LegMode): DriveRouteJson | null {
   );
 }
 
-async function fastestPool(from: Stop, to: Stop): Promise<DriveRouteJson[]> {
+/** With "Avoid ferries" on, routes over water drop out while a route without one is left (#71). */
+export function withoutFerries<T extends { ferries?: unknown[] }>(list: T[], noFerry: boolean): T[] {
+  if (!noFerry) return list;
+  const dry = list.filter((r) => !r.ferries?.length);
+  return dry.length ? dry : list;
+}
+
+async function fastestPool(from: Stop, to: Stop, noFerry = false): Promise<DriveRouteJson[]> {
   const km = haversineM(from, to) / 1000;
   if (km < 320) {
     // Valhalla too, even on short trips: OSRM never takes ferries, so Copenhagen–Hamburg
     // (Rødby–Puttgarden) or Aarhus–Copenhagen (Molslinjen) would always drive around (#71).
     const [os, val] = await Promise.all([
       osrm(from, to).catch(() => null),
-      valhalla(from, to, "fastest").catch(() => null),
+      valhalla(from, to, "fastest", noFerry).catch(() => null),
     ]);
-    return [os, val].filter((r): r is DriveRouteJson => Boolean(r && okRoute(r, from, to)));
+    return withoutFerries([os, val].filter((r): r is DriveRouteJson => Boolean(r && okRoute(r, from, to))), noFerry);
   }
   const [alts, plain, val] = await Promise.all([
     osrmRoutes(from, to, "&alternatives=true").catch(() => []),
     osrmRoutes(from, to).catch(() => []),
-    valhalla(from, to, "fastest").catch(() => null),
+    valhalla(from, to, "fastest", noFerry).catch(() => null),
   ]);
   const list = [...alts, ...plain, val].filter((r): r is DriveRouteJson =>
     Boolean(r && okRoute(r, from, to)),
   );
-  return list;
+  return withoutFerries(list, noFerry);
 }
 
-async function hop(from: Stop, to: Stop, mode: LegMode): Promise<DriveRouteJson | null> {
+async function hop(from: Stop, to: Stop, mode: LegMode, noFerry = false): Promise<DriveRouteJson | null> {
   if (mode === "eco") {
     const [v, o, alts] = await Promise.all([
-      valhalla(from, to, "eco").catch(() => null),
+      valhalla(from, to, "eco", noFerry).catch(() => null),
       osrm(from, to).catch(() => null),
       osrmRoutes(from, to, "&alternatives=true").catch(() => []),
     ]);
     const fast = o && okRoute(o, from, to) ? o : null;
-    const cands = [v, ...alts].filter((r): r is DriveRouteJson => Boolean(r && okRoute(r, from, to)));
+    const cands = withoutFerries([v, ...alts].filter((r): r is DriveRouteJson => Boolean(r && okRoute(r, from, to))), noFerry);
     return pickEcoRoute(fast, cands) ?? fast ?? v;
   }
   if (mode === "cheapest") {
     const [v, skip, fastPool] = await Promise.all([
-      valhalla(from, to, "cheapest").catch(() => null),
+      valhalla(from, to, "cheapest", noFerry).catch(() => null),
       osrm(from, to, "&exclude=toll").catch(() => null),
-      fastestPool(from, to),
+      fastestPool(from, to, noFerry),
     ]);
     const fast = pickFastestRoute(fastPool);
-    const cands = [v, skip].filter((r): r is DriveRouteJson => Boolean(r && okRoute(r, from, to)));
+    const cands = withoutFerries([v, skip].filter((r): r is DriveRouteJson => Boolean(r && okRoute(r, from, to))), noFerry);
     return pickCheapAvoidRoute(fastWithoutFerry(fast, cands), cands, { tolls: true, roadFees: true }) ?? fast;
   }
-  const pool = await fastestPool(from, to);
+  const pool = await fastestPool(from, to, noFerry);
   return pickFastestRoute(pool);
 }
 
-async function routeChunked(from: Stop, to: Stop, mode: LegMode): Promise<DriveRouteJson | null> {
+async function routeChunked(from: Stop, to: Stop, mode: LegMode, noFerry = false): Promise<DriveRouteJson | null> {
   const stops = hopStops(from, to, 900);
-  if (stops.length === 2) return hop(from, to, mode);
+  if (stops.length === 2) return hop(from, to, mode, noFerry);
   const parts = await Promise.all(
-    stops.slice(0, -1).map((s, i) => hop(s, stops[i + 1], mode)),
+    stops.slice(0, -1).map((s, i) => hop(s, stops[i + 1], mode, noFerry)),
   );
   if (parts.some((p) => !p)) return null;
   return stitch(parts as DriveRouteJson[], mode);
@@ -282,20 +289,20 @@ function okRoute(route: DriveRouteJson | null, from: Stop, to: Stop) {
   return Boolean(route && anchored(route.path, from, to) && route.seconds > 0);
 }
 
-export async function routeDrive(from: Stop, to: Stop, mode: LegMode): Promise<DriveRouteJson | null> {
+export async function routeDrive(from: Stop, to: Stop, mode: LegMode, noFerry = false): Promise<DriveRouteJson | null> {
   if (mode === "fastest") {
-    const pool = await fastestPool(from, to);
+    const pool = await fastestPool(from, to, noFerry);
     const best = pickFastestRoute(pool);
     if (best) return withTolls(best, "fastest", Boolean(best.hasToll));
-    const base = await hop(from, to, "fastest");
+    const base = await hop(from, to, "fastest", noFerry);
     return base ? withTolls(base, "fastest", Boolean(base.hasToll)) : null;
   }
   if (mode === "cheapest") {
     const km = haversineM(from, to) / 1000;
     if (km > 1300) {
       const [fastLong, skipLong] = await Promise.all([
-        routeChunked(from, to, "fastest"),
-        routeChunked(from, to, "cheapest"),
+        routeChunked(from, to, "fastest", noFerry),
+        routeChunked(from, to, "cheapest", noFerry),
       ]);
       const fastOk = fastLong ? withTolls(fastLong, "fastest", Boolean(fastLong.hasToll)) : null;
       const skip = skipLong ? withTolls(skipLong, "cheapest", Boolean(skipLong.hasToll)) : null;
@@ -304,26 +311,27 @@ export async function routeDrive(from: Stop, to: Stop, mode: LegMode): Promise<D
       if (fastOk) return fastOk;
     }
     const [fastPool, skipVal, skipOsrm] = await Promise.all([
-      fastestPool(from, to),
-      valhalla(from, to, "cheapest").catch(() => null),
+      fastestPool(from, to, noFerry),
+      valhalla(from, to, "cheapest", noFerry).catch(() => null),
       osrm(from, to, "&exclude=toll").catch(() => null),
     ]);
     const fastOk = pickFastestRoute(fastPool.map((r) => withTolls(r, "fastest", Boolean(r.hasToll))));
-    const cands = [skipVal, skipOsrm]
-      .filter((r): r is DriveRouteJson => Boolean(r && okRoute(r, from, to)))
-      .map((r) => withTolls(r, "cheapest", Boolean(r.hasToll)));
+    const cands = withoutFerries(
+      [skipVal, skipOsrm].filter((r): r is DriveRouteJson => Boolean(r && okRoute(r, from, to))),
+      noFerry,
+    ).map((r) => withTolls(r, "cheapest", Boolean(r.hasToll)));
     const picked = pickCheapAvoidRoute(fastWithoutFerry(fastOk, cands), cands, { tolls: true, roadFees: true });
     if (picked) return withTolls(picked, "cheapest", Boolean(picked.hasToll));
     if (fastOk) return fastOk;
-    const hopped = await hop(from, to, "cheapest");
+    const hopped = await hop(from, to, "cheapest", noFerry);
     return hopped ? withTolls(hopped, "cheapest", Boolean(hopped.hasToll)) : null;
   }
   const km = haversineM(from, to) / 1000;
   if (km > 1300) {
-    const long = await routeChunked(from, to, "eco");
+    const long = await routeChunked(from, to, "eco", noFerry);
     if (long) return withTolls(long, "eco", Boolean(long.hasToll));
   }
-  const picked = await hop(from, to, "eco");
+  const picked = await hop(from, to, "eco", noFerry);
   if (picked) return withTolls(picked, "eco", Boolean(picked.hasToll));
   const fallback = await osrm(from, to).catch(() => null);
   return fallback && okRoute(fallback, from, to) ? withTolls(fallback, "eco", Boolean(fallback.hasToll)) : null;
@@ -340,15 +348,17 @@ function parseMode(raw: string | null | undefined): LegMode {
   return raw === "eco" || raw === "cheapest" || raw === "fastest" ? raw : "fastest";
 }
 
-async function readDriveInput(request: Request): Promise<{ from: Stop; to: Stop; mode: LegMode } | { error: string }> {
+type DriveInput = { from: Stop; to: Stop; mode: LegMode; noFerry: boolean };
+
+async function readDriveInput(request: Request): Promise<DriveInput | { error: string }> {
   if (request.method === "GET") {
     const url = new URL(request.url);
     const from = parsePoint(url.searchParams.get("from"));
     const to = parsePoint(url.searchParams.get("to"));
     if (!from || !to) return { error: "Need two points" };
-    return { from, to, mode: parseMode(url.searchParams.get("mode")) };
+    return { from, to, mode: parseMode(url.searchParams.get("mode")), noFerry: url.searchParams.get("noferry") === "1" };
   }
-  const body = (await request.json()) as { from?: Stop; to?: Stop; mode?: LegMode };
+  const body = (await request.json()) as { from?: Stop; to?: Stop; mode?: LegMode; noFerry?: boolean };
   const from = body.from;
   const to = body.to;
   if (
@@ -361,7 +371,7 @@ async function readDriveInput(request: Request): Promise<{ from: Stop; to: Stop;
   ) {
     return { error: "Need two points" };
   }
-  return { from, to, mode: parseMode(body.mode) };
+  return { from, to, mode: parseMode(body.mode), noFerry: body.noFerry === true };
 }
 
 export async function handleDriveRequest(request: Request): Promise<Response> {
@@ -370,8 +380,8 @@ export async function handleDriveRequest(request: Request): Promise<Response> {
     if ("error" in input) {
       return Response.json({ error: input.error }, { status: 400, headers: noStore });
     }
-    const { from, to, mode } = input;
-    const routed = await routeDrive(from, to, mode);
+    const { from, to, mode, noFerry } = input;
+    const routed = await routeDrive(from, to, mode, noFerry);
     if (!routed) {
       return Response.json({ error: "No route" }, { status: 502, headers: noStore });
     }

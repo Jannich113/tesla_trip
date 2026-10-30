@@ -117,3 +117,52 @@ test("Fastest and Eco are neutral about ferries; Cheapest avoids them (#71)", as
   assert.equal(costingFor("cheapest").use_ferry, FERRY_AVOID);
   assert.equal(costingFor("cheapest", { motorways: true, tolls: true, roadFees: true }).use_ferry, FERRY_AVOID);
 });
+
+test("Avoid ferries asks the router never to take one, in every mode (#71)", async () => {
+  const { costingFor, FERRY_NEVER } = await import("./modes.ts");
+  for (const mode of ["fastest", "eco", "cheapest"] as const) {
+    assert.equal(costingFor(mode, false, true).use_ferry, FERRY_NEVER, mode);
+  }
+});
+
+test("Avoid ferries drops routes over water, unless every route crosses (an island)", async () => {
+  const { withoutFerries } = await import("./drive.ts");
+  const ferry = { id: "ferry", ferries: [{}] };
+  const dry = { id: "dry", ferries: [] };
+  const osrm: { id: string; ferries?: unknown[] } = { id: "osrm" };
+  assert.deepEqual(withoutFerries([ferry, dry, osrm], true).map((r) => r.id), ["dry", "osrm"]);
+  assert.deepEqual(withoutFerries([ferry, dry], false).map((r) => r.id), ["ferry", "dry"]);
+  assert.deepEqual(withoutFerries([ferry], true).map((r) => r.id), ["ferry"]);
+});
+
+test("Avoid-ferries routes are cached apart from plain ones", async () => {
+  const { corridorKey, primeRouteCache, lookupCachedRoute } = await import("./engine.ts");
+  const from = { lat: 55.1, lng: 12.1 };
+  const to = { lat: 53.6, lng: 10.0 };
+  assert.notEqual(corridorKey(from, to, "fastest"), corridorKey(from, to, "fastest", true));
+  const path = Array.from({ length: 40 }, (_, i) => [55.1 - i * 0.04, 12.1 - i * 0.05] as [number, number]);
+  primeRouteCache({ [corridorKey(from, to, "fastest", true)]: { miles: 150, seconds: 9000, path, source: "valhalla", ferries: [] } });
+  assert.equal(lookupCachedRoute(from, to, "fastest"), undefined);
+  assert.equal(lookupCachedRoute(from, to, "fastest", true)?.miles, 150);
+});
+
+test("the plan counts half the gap between sailings as the wait, at most 90 min", async () => {
+  const { departureWaitMin, MAX_DEPARTURE_WAIT_MIN } = await import("./ferries.ts");
+  assert.equal(departureWaitMin(30), 15);
+  assert.equal(departureWaitMin(120), 60);
+  assert.equal(departureWaitMin(1440), MAX_DEPARTURE_WAIT_MIN);
+  assert.equal(departureWaitMin(null), 0);
+  const rodby = ferryInfo({ name: "Rødby - Puttgarden", from: [54.656, 11.352], to: [54.5, 11.226], miles: 12, seconds: 2700 });
+  assert.equal(rodby.everyMin, 30);
+  assert.equal(rodby.departureWaitMin, 15);
+  const unknown = ferryInfo({ name: "Some Ferry", from: [40.6, 14.3], to: [40.55, 14.24], miles: 10, seconds: 1800 });
+  assert.equal(unknown.everyMin, null);
+  assert.equal(unknown.departureWaitMin, 0);
+});
+
+test("every catalog crossing has a typical departure gap", () => {
+  for (const l of FERRY_LINES) {
+    const info = ferryInfo({ name: l.name, from: [l.ports[0].lat, l.ports[0].lng], to: [l.ports[1].lat, l.ports[1].lng], miles: 10, seconds: 600 });
+    assert.ok(info.everyMin && info.everyMin >= 15, `${l.id}: ${info.everyMin}`);
+  }
+});

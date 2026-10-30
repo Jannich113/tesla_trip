@@ -17,6 +17,8 @@ export type SavedPlan = {
   cheapAvoidMotorways?: boolean;
   cheapAvoidTolls?: boolean;
   cheapAvoidRoadFees?: boolean;
+  /** Route around car ferries, every mode (#71). */
+  avoidFerries?: boolean;
   detours: number[];
   waits: number[];
   whenKind: WhenKind;
@@ -241,6 +243,7 @@ function toShell(s: Partial<PlanState>): Partial<PlanState> {
     cheapAvoidMotorways: Boolean(cleaned.cheapAvoidMotorways),
     cheapAvoidTolls: Boolean(cleaned.cheapAvoidTolls),
     cheapAvoidRoadFees: Boolean(cleaned.cheapAvoidRoadFees),
+    avoidFerries: Boolean(cleaned.avoidFerries),
     detours: cleaned.detours ?? [],
     waits: cleaned.waits ?? [],
     whenKind: cleaned.whenKind ?? "depart",
@@ -373,6 +376,7 @@ type PlanState = {
   cheapAvoidMotorways: boolean;
   cheapAvoidTolls: boolean;
   cheapAvoidRoadFees: boolean;
+  avoidFerries: boolean;
   detours: number[];
   waits: number[];
   whenKind: WhenKind;
@@ -400,6 +404,7 @@ type PlanStore = PlanState & {
   setLegMode: (index: number, mode: LegMode) => void;
   setAllModes: (mode: LegMode) => void;
   setCheapAvoid: (patch: { motorways?: boolean; tolls?: boolean; roadFees?: boolean }) => void;
+  setAvoidFerries: (on: boolean) => void;
   setLegDetour: (index: number, km: number) => void;
   setAllDetours: (km: number) => void;
   setLegWait: (index: number, min: number) => void;
@@ -427,6 +432,7 @@ const empty = (): PlanState => ({
   cheapAvoidMotorways: false,
   cheapAvoidTolls: false,
   cheapAvoidRoadFees: false,
+  avoidFerries: false,
   detours: [],
   waits: [],
   whenKind: "depart",
@@ -578,6 +584,8 @@ export const usePlanStore = create<PlanStore>()(
           cheapAvoidRoadFees: patch.roadFees ?? get().cheapAvoidRoadFees,
         }),
 
+      setAvoidFerries: (on) => set({ avoidFerries: on }),
+
       setLegDetour: (index, km) => {
         const detours = get().detours.length
           ? [...get().detours]
@@ -608,7 +616,7 @@ export const usePlanStore = create<PlanStore>()(
       },
 
       savePlan: (given, summary) => {
-        const { name, stops, modes, cheapAvoidMotorways, cheapAvoidTolls, cheapAvoidRoadFees, detours, waits, whenKind, when, legWhen, whPerMi, speedEff, saved, seq } = get();
+        const { name, stops, modes, cheapAvoidMotorways, cheapAvoidTolls, cheapAvoidRoadFees, avoidFerries, detours, waits, whenKind, when, legWhen, whPerMi, speedEff, saved, seq } = get();
         if (stops.length < 2) return null;
         const label = (given ?? name).trim();
         if (!label) return null;
@@ -620,6 +628,7 @@ export const usePlanStore = create<PlanStore>()(
           cheapAvoidMotorways,
           cheapAvoidTolls,
           cheapAvoidRoadFees,
+          avoidFerries,
           detours,
           waits,
           whenKind,
@@ -667,6 +676,7 @@ export const usePlanStore = create<PlanStore>()(
           cheapAvoidMotorways: plan.cheapAvoidMotorways ?? Boolean(plan.cheapAvoidFees),
           cheapAvoidTolls: plan.cheapAvoidTolls ?? Boolean(plan.cheapAvoidFees),
           cheapAvoidRoadFees: plan.cheapAvoidRoadFees ?? Boolean(plan.cheapAvoidFees),
+          avoidFerries: Boolean(plan.avoidFerries),
           detours: plan.detours,
           waits: plan.waits ?? plan.stops.slice(1).map(() => DEFAULT_WAIT_MIN),
           whenKind: plan.whenKind ?? "depart",
@@ -707,6 +717,7 @@ export const usePlanStore = create<PlanStore>()(
         cheapAvoidMotorways: s.cheapAvoidMotorways,
         cheapAvoidTolls: s.cheapAvoidTolls,
         cheapAvoidRoadFees: s.cheapAvoidRoadFees,
+        avoidFerries: s.avoidFerries,
         detours: s.detours,
         waits: s.waits,
         whenKind: s.whenKind,

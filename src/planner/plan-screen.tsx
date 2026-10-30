@@ -250,16 +250,24 @@ function WhenFields({
   );
 }
 
-function CheapAvoidToggles({ className }: { className?: string }) {
+/** Avoid toggles under the picked route: the road ones shape Cheapest only; ferries every mode. */
+function AvoidToggles({ className, cheapest }: { className?: string; cheapest: boolean }) {
   const motorways = usePlanStore((s) => s.cheapAvoidMotorways);
   const tolls = usePlanStore((s) => s.cheapAvoidTolls);
   const roadFees = usePlanStore((s) => s.cheapAvoidRoadFees);
   const setCheapAvoid = usePlanStore((s) => s.setCheapAvoid);
+  const avoidFerries = usePlanStore((s) => s.avoidFerries);
+  const setAvoidFerries = usePlanStore((s) => s.setAvoidFerries);
   const rows = [
-    { on: motorways, label: "Avoid motorways", set: (v: boolean) => setCheapAvoid({ motorways: v }) },
-    { on: tolls, label: "Avoid toll gates", set: (v: boolean) => setCheapAvoid({ tolls: v }) },
-    { on: roadFees, label: "Avoid road fees", set: (v: boolean) => setCheapAvoid({ roadFees: v }) },
-  ] as const;
+    ...(cheapest
+      ? [
+          { on: motorways, label: "Avoid motorways", set: (v: boolean) => setCheapAvoid({ motorways: v }) },
+          { on: tolls, label: "Avoid toll gates", set: (v: boolean) => setCheapAvoid({ tolls: v }) },
+          { on: roadFees, label: "Avoid road fees", set: (v: boolean) => setCheapAvoid({ roadFees: v }) },
+        ]
+      : []),
+    { on: avoidFerries, label: "Avoid ferries (all routes)", set: setAvoidFerries },
+  ];
   return (
     <div className={cn("space-y-2", className)}>
       {rows.map((row) => (
@@ -278,12 +286,13 @@ function CheapAvoidToggles({ className }: { className?: string }) {
 }
 
 
-function routeKey(
+function routeKeyFor(
   from: { lat: number; lng: number },
   to: { lat: number; lng: number },
   mode: LegMode,
+  noFerry: boolean,
 ) {
-  return corridorKey(from, to, mode);
+  return corridorKey(from, to, mode, noFerry);
 }
 
 function stopsKey(stops: { name: string; lat: number; lng: number }[]) {
@@ -369,6 +378,11 @@ function ChainRow({
             .filter(Boolean)
             .join(" · ")}
         </span>
+        {f.everyMin ? (
+          <span className="mt-0.5 block text-[11px] text-subtle">
+            {`Usually sails every ${f.everyMin >= 1440 ? "day" : minutesToHm(f.everyMin)}; ${minutesToHm(f.departureWaitMin)} average wait counted${f.everyMin >= 1440 ? ", so book a sailing and time the drive to it" : ""} (typical timetable)`}
+          </span>
+        ) : null}
         <span className="mt-0.5 block text-[11px] text-subtle">
           {f.priceKr
             ? `≈ ${formatKrValue(f.fareKr, 0)} kr in the trip price (usually ${formatKrValue(f.priceKr.from, 0)}–${formatKrValue(f.priceKr.to, 0)} kr one way with car; rough estimate, varies by departure)`
@@ -563,7 +577,7 @@ const OptionList = memo(function OptionList({
               ))}
             </ol>
           ) : null}
-          {picked.mode === "cheapest" ? <CheapAvoidToggles className="mt-3" /> : null}
+          <AvoidToggles className="mt-3" cheapest={picked.mode === "cheapest"} />
         </div>
       ) : null}
     </div>
@@ -624,6 +638,13 @@ export function PlanScreen() {
     [cheapAvoidMotorways, cheapAvoidTolls, cheapAvoidRoadFees],
   );
   const pathModes = useMemo<LegMode[]>(() => ["eco", "fastest", "cheapest"], []);
+  // "Avoid ferries" (#71) routes every mode again, under its own cache keys.
+  const avoidFerries = usePlanStore((s) => s.avoidFerries);
+  const routeKey = useCallback(
+    (from: { lat: number; lng: number }, to: { lat: number; lng: number }, mode: LegMode) =>
+      routeKeyFor(from, to, mode, avoidFerries),
+    [avoidFerries],
+  );
   const whenKind = usePlanStore((s) => s.whenKind);
   const when = usePlanStore((s) => s.when);
   const legWhen = usePlanStore((s) => s.legWhen);
@@ -796,7 +817,7 @@ export function PlanScreen() {
           const from = stops[i];
           const to = stops[i + 1];
           const key = routeKey(from, to, mode);
-          const hit = routeMap[key] ?? lookupCachedRoute(from, to, mode);
+          const hit = routeMap[key] ?? lookupCachedRoute(from, to, mode, avoidFerries);
           if (hit && hit.source !== "air" && hit.path.length >= 3) {
             if (!routeMap[key]) jobs.push({ from, to, mode, key });
             continue;
@@ -804,20 +825,20 @@ export function PlanScreen() {
           jobs.push({ from, to, mode, key });
         }
         const needNet = jobs.filter((job) => {
-          const hit = routeMap[job.key] ?? lookupCachedRoute(job.from, job.to, job.mode);
+          const hit = routeMap[job.key] ?? lookupCachedRoute(job.from, job.to, job.mode, avoidFerries);
           return !hit || hit.source === "air" || hit.path.length < 3;
         });
         if (mode === "fastest" && needNet.length) setRouting(true);
         else if (mode === "fastest") setRouting(false);
         const patch: Record<string, RoutedLeg> = {};
         for (const job of jobs) {
-          const cached = routeMap[job.key] ?? lookupCachedRoute(job.from, job.to, job.mode);
+          const cached = routeMap[job.key] ?? lookupCachedRoute(job.from, job.to, job.mode, avoidFerries);
           if (cached && cached.source !== "air" && cached.path.length >= 3) {
             if (!routeMap[job.key]) patch[job.key] = cached;
             continue;
           }
           if (cancelled) return;
-          const route = await fetchRoute(job.from, job.to, job.mode);
+          const route = await fetchRoute(job.from, job.to, job.mode, avoidFerries);
           if (cancelled || route.source === "air" || route.path.length < 3) continue;
           patch[job.key] = route;
         }
@@ -833,7 +854,7 @@ export function PlanScreen() {
     };
     // routeMap is read only to skip cached hops; adding it retriggers this effect on every cache write.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [live, stops, setRouteCache]);
+  }, [live, stops, setRouteCache, routeKey]);
 
   useEffect(() => {
     setPrefer({});
@@ -904,7 +925,7 @@ export function PlanScreen() {
     () => collectSearchRoutes(["eco", "fastest"], routesFor),
     // routesFor closes over routeMap and stops; its identity changes every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [routeMap, stops],
+    [routeMap, stops, routeKey],
   );
   const cheapPathM = pathMode("cheapest", cheapAvoid);
   const cheapSearchRoutes = useMemo(() => {
@@ -913,7 +934,7 @@ export function PlanScreen() {
     return collectSearchRoutes(["cheapest"], routesFor);
     // routesFor closes over routeMap and stops; its identity changes every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeMap, stops, cheapPathM]);
+  }, [routeMap, stops, cheapPathM, routeKey]);
   const searchRoutes = useMemo(
     () => [...stableSearchRoutes, ...cheapSearchRoutes],
     [stableSearchRoutes, cheapSearchRoutes],
@@ -1017,7 +1038,7 @@ export function PlanScreen() {
       }
     }
     return stamp;
-  }, [stops, pathModes, routeMap]);
+  }, [stops, pathModes, routeMap, routeKey]);
 
   const deferredMap = useDeferredValue(routeMap);
 
@@ -1105,7 +1126,7 @@ export function PlanScreen() {
         kmh: avgSpeedKmh(row.totals.mi, seconds),
       };
     });
-  }, [pricedRows, deferredMap, speedEff, cheapAvoid, stops, lastOptions]);
+  }, [pricedRows, deferredMap, speedEff, cheapAvoid, stops, lastOptions, routeKey]);
 
   useEffect(() => {
     if (!live) return;
@@ -1245,7 +1266,7 @@ export function PlanScreen() {
           if (cancelled) return;
           await Promise.all(
             jobs.slice(i, i + 2).map(async (job) => {
-              const route = await fetchRoute(job.from, job.to, job.mode);
+              const route = await fetchRoute(job.from, job.to, job.mode, avoidFerries);
               if (cancelled || route.source === "air" || route.path.length < 3) return;
               patch[job.key] = route;
             }),
@@ -1260,7 +1281,7 @@ export function PlanScreen() {
     };
     // hopKey already tracks geometry; optionRows/routeMap would refetch and can loop via setRouteCache.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hopKey, cheapAvoid]);
+  }, [hopKey, cheapAvoid, routeKey]);
 
   function addStop(hit: AddressHit) {
     const idx = stops.length;
@@ -1574,7 +1595,7 @@ export function PlanScreen() {
       });
     }
     return out;
-  }, [stops, routeMap, cheapAvoid, mapMode, showAllRoutes, optionRows]);
+  }, [stops, routeMap, cheapAvoid, mapMode, showAllRoutes, optionRows, routeKey]);
 
   const overviewFeePath = useMemo(() => {
     const path = mapRoutes.find((r) => r.id === `opt-${mapMode}-0`)?.path;

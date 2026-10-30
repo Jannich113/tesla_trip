@@ -346,9 +346,9 @@ describe("ferry crossings (#71)", () => {
 
   it("counts check-in and crossing time, and only the driven distance as energy", () => {
     const f = ferryLegs[0];
-    assert.equal(f.waitMin, f.ferry!.checkInMin);
+    assert.equal(f.waitMin, f.ferry!.checkInMin + f.ferry!.departureWaitMin);
     const minutes = (Date.parse(f.arriveAt) - Date.parse(f.departAt)) / 60_000;
-    assert.equal(minutes, f.ferry!.checkInMin + f.ferry!.crossingMin);
+    assert.equal(minutes, f.ferry!.checkInMin + f.ferry!.departureWaitMin + f.ferry!.crossingMin);
     const drivenKm = legs.filter((l) => !l.ferry).reduce((n, l) => n + l.route.miles * 1.609, 0);
     assert.ok(Math.abs(drivenKm - 600) < 1, `driven ${drivenKm.toFixed(1)} km`);
   });

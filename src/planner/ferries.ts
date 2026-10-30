@@ -77,6 +77,46 @@ export const FERRY_LINES: FerryLine[] = [
   line("helsinki-tallinn", ["Tallink", "Viking Line", "Eckerö Line"], ["Helsinki", 60.16, 24.95], ["Tallinn", 59.44, 24.77], 135, 30, [400, 1000], "https://www.tallink.com"),
 ];
 
+/**
+ * Typical minutes between departures, from the operators' usual timetables (ROUGH: they
+ * change with season and weekday). Overnight lines sail about once a day.
+ */
+const DEPARTURE_EVERY_MIN: Record<string, number> = {
+  "rodby-puttgarden": 30,
+  "gedser-rostock": 120,
+  "helsingor-helsingborg": 20,
+  "aarhus-odden": 120,
+  "ebeltoft-odden": 180,
+  "bojden-fynshav": 120,
+  "spodsbjerg-tars": 60,
+  "hirtshals-kristiansand": 360,
+  "hirtshals-larvik": 720,
+  "frederikshavn-goteborg": 240,
+  "kobenhavn-oslo": 1440,
+  "kiel-oslo": 1440,
+  "trelleborg-rostock": 240,
+  "trelleborg-travemunde": 360,
+  "trelleborg-sassnitz": 720,
+  "malmo-travemunde": 480,
+  "ystad-ronne": 180,
+  "stockholm-helsinki": 720,
+  "stockholm-turku": 720,
+  "kapellskar-naantali": 480,
+  "helsinki-tallinn": 60,
+};
+
+/**
+ * Wait for the next departure counted in the plan: half the gap between sailings, at most
+ * 90 min. On a once-a-day line nobody arrives at random; they book a sailing and time the
+ * drive to it, so the full gap would overstate the trip.
+ */
+export const MAX_DEPARTURE_WAIT_MIN = 90;
+
+export function departureWaitMin(everyMin: number | null) {
+  if (!everyMin || everyMin <= 0) return 0;
+  return Math.min(MAX_DEPARTURE_WAIT_MIN, Math.round(everyMin / 2));
+}
+
 /** Valhalla maneuver type for boarding a ferry. */
 const FERRY_ENTER = 28;
 
@@ -146,6 +186,10 @@ export type FerryInfo = {
   known: boolean;
   /** Fare counted in the trip price: the middle of the catalog range, or a guess from the crossing time. */
   fareKr: number;
+  /** Typical minutes between departures; null when not known. */
+  everyMin: number | null;
+  /** Average wait for the next departure, counted in the plan (see departureWaitMin). */
+  departureWaitMin: number;
 };
 
 const DEFAULT_CHECK_IN_MIN = 30;
@@ -170,6 +214,8 @@ export function ferryInfo(crossing: FerryCrossing): FerryInfo {
       bookingUrl: null,
       known: false,
       fareKr: guessFareKr(crossingMin),
+      everyMin: null,
+      departureWaitMin: 0,
     };
   }
   return {
@@ -181,6 +227,8 @@ export function ferryInfo(crossing: FerryCrossing): FerryInfo {
     bookingUrl: l.bookingUrl,
     known: true,
     fareKr: roundTo50((l.priceKr.from + l.priceKr.to) / 2),
+    everyMin: DEPARTURE_EVERY_MIN[l.id] ?? null,
+    departureWaitMin: departureWaitMin(DEPARTURE_EVERY_MIN[l.id] ?? null),
   };
 }
 
