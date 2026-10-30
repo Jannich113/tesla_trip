@@ -7,6 +7,7 @@ import { ConfirmStrip } from "@/components/confirm-strip";
 import { parseCoordinates, reverseAddress, searchAddress, suggestAddress, type AddressHit } from "./search";
 import { buildPlanLocations, collectSearchRoutes, locationsForRoutes } from "./plan-locations";
 import { chargeChain, type ChainEntry, type ChargeStatus } from "./charge-chain";
+import { fastestOfModes } from "./pick-route";
 
 /**
  * Address suggestions under a stop field: the picked row is highlighted, and a spelling fix
@@ -362,7 +363,7 @@ function ChainRow({
           : [
               entry.network,
               `${formatKrValue(entry.rateKr, 2)} kr/kWh`,
-              `${formatNumber(entry.kwh, 0)} kWh`,
+              entry.toSoc ? `${formatNumber(entry.kwh, 0)} kWh to ${entry.toSoc}%` : `${formatNumber(entry.kwh, 0)} kWh`,
               `${formatKrValue(entry.kr, 0)} kr`,
             ]
               .filter(Boolean)
@@ -819,11 +820,18 @@ export function PlanScreen() {
 
   const acKr = hours[0]?.krPerKwh ?? HOME_USD_PER_KWH * DKK_PER_USD;
 
+  /** The route a mode drives on leg i. Fastest takes the quickest route any mode found (#70). */
+  function legRoute(i: number, mode: LegMode): RoutedLeg | undefined {
+    const at = (m: LegMode) => routeMap[routeKey(stops[i], stops[i + 1], m)];
+    if (mode !== "fastest") return at(mode);
+    return fastestOfModes(at("fastest"), [at("eco"), at("cheapest")]);
+  }
+
   function routesFor(mode: LegMode): RoutedLeg[] {
     if (stops.length < 2) return [];
     const list: RoutedLeg[] = [];
     for (let i = 0; i < stops.length - 1; i++) {
-      const hit = routeMap[routeKey(stops[i], stops[i + 1], mode)];
+      const hit = legRoute(i, mode);
       if (!hit || hit.source === "air" || hit.path.length < 3) return [];
       list.push(hit);
     }
@@ -840,7 +848,7 @@ export function PlanScreen() {
         .slice(0, -1)
         .map((_, i) => {
           const m = activeModes[i] ?? "fastest";
-          return routeMap[routeKey(stops[i], stops[i + 1], pathMode(m, avoidForMode(m, cheapAvoid)))];
+          return legRoute(i, pathMode(m, avoidForMode(m, cheapAvoid)));
         })
         .filter((r): r is RoutedLeg => Boolean(r))
     : routesFor(pathMode(activeModes[0] ?? "fastest", avoidForMode(activeModes[0] ?? "fastest", cheapAvoid)));

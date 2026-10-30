@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ChargeLocation } from "@/lib/charge-locations";
 import {
+  chargeMinutes,
   corridorKey,
   lookupCachedRoute,
   pricePlan,
@@ -183,6 +184,32 @@ describe("pricePlan charge stops", () => {
       }
     });
   }
+
+  for (const mode of ["eco", "fastest", "cheapest"] as const) {
+    it(`${mode}: charges above 80% to bridge a long gap instead of planning an estimate (#69)`, () => {
+      const legs = plan(...SPARSE, 80, mode);
+      const estimates = legs.filter((l) => l.accepted && l.charge?.placeholder);
+      assert.deepEqual(estimates.map((l) => l.from.name), [], "planned estimate stops although a fuller charge reaches the next charger");
+      const used = legs.filter((l) => l.accepted && l.charge).map((l) => l.charge!.locationId);
+      assert.ok(used.includes("sc-600") && used.includes("sc-950"), `charged at ${used.join(", ")}`);
+      const fuller = legs.filter((l) => l.accepted && l.charge && l.startSoc > 81);
+      assert.ok(fuller.length >= 1, "expected at least one charge above 80%");
+      for (const leg of legs) assert.ok(leg.startSoc <= 100.01, `${leg.from.name} leaves at ${leg.startSoc.toFixed(0)}%`);
+    });
+  }
+
+  it("keeps the usual 80% when the next charger is within reach (#69)", () => {
+    for (const leg of plan(700, GAP)) {
+      if (leg.accepted && leg.charge) assert.ok(leg.startSoc <= 80.5, `${leg.from.name} charges to ${leg.startSoc.toFixed(0)}%`);
+    }
+  });
+
+  it("charging above 80% takes longer per kWh (#69)", () => {
+    const below = chargeMinutes(20, 30, 75, 150); // 30% → ~57%
+    const above = chargeMinutes(20, 75, 75, 150); // 75% → ~102% capped in practice, mostly above 80%
+    assert.ok(Math.abs(below - 8) < 0.01, `20 kWh at 150 kW below 80% should take 8 min, took ${below.toFixed(1)}`);
+    assert.ok(above > below * 2, `above 80% took ${above.toFixed(1)} min vs ${below.toFixed(1)} below`);
+  });
 
   it("counts every charge in the trip price", () => {
     const legs = plan(700, GAP);

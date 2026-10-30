@@ -29,6 +29,22 @@ export function pickFastestRoute<T extends DriveCandidate>(routes: T[]): T | nul
   return pickRouted("fastest", routes);
 }
 
+/**
+ * Fastest for one leg: its own route, unless a route another mode found for the same leg is
+ * quicker. Each mode asks the routers for different candidates (Eco also tries Valhalla's eco
+ * costing and OSRM alternatives), so without this Eco could come out faster than Fastest (#70).
+ * Returns undefined until Fastest's own route has loaded, so nothing flickers.
+ */
+export function fastestOfModes<T extends DriveCandidate>(
+  own: T | undefined,
+  others: Array<T | undefined>,
+): T | undefined {
+  const real = (r: T | undefined): r is T =>
+    Boolean(r && r.source !== "air" && r.path.length >= 3 && r.miles > 0 && r.seconds > 0);
+  if (!real(own)) return undefined;
+  return others.filter(real).reduce((best, r) => (r.seconds < best.seconds ? r : best), own);
+}
+
 /** Prefer 80–100 km/t roads. A 50–60 km/t crawl is never eco — fall back to Fastest. */
 export function pickEcoRoute<T extends DriveCandidate>(fast: T | null, cands: T[]): T | null {
   const ok = (r: T | null): r is T => Boolean(r && r.path.length >= 3 && r.miles > 0 && r.seconds > 0);

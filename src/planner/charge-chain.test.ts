@@ -119,3 +119,30 @@ describe("chargeChain", () => {
     assert.deepEqual(chain.map((e) => `${e.type}:${e.name}`), ["stop:A", "pass:Moraberg", "stop:B"]);
   });
 });
+
+describe("chargeChain charge level (#69)", () => {
+  const KM = 111.2;
+  const road = (km: number): RoutedLeg => {
+    const n = Math.round(km / 5);
+    return { miles: km / 1.609, seconds: (km / 100) * 3600, source: "osrm", path: Array.from({ length: n + 1 }, (_, i) => [55 + (km / KM) * (i / n), 10]) };
+  };
+  const stall = (id: string, km: number): ChargeLocation => ({ id, name: id, short: id, usdPerKwh: 0.5, lat: 55 + km / KM, lng: 10.002, kind: "supercharger", preset: false, radiusM: 250 });
+  const legs = pricePlan({
+    stops: [{ id: "a", name: "Start", lat: 55, lng: 10 }, { id: "b", name: "End", lat: 55 + 1100 / KM, lng: 10 }],
+    modes: ["fastest"], detours: [12], routes: [road(1100)], soc: 80, usableKwh: 75,
+    locations: [stall("sc-250", 250), stall("sc-600", 600), stall("sc-950", 950)],
+    hours: [], acKw: 11, acKr: 2, speedEff: defaultSpeedEff(250), departHhmm: "",
+  });
+  const charges = chargeChain(legs, tesla).filter((e) => e.type === "charge");
+
+  it("shows the level when a charge goes above 80%", () => {
+    const fuller = charges.filter((e) => e.type === "charge" && e.toSoc !== null);
+    assert.ok(fuller.length >= 1, "no charge shows a level above 80%");
+    for (const e of fuller) if (e.type === "charge") assert.ok(e.toSoc! > 80 && e.toSoc! <= 100);
+  });
+
+  it("leaves the level out for a normal 80% charge", () => {
+    const normal = chargeChain(trip(700, [sc("sc-220", 220), sc("sc-480", 480)]), tesla).filter((e) => e.type === "charge");
+    for (const e of normal) if (e.type === "charge") assert.equal(e.toSoc, null);
+  });
+});

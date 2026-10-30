@@ -415,3 +415,42 @@ export function pickViaAtRange(opts: Parameters<typeof pickViaOnPath>[0]): ViaLo
     short: "Charge",
   };
 }
+
+/**
+ * Charge level (%) for a stop so that the next known charger, or the leg's end, is reachable
+ * with `floorSoc` left (#69). Normally `normalSoc` (80). Raised, up to `maxSoc`, only when no
+ * charger is reachable at the normal level but one is at a fuller charge. Left at the normal
+ * level when even `maxSoc` falls short; the planner then plans a "no known charger" stop.
+ */
+export function bridgeTargetSoc(opts: {
+  path: [number, number][];
+  totalKwh: number;
+  usableKwh: number;
+  locations: ViaLoc[];
+  bandM: number;
+  excludeIds?: Iterable<string>;
+  normalSoc?: number;
+  maxSoc?: number;
+  floorSoc?: number;
+  marginSoc?: number;
+}): number {
+  const { path, totalKwh, usableKwh, bandM } = opts;
+  const normal = opts.normalSoc ?? 80;
+  const max = opts.maxSoc ?? 100;
+  const floor = opts.floorSoc ?? 8;
+  const margin = opts.marginSoc ?? 4;
+  if (totalKwh <= 0 || usableKwh <= 0 || path.length < 2) return normal;
+  const reachNormal = ((normal - floor) / 100) * usableKwh;
+  if (totalKwh <= reachNormal) return normal;
+  const exclude = new Set(opts.excludeIds ?? []);
+  // Energy to each known charger ahead; one right here (under 10% of the pack away) does not help.
+  const ahead = locationsNearPath(opts.locations, path, bandM)
+    .filter((l) => !exclude.has(l.id) && l.kind !== "home")
+    .map((l) => totalKwh * alongFraction(path, l.lat, l.lng))
+    .filter((kwh) => kwh > usableKwh * 0.1)
+    .sort((a, b) => a - b);
+  if (ahead.some((kwh) => kwh <= reachNormal)) return normal;
+  const next = Math.min(ahead[0] ?? totalKwh, totalKwh);
+  const need = Math.ceil(floor + (next / usableKwh) * 100 + margin);
+  return need <= max ? Math.max(normal, need) : normal;
+}

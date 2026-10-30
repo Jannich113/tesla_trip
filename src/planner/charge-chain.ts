@@ -23,6 +23,8 @@ export type ChainEntry =
       network: string | null;
       /** No charger is known here; kWh and price are estimates. */
       placeholder: boolean;
+      /** Charge level when leaving, shown only when it goes above the usual 80% (#69). */
+      toSoc: number | null;
       /** The user leg this charge belongs to (for adding or removing an optional charge). */
       userIndex: number;
       lat: number | null;
@@ -64,6 +66,7 @@ export function chargeChain(legs: PricedLeg[], networkOf: (charge: PricedCharge)
         rateKr: c.rateKr,
         network: c.placeholder ? null : networkOf(c),
         placeholder: Boolean(c.placeholder),
+        toSoc: leg.startSoc > 80.5 ? Math.round(leg.startSoc) : null,
         userIndex: leg.userIndex,
         lat: atVia ? leg.from.lat : null,
         lng: atVia ? leg.from.lng : null,
